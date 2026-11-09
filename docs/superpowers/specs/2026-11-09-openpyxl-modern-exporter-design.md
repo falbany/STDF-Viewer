@@ -83,22 +83,31 @@ Test/Param split follows the reference `DEFAULT_PARAM_PATTERN` (`^(?P<test>.+)/(
 Row structure — the sheet is two stacked tables:
 
 1. **Row 1 — metadata banner header**: grey fill (`CBD5E1`), subheader-style bold dark font, height 22 pt. Labels: the 12 base columns + **full PART_ID** per DUT column.
-2. **Rows 2–9 — METADATA block** (always present, fixed layout; hidden rows keep their slot):
+2. **Rows 2–15 — METADATA block** (14 rows, always present, fixed layout; hidden rows keep their slot):
    - Each row: `METADATA` in Test (styled label), field name in Param, synthetic Test# from 10000 sequential, value type in Unit (`TEXT`/`INT`/`DOUBLE`), `-` in unused stat cells, and `=MIN`/`=MAX` over the row's DUT range for numeric rows.
-   - Rows (order fixed): Part ID (TEXT), Part TXT (TEXT), Temperature (DOUBLE, parsed from PART_ID), HW Bin (INT), SW Bin (INT), Wafer (INT), X (INT), Y (INT). `PART_FIX` deliberately dropped (§3).
-   - Temperature: case-insensitive regex `_T(-?\d+)C` on PART_ID, last match wins (`SN541_T25C`→25, `SN541_T-5C`→-5, `SN541_T85C`→85); blank cell when absent/unparseable.
-   - **Masking** (from the reference): a row whose DUT values are all blank (Wafer) or all identical (X, Y) keeps its row but is hidden (height 0 + `hidden=True`; openpyxl does not persist height 0).
-   - Data source per field: `dutInfo` tuple `[File ID, Part ID, Part Text, Head-Site, Tests Executed, Test Time, HW Bin, SW Bin, Wafer ID, (X,Y), DUT Flag]` → Part ID=1, Part TXT=2, HW Bin=6, SW Bin=7, Wafer=8, X/Y=9.
-   - *Open question for the user (default: included, appended after Y as TEXT/INT/TEXT/TEXT): Head-Site, Tests Executed, Test Time, DUT Flag rows — the reference image has only the 9 reference rows, so these extras are additive; strike any not wanted.*
-3. **Repeated header row** (row 10 with 8 metadata rows): the primary header — fill `1E40AF`, bold white font, height 22 pt; base columns repeat their labels, DUT columns are retitled by **Part ID Base** (PART_ID minus the temperature match; falls back to full ID), mirroring the reference (`SN541_T25C` → `SN541`). This row is the header of the **Excel Table** spanning `[A{header row} : {last DUT col}{last data row}]` (sanitized unique table name), giving native filter buttons over the whole test region.
+   - Rows (order fixed, decided 2026-11-09): File ID (INT), DUT # (INT, 1..N in column order), Part ID (TEXT), Part TXT (TEXT), Temperature (DOUBLE, parsed from PART_ID), HW Bin (INT), SW Bin (INT), Wafer (INT), X (INT), Y (INT), Head-Site (TEXT), Tests Executed (INT), Test Time (TEXT), DUT Flag (TEXT). `PART_FIX` deliberately dropped (§3). File ID + DUT # keep multi-file columns identifiable; DUT # mirrors the classic exporter's `#1..#N` numbering.
+   - Temperature: case-insensitive regex `_T(-?\d+(?:\.\d+)?)C` on PART_ID, last match wins (`SN541_T25C`→25, `SN541_T-5C`→-5, `SN541_T85C`→85); blank cell when absent/unparseable. Part ID Base = PART_ID minus that same match.
+   - **Masking** (from the reference): a row whose DUT values are all blank (Wafer) or all identical (File ID — auto-hides single-file exports; X, Y) keeps its row but is hidden (height 0 + `hidden=True`; openpyxl does not persist height 0).
+   - Data sources: `dutInfo` tuple `[File ID, Part ID, Part Text, Head-Site, Tests Executed, Test Time, HW Bin, SW Bin, Wafer ID, (X,Y), DUT Flag]` → File ID=0, Part ID=1, Part TXT=2, Head-Site=3, Tests Executed=4, Test Time=5, HW Bin=6, SW Bin=7, Wafer=8, X/Y=9, DUT Flag=10; DUT # = sequential column position.
+3. **Repeated header row** (row 16 with 14 metadata rows): the primary header — fill `1E40AF`, bold white font, height 22 pt; base columns repeat their labels, DUT columns are retitled by **Part ID Base** (PART_ID minus the temperature match; falls back to full ID), mirroring the reference (`SN541_T25C` → `SN541`). This row is the header of the **Excel Table** spanning `[A{header row} : {last DUT col}{last data row}]` (sanitized unique table name), giving native filter buttons over the whole test region. Excel requires unique table column names: the *visible* header text stays faithful to the reference (duplicated Part ID Bases allowed); the table's internal column names are uniquified (suffix ` #idx` on collision, blank IDs fall back to `DUT #N`) — the builder must verify openpyxl emits a valid table in that case.
 4. **Data rows** — one per test in `self.testTuples` order, formulas as in the table above; DUT cells:
    - PTR/MPR: numeric measurement cells (real floats) or blank when the DUT lacks the test.
-   - FTR: encoded **numerically as 0 = pass, 1 = fail** (via the existing `isPass(flag)` helper) so the same FAILS/CF machinery applies; displayed as text via the custom number format `[=0]"Pass";[=1]"Fail";` (builder must verify across Excel/LibreOffice/Numbers; fallback: `Pass`/`Fail` strings with static theme fills, flagged as the one non-dynamic corner).
+   - FTR: encoded **numerically as 0 = pass, 1 = fail** (via the existing `isPass(flag)` helper; flag `-1`/missing → blank cell) so the same FAILS/CF machinery applies; displayed as text via the custom number format `[=0]"Pass";[=1]"Fail";` (builder must verify across Excel/LibreOffice/Numbers; fallback: `Pass`/`Fail` strings with static theme fills, flagged as the one non-dynamic corner).
    - Limits are left blank for FTR rows (deviation from the reference's `[0, 1]` placeholders — same semantics, less confusing display; the P/F branches key off the Unit cell, not the limits).
 
-**Dynamic formatting** (openpyxl conditional formatting, all live rules):
+**Hybrid fail logic** (decided 2026-11-09 — preserves classic flag semantics where limits can't express them):
 
-- DUT data region: formula rules per row — outside `[E,F]` → fail fill `FFCCCC`; inside → pass fill `CCFFCC`; blank → neutral fill `FFF3CD`. P/F rows classify on cell value (`1` fail / `0` pass), keyed off the Unit column reference (`$D{row}="P/F"`), never off the (blank) limits.
+- Test has limits (E or F non-blank): FAILS and coloring classify each DUT cell by limit comparison — the live formula path.
+- Test has no limits (parametric, both limit cells blank): a **hidden flag mirror** drives them. After the last visible DUT column (with one spacer column), the exporter writes one hidden column per DUT carrying the recorded flag as 0/1 (from `isPass`; missing → blank), header `flags (do not edit)`. FAILS = `=SUMPRODUCT((flags<>"")*(flags=1))` over the hidden range; coloring rules reference the hidden cells with fully-relative offsets so each die cell maps to its own flag cell. Everything stays formula-driven; the hidden columns sit outside the Excel Table range.
+- FTR rows: visible cells already carry 0/1, so they need no hidden mirror (same formulas as the flag path, over the visible range).
+- FAILS formula choice per row: limits → limit SUMPRODUCT; no limits → hidden-flag SUMPRODUCT; `P/F` unit → visible-range flag SUMPRODUCT.
+- Reviewer-confirmed facts the builder can rely on: `VECT_NAM`/`LOG_NAM` survive in `Data[testTuple][fid]` (Param precedence works without new queries); `dutInfo` of a DUT without PRR info is an empty tuple (blank Part ID → `DUT #N` fallbacks); per-test limits/units follow classic first-file-wins semantics (same TestInfo source).
+
+**Dynamic formatting** (openpyxl conditional formatting, all live rules; rule priority with `stopIfTrue`):
+
+- DUT data region, blank cells: `=M{r}=""` → neutral fill `FFF3CD` (highest priority).
+- Limit rows: outside `[E,F]` → fail fill `FFCCCC`; inside → pass fill `CCFFCC` (formulas referencing `$E{r}`/`$F{r}` as in the reference, so blank limits never fire).
+- Flag rows (no-limit parametric and FTR): hidden/visible flag cell `=1` → fail fill; `=0` → pass fill; fully-relative flag references so each die cell tracks its own column.
 - Cpk column bands (stop-true in order): `>=1.67` → `A7F3D0`; `>=1.33` → `D1FAE5`; `>=1.0` → `FEF3C7`; `<1.0` → `FECACA`; non-numeric (blank) unstyled.
 - FAILS column: two-color scale green `CCFFCC` → red `FFCCCC`, min 0, max `0.2 × DUT count`.
 - Note: Cpk is blank for one-sided limits or zero STD (reference `IFERROR` semantics) — accepted.
@@ -126,7 +135,8 @@ Everything else lives in `deps/modernExporter/`: `theme.py` (tokens/style factor
 
 - Exact Excel `number_format` strings derived from `(data_precision, data_notation)`.
 - Verify `[=0]"Pass";[=1]"Fail"` custom format renders correctly in Excel/LibreOffice; apply documented fallback if not.
-- Confirm `VECT_NAM`/`LOG_NAM` availability in the dutSummary content dict; wire the Param precedence accordingly.
-- Auto-fit width caps; table-name sanitization rules (Excel table names: letters/digits/underscore, unique per workbook).
-- Test approach: export from at least one real multi-site STDF (plus an FTR-only and a multi-temperature-named PART_ID case if practical) and inspect formulas/CF recalculated by Excel; unit-test the pure helpers (temperature/base regex, test/param split, chunk splitting, mask rules) since they are pure functions.
+- Verify openpyxl emits a valid Excel Table over duplicated visible headers (uniquify internal column names per §7.3).
+- Auto-fit width caps; table-name sanitization rules (Excel table names: letters/digits/underscore, unique per workbook); hide the flag-mirror columns and keep them outside the table range.
+- Edge cases: empty test selection → metadata table + repeated header only, no Excel Table; temperature-less part IDs → blank Temperature cell, Part ID Base = full ID.
+- Test approach: export from at least one real multi-site STDF (plus an FTR-only and a multi-temperature-named PART_ID case if practical) and inspect formulas/CF recalculated by Excel; unit-test the pure helpers (temperature/base regex, test/param split, chunk splitting, mask rules, hybrid FAILS branching) since they are pure functions.
 - Performance guard: log/measure workbook build time on a large selection once; if memory is problematic, the chunk cap is the tuning knob.
