@@ -222,13 +222,19 @@ def _add_die_rules(ws, die_rules, theme):
 
 
 def _add_cpk_rules(ws, cell_range, theme):
-    """Four Cpk band rules; the first three stop the chain."""
+    """Four Cpk band rules; the first three stop the chain.
+
+    Every band is ISNUMBER-guarded: the Cpk formula yields "" on error
+    (zero STD), and in Excel text compares above any number, so an
+    unguarded "">=1.33 would color blank Cpk cells (design §7: blank
+    stays unstyled).
+    """
     min_col, min_row, _, _ = range_boundaries(cell_range)
     cell = f"{get_column_letter(min_col)}{min_row}"
     bands = (
         (f"AND(ISNUMBER({cell}),{cell}>=1.67)", True),
-        (f"{cell}>=1.33", True),
-        (f"{cell}>=1", True),
+        (f"AND(ISNUMBER({cell}),{cell}>=1.33)", True),
+        (f"AND(ISNUMBER({cell}),{cell}>=1)", True),
         (f"AND(ISNUMBER({cell}),{cell}<1)", False),
     )
     for (formula, stop), hex6 in zip(bands, theme.cpk_band_fills()):

@@ -207,8 +207,8 @@ class TestMatrixConditionalFormatting:
         rules = cf_block(ws, "K17:K19")
         assert [r.formula for r in rules] == [
             ['AND(ISNUMBER(K17),K17>=1.67)'],
-            ['K17>=1.33'],
-            ['K17>=1'],
+            ['AND(ISNUMBER(K17),K17>=1.33)'],
+            ['AND(ISNUMBER(K17),K17>=1)'],
             ['AND(ISNUMBER(K17),K17<1)'],
         ]
         assert [r.stopIfTrue for r in rules] == [True, True, True, False]
