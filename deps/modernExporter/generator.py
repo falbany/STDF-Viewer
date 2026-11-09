@@ -50,7 +50,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from PyQt5 import QtCore
 
-from deps.SharedSrc import getSetting, tab
+from deps.SharedSrc import tab
 from deps.uic_stdExporter import (
     ReportSelection,
     dataChannel,
@@ -59,21 +59,18 @@ from deps.uic_stdExporter import (
 )
 from deps.modernExporter.matrix import build_dut_summary_spec
 from deps.modernExporter.sheets import insert_report_image, plain_table_spec
-from deps.modernExporter.theme import ModernTheme, number_format_from_settings
+from deps.modernExporter.theme import ModernTheme
 from deps.modernExporter.writer import (
-    BASE_COLUMN_COUNT,
     render_matrix_sheet,
     render_plain_table,
     write_body_cell,
 )
 
 # auto-fit column width = max content length * 1.1, capped (classic uses the
-# same *1.1 factor via xlsxwriter set_column; the cap is the modern bound)
+# same *1.1 factor via xlsxwriter set_column; the cap is the modern bound).
+# Plain sheets only — the DUT Summary widths are pinned by the renderer.
 AUTOFIT_FACTOR = 1.1
 AUTOFIT_CAP = 60
-# DUT Summary die columns keep a pinned width — only the fixed A..L block
-# is auto-fitted
-DIE_COLUMN_WIDTH = 10
 
 
 class ModernReportGenerator(reportGenerator):
@@ -90,18 +87,15 @@ class ModernReportGenerator(reportGenerator):
     # helpers
     # ----------------------------------------------------------------------
 
-    def _autofit_columns(self, ws, max_column: int | None = None) -> None:
+    def _autofit_columns(self, ws) -> None:
         """Set each used column's width to max content length * 1.1, capped
         at AUTOFIT_CAP (the modern counterpart of the classic
-        ``set_column(col, col, width*1.1)`` calls). ``max_column`` limits
-        the fit to the first N columns — the DUT Summary matrix auto-fits
-        only its fixed A..L block, its die columns stay pinned."""
+        ``set_column(col, col, width*1.1)`` calls). Plain sheets only — the
+        DUT Summary matrix pins its column widths in the renderer."""
         widths: dict[int, int] = {}
         for row in ws.iter_rows():
             for cell in row:
                 if cell.value is None:
-                    continue
-                if max_column is not None and cell.column > max_column:
                     continue
                 length = len(str(cell.value))
                 if length > widths.get(cell.column, 0):
@@ -250,25 +244,18 @@ class ModernReportGenerator(reportGenerator):
         specs = build_dut_summary_spec(
             summaryTable, self.testTuples, order, dut_ids,
             sheet_name=self.tr("DUT Summary"),
-            # getFloatFormat() is a printf template ("%.3G"), not an Excel
-            # number format (% reads as a percentage code); convert via the
-            # theme converter instead
-            float_format=number_format_from_settings(
-                getSetting().gen.data_precision,
-                getSetting().gen.data_notation),
+            # numeric cell formats are hardcoded scientific in the spec
+            # builder (2026-11-10) — no settings-derived float format anymore
             tr=self.tr)
 
         # chunk 0 renders on the existing DUT Summary sheet; chunks 1+
         # (die overflow beyond the Excel column cap) get their own sheets —
-        # spec names already carry the " (n)" suffixes
+        # spec names already carry the " (n)" suffixes. Column widths are
+        # pinned inside render_matrix_sheet (A=8, B=30, C..L=8, dies=8).
         for chunk_index, spec in enumerate(specs):
             ws = (DutSheet if chunk_index == 0
                   else self._wb.create_sheet(spec["name"]))
             render_matrix_sheet(ws, spec, self._theme)
-            # auto-fit the fixed A..L block only; die columns stay pinned
-            self._autofit_columns(ws, max_column=BASE_COLUMN_COUNT)
-            for column in spec["die_columns"]:
-                ws.column_dimensions[column].width = DIE_COLUMN_WIDTH
 
         # classic cadence: one tick after the DUT info part...
         self.loopCount += 1

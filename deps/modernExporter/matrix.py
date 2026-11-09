@@ -44,8 +44,10 @@ from deps.modernExporter.helpers import (
     fails_formula_ftr,
     fails_formula_limits,
     flag_value,
-    metadata_minmax_formulas,
+    metadata_stat_formulas,
+    parse_bin,
     parse_temperature,
+    parse_test_time,
     part_id_base,
     split_dut_chunks,
     split_test_name,
@@ -53,15 +55,18 @@ from deps.modernExporter.helpers import (
     workflow_key,
 )
 
-# Sheet layout: banner row 1, 14 metadata rows 2..15, repeated header 16, data 17+.
+# Sheet layout (2026-11-10 adjustment): banner row 1, 13 metadata rows 2..14
+# (DUT # row removed — the banner labels carry DUT #n), repeated header 15,
+# data 16+.
 BANNER_ROW = 1
 METADATA_START = 2
-HEADER_ROW = 16
-DATA_START = 17
+HEADER_ROW = 15
+DATA_START = 16
 
-# Fixed A..L columns of the DUT Summary sheet.
+# Fixed A..L columns of the DUT Summary sheet (2026-11-10: Test# permuted
+# from C to A; only A/B/C move, so every formula's column letters stay put).
 BASE_HEADERS = (
-    "Test", "Param", "Test#", "Unit", "SpecMin", "SpecMax",
+    "Test#", "Test", "Param", "Unit", "SpecMin", "SpecMax",
     "Min", "Max", "Mean", "STD", "Cpk", "FAILS",
 )
 FORMULA_COLUMNS = [6, 7, 8, 9, 10, 11]  # G..L carry formulas
@@ -69,33 +74,40 @@ FORMULA_COLUMNS = [6, 7, 8, 9, 10, 11]  # G..L carry formulas
 # Synthetic Test# of the metadata block.
 METADATA_TEST_NUM_BASE = 10000
 
+# Scientific format of the numeric data cells (2026-11-10: E..J stat columns
+# and parametric die cells; hardcoded, decoupled from the exporter settings).
+SCIENTIFIC_FORMAT = "0.00E+00"
+
 # Mask rules: "never" keeps the row; "blank" hides all-blank rows;
 # "constant" hides rows whose non-blank values are all identical
-# (all-blank counts as a constant of nothing).
+# (all-blank counts as a constant of nothing); "always" folds the row
+# unconditionally (Head-Site, Test Time, DUT Flag).
 MASK_NEVER = "never"
 MASK_BLANK = "blank"
 MASK_CONSTANT = "constant"
+MASK_ALWAYS = "always"
 
-# The 14-row metadata block (fixed order). `dutinfo_index` maps into the
+# The 13-row metadata block (fixed order; DUT # removed 2026-11-10).
+# `unit_type` is the visible Unit cell. `dutinfo_index` maps into the
 # dutInfo tuple [File ID, Part ID, Part Text, Head-Site, Tests Executed,
 # Test Time, HW Bin, SW Bin, Wafer ID, (X, Y), DUT Flag]; None marks the
-# derived rows (DUT # = sequential column position, Temperature = parsed
-# from the raw Part ID).
+# derived row (Temperature = parsed from the raw Part ID). Test Time and
+# HW/SW Bin arrive as DB-shaped strings ("123 ms" / "Bin 1") and parse to
+# bare numerics.
 METADATA_ROWS = (
     {"name": "File ID", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 0},
-    {"name": "DUT #", "unit_type": "INT", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": None},
     {"name": "Part ID", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 1},
     {"name": "Part TXT", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 2},
-    {"name": "Temperature", "unit_type": "DOUBLE", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": None},
-    {"name": "HW Bin", "unit_type": "INT", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 6},
-    {"name": "SW Bin", "unit_type": "INT", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 7},
+    {"name": "Temperature", "unit_type": "CELSIUS", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": None},
+    {"name": "HW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 6},
+    {"name": "SW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 7},
     {"name": "Wafer", "unit_type": "INT", "numeric": True, "mask": MASK_BLANK, "dutinfo_index": 8},
     {"name": "X", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9},
     {"name": "Y", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9},
-    {"name": "Head-Site", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 3},
+    {"name": "Head-Site", "unit_type": "TEXT", "numeric": False, "mask": MASK_ALWAYS, "dutinfo_index": 3},
     {"name": "Tests Executed", "unit_type": "INT", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 4},
-    {"name": "Test Time", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 5},
-    {"name": "DUT Flag", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 10},
+    {"name": "Test Time", "unit_type": "ms", "numeric": True, "mask": MASK_ALWAYS, "dutinfo_index": 5},
+    {"name": "DUT Flag", "unit_type": "TEXT", "numeric": False, "mask": MASK_ALWAYS, "dutinfo_index": 10},
 )
 
 # First two integers inside a preformatted "(X, Y)" string.
@@ -118,13 +130,17 @@ def sanitize_cell(value):
 
 
 def build_dut_summary_spec(summaryTable, testTuples, order, dut_ids, sheet_name,
-                           float_format, die_cap=DUT_CHUNK_CAP, tr=lambda s: s):
+                           die_cap=DUT_CHUNK_CAP, tr=lambda s: s):
     """Build one spec dict per die chunk of the DUT Summary sheet.
 
     `summaryTable` is the classic protocol dict (Data/TestInfo/dut2ind/dutInfo)
     from `waitForDutSummary`; `order` is the `(fid, dutIndex)` display order;
     `dut_ids` carries the full part ID per ordered DUT (blank entries get a
-    "DUT #n" fallback for the visible headers).
+    "DUT #n" fallback for the repeated header).
+
+    Since 2026-11-10 the banner row labels are "DUT #n" (global numbering)
+    and the numeric cell formats are hardcoded scientific — no float format
+    is passed in anymore.
     """
     display_ids = [
         dut_id if dut_id not in (None, "") else f"DUT #{i + 1}"
@@ -146,7 +162,6 @@ def build_dut_summary_spec(summaryTable, testTuples, order, dut_ids, sheet_name,
             display_ids=display_ids[chunk_start: chunk_start + len(chunk_ids)],
             sheet_name=sheet_name,
             base_labels=base_labels,
-            float_format=float_format,
             chunk_index=chunk_index,
         ))
         chunk_start += len(chunk_ids)
@@ -264,8 +279,6 @@ def _flag_cell(flag):
 
 def _metadata_cell(meta, summaryTable, fid, dut_index, global_index):
     name = meta["name"]
-    if name == "DUT #":
-        return global_index + 1
     info = summaryTable.get("dutInfo", {}).get(fid, {}).get(dut_index) or ()
 
     def raw(index):
@@ -275,13 +288,18 @@ def _metadata_cell(meta, summaryTable, fid, dut_index, global_index):
         part_id = raw(1)
         temperature = parse_temperature(part_id if isinstance(part_id, str) else None)
         return "" if temperature is None else float(temperature)
+    if name in ("HW Bin", "SW Bin"):
+        # DB shape "Bin N" -> bare int N
+        return parse_bin(raw(meta["dutinfo_index"]))
+    if name == "Test Time":
+        # DB shape "N ms" -> bare int N (numeric ms so Min/Max/Mean compute)
+        return parse_test_time(raw(meta["dutinfo_index"]))
     if name in ("X", "Y"):
         x, y = _parse_xy(raw(9))
         return _coerce(x if name == "X" else y, int)
     value = raw(meta["dutinfo_index"])
     if meta["numeric"]:
-        caster = float if meta["unit_type"] == "DOUBLE" else int
-        return _coerce(value, caster)
+        return _coerce(value, int)
     return "" if value is None else value
 
 
@@ -310,6 +328,8 @@ def _coerce(value, caster):
 
 def _is_masked(meta, values):
     rule = meta["mask"]
+    if rule == MASK_ALWAYS:
+        return True
     if rule == MASK_NEVER:
         return False
     non_blank = [v for v in values if v not in (None, "")]
@@ -324,7 +344,12 @@ def _is_masked(meta, values):
 
 
 def _metadata_block(summaryTable, chunk_cells, first_die, last_die):
-    """The 14 metadata row-lists plus the absolute Excel rows to hide."""
+    """The 13 metadata row-lists plus the absolute Excel rows to hide.
+
+    Numeric rows carry live MIN/MAX/MEAN over their die range (Mean added
+    2026-11-10); text rows are all dashes. The row shape puts Test# first:
+    [test#, "METADATA", name, unit, "-", "-", MIN, MAX, MEAN, "-", "-", "-"].
+    """
     rows = []
     masked_rows = []
     for position, meta in enumerate(METADATA_ROWS):
@@ -333,13 +358,13 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die):
             _metadata_cell(meta, summaryTable, fid, dut_index, global_index)
             for global_index, fid, dut_index in chunk_cells
         ]
-        prefix = ["METADATA", meta["name"], METADATA_TEST_NUM_BASE + position,
+        prefix = [METADATA_TEST_NUM_BASE + position, "METADATA", meta["name"],
                   meta["unit_type"], "-", "-"]
         if meta["numeric"]:
-            prefix.extend(metadata_minmax_formulas(excel_row, first_die, last_die))
+            prefix.extend(metadata_stat_formulas(excel_row, first_die, last_die))
+            prefix.extend(["-", "-", "-"])
         else:
-            prefix.extend(["-", "-"])
-        prefix.extend(["-", "-", "-", "-"])
+            prefix.extend(["-"] * 6)
         rows.append(prefix + values)
         if _is_masked(meta, values):
             masked_rows.append(excel_row)
@@ -377,9 +402,9 @@ def _test_rows(summaryTable, tests, chunk_cells, first_die, last_die,
         else:
             fails = fails_formula_flags(row_index, mirror_first, mirror_last)
         rows.append([
+            test["num"],
             test["test"],
             test["param"],
-            test["num"],
             "P/F" if test["is_ftr"] else test["unit"],
             "" if test["is_ftr"] else _limit_cell(test["llimit"]),
             "" if test["is_ftr"] else _limit_cell(test["hlimit"]),
@@ -415,7 +440,7 @@ def _table_name(sheet_name, chunk_index):
 
 
 def _build_chunk(summaryTable, tests, order, chunk_start, chunk_ids, display_ids,
-                 sheet_name, base_labels, float_format, chunk_index):
+                 sheet_name, base_labels, chunk_index):
     die_count = len(chunk_ids)
     # (global DUT position, fid, dutIndex) per die column of this chunk;
     # a missing `order` entry degrades to blank cells.
@@ -445,14 +470,24 @@ def _build_chunk(summaryTable, tests, order, chunk_start, chunk_ids, display_ids
 
     spec = {
         "name": sheet_name if chunk_index == 0 else f"{sheet_name} ({chunk_index + 1})",
-        "headers": list(base_labels) + list(display_ids),
+        # banner row 1: base labels + global "DUT #n" per die column (the
+        # raw part IDs stay on the repeated header and the Part ID row)
+        "headers": list(base_labels) + [
+            f"DUT #{chunk_start + i + 1}" for i in range(die_count)
+        ],
         "metadata_rows": metadata_rows,
         "masked_rows": masked_rows,
         "secondary_header": list(base_labels) + [part_id_base(d) for d in display_ids],
         "rows": rows,
         "formula_columns": list(FORMULA_COLUMNS),
         "number_formats": {
-            **{die_col(i): float_format for i in range(die_count)},
+            "SpecMin": SCIENTIFIC_FORMAT,
+            "SpecMax": SCIENTIFIC_FORMAT,
+            "Min": SCIENTIFIC_FORMAT,
+            "Max": SCIENTIFIC_FORMAT,
+            "Mean": SCIENTIFIC_FORMAT,
+            "STD": SCIENTIFIC_FORMAT,
+            **{die_col(i): SCIENTIFIC_FORMAT for i in range(die_count)},
             "FAILS": "0",
             "Cpk": "0.00",
             "Test#": "0",

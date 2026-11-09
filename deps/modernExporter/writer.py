@@ -35,7 +35,7 @@ and print setup.
 import re
 
 from openpyxl.formatting.rule import ColorScaleRule, FormulaRule
-from openpyxl.styles import Border, PatternFill, Side
+from openpyxl.styles import Alignment, Border, PatternFill, Side
 from openpyxl.utils import (
     column_index_from_string,
     get_column_letter,
@@ -47,11 +47,12 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from deps.modernExporter.matrix import sanitize_cell
 
-# Sheet layout, mirroring matrix.py: banner 1, metadata 2..15, header 16, data 17+.
+# Sheet layout, mirroring matrix.py: banner 1, metadata 2..14 (13 rows),
+# header 15, data 16+.
 BANNER_ROW = 1
 METADATA_START = 2
-HEADER_ROW = 16
-DATA_START = 17
+HEADER_ROW = 15
+DATA_START = 16
 
 BASE_COLUMN_COUNT = 12  # fixed A..L block
 ROW_HEIGHT = 22
@@ -60,8 +61,24 @@ MIRROR_HEADER_TEXT = "flags (do not edit)"
 GROUP_BORDER_HEX = "FF94A3B8"  # heavier side color on workflow boundaries
 FALLBACK_TABLE_NAME = "DUTSummary"
 
+# Fixed column geometry (2026-11-10): A=Test#, B=Test (wide, right-aligned),
+# C=Param (left-aligned). The DUT-sheet widths are pinned — no autofit.
+TEST_NAME_COLUMN = 2
+PARAM_COLUMN = 3
+SPEC_MIN_COLUMN = 5   # E — static neutral yellow
+SPEC_MAX_COLUMN = 6   # F — static neutral yellow
+BASE_COLUMN_WIDTH = 8
+TEST_NAME_COLUMN_WIDTH = 30
+DIE_COLUMN_WIDTH = 8
+
+TEST_NAME_ALIGNMENT = Alignment(horizontal="right", vertical="center")
+PARAM_ALIGNMENT = Alignment(horizontal="left", vertical="center")
+
 # spec["number_formats"] keys that target fixed (non-die) columns.
-FIXED_FORMAT_COLUMNS = {"Test#": 3, "Cpk": 11, "FAILS": 12}
+FIXED_FORMAT_COLUMNS = {
+    "Test#": 1, "SpecMin": 5, "SpecMax": 6, "Min": 7, "Max": 8,
+    "Mean": 9, "STD": 10, "Cpk": 11, "FAILS": 12,
+}
 
 
 # --------------------------------------------------------------------------
@@ -93,6 +110,16 @@ def _solid_fill(hex6):
     return PatternFill(start_color=argb, end_color=argb, fill_type="solid")
 
 
+def _body_alignment(column: int, theme) -> Alignment:
+    """Body alignment with the 2026-11-10 column overrides: Test (B) right,
+    Param (C) left, everything else the theme's centered body alignment."""
+    if column == TEST_NAME_COLUMN:
+        return TEST_NAME_ALIGNMENT
+    if column == PARAM_COLUMN:
+        return PARAM_ALIGNMENT
+    return theme.body_alignment
+
+
 def _add_rule(ws, cell_range, formula, fill, stop=True):
     """Add one expression FormulaRule; insertion order sets the priority."""
     rule = FormulaRule(formula=[formula], fill=fill, stopIfTrue=stop)
@@ -117,7 +144,7 @@ def write_body_cell(ws: Worksheet, row: int, column: int, value, theme,
 # --------------------------------------------------------------------------
 
 def _render_banner(ws, spec, theme):
-    """Row 1: grey banner repeating the full part IDs."""
+    """Row 1: grey banner with the base labels + "DUT #n" per die column."""
     for column, value in enumerate(spec["headers"], start=1):
         _write_cell(ws, BANNER_ROW, column, value, theme.banner_font,
                     theme.body_alignment, fill=theme.banner_fill)
@@ -125,21 +152,26 @@ def _render_banner(ws, spec, theme):
 
 
 def _render_metadata(ws, spec, theme):
-    """Rows 2..15: label font on the Test/Param cells, formulas passed through."""
+    """Rows 2..14: label font on the METADATA/field-name cells, formulas
+    passed through, static neutral yellow on the SpecMin/SpecMax cells."""
     for offset, values in enumerate(spec["metadata_rows"]):
         row = METADATA_START + offset
         for column, value in enumerate(values, start=1):
-            font = (theme.metadata_label_font if column <= 2
+            font = (theme.metadata_label_font
+                    if column in (TEST_NAME_COLUMN, PARAM_COLUMN)
                     else theme.body_font)
-            _write_cell(ws, row, column, value, font, theme.body_alignment,
-                        border=theme.border)
+            fill = (theme.neutral_fill
+                    if column in (SPEC_MIN_COLUMN, SPEC_MAX_COLUMN) else None)
+            _write_cell(ws, row, column, value, font,
+                        _body_alignment(column, theme),
+                        border=theme.border, fill=fill)
     for row in spec.get("masked_rows", []):
         ws.row_dimensions[row].hidden = True
         ws.row_dimensions[row].height = 0
 
 
 def _render_header(ws, spec, theme):
-    """Row 16: blue repeated header (part ID base); leads the Excel Table."""
+    """Row 15: blue repeated header (part ID base); leads the Excel Table."""
     for column, value in enumerate(spec["secondary_header"], start=1):
         _write_cell(ws, HEADER_ROW, column, value, theme.header_font,
                     theme.header_alignment, border=theme.border,
@@ -148,7 +180,11 @@ def _render_header(ws, spec, theme):
 
 
 def _render_data_rows(ws, spec, theme):
-    """Rows 17+: body cells, per-row die number formats, group styling."""
+    """Rows 16+: body cells, per-row die number formats, group styling.
+
+    SpecMin/SpecMax (E/F) carry a static neutral yellow fill on every data
+    row (2026-11-10), overriding the group banding there; Test/Param keep
+    the right/left column alignment."""
     die_columns = spec["die_columns"]
     formats = spec.get("number_formats") or {}
     fixed_formats = {column: formats[key]
@@ -175,10 +211,17 @@ def _render_data_rows(ws, spec, theme):
                     number_format = ("0" if is_pf
                                      else formats.get(die_columns[die_index]))
             fixed_column = column <= BASE_COLUMN_COUNT
+            if column in (SPEC_MIN_COLUMN, SPEC_MAX_COLUMN):
+                fill = theme.neutral_fill
+            elif band and fixed_column:
+                fill = theme.group_fill
+            else:
+                fill = None
             _write_cell(
-                ws, row, column, value, theme.body_font, theme.body_alignment,
+                ws, row, column, value, theme.body_font,
+                _body_alignment(column, theme),
                 border=boundary_border if boundary and fixed_column else thin,
-                fill=theme.group_fill if band and fixed_column else None,
+                fill=fill,
                 number_format=number_format,
             )
 
@@ -346,17 +389,35 @@ def _add_dut_table(ws, spec):
 
 
 # --------------------------------------------------------------------------
+# column widths
+# --------------------------------------------------------------------------
+
+def _set_column_widths(ws, spec):
+    """Pin the DUT-sheet widths (2026-11-10): A=8, B=30 (Test name),
+    C..L=8, die columns=8. Replaces the base-column autofit the generator
+    used to run; hidden mirror columns stay untouched."""
+    ws.column_dimensions["A"].width = BASE_COLUMN_WIDTH
+    ws.column_dimensions["B"].width = TEST_NAME_COLUMN_WIDTH
+    for index in range(3, BASE_COLUMN_COUNT + 1):
+        ws.column_dimensions[get_column_letter(index)].width = BASE_COLUMN_WIDTH
+    for letter in spec.get("die_columns") or []:
+        ws.column_dimensions[letter].width = DIE_COLUMN_WIDTH
+
+
+# --------------------------------------------------------------------------
 # public API
 # --------------------------------------------------------------------------
 
 def render_matrix_sheet(ws: Worksheet, spec: dict, theme) -> None:
     """Render one DUT Summary spec dict onto ``ws`` (banner, metadata block,
     repeated header, data rows, live conditional formatting, Excel Table,
-    hidden flag mirrors, freeze / gridlines / print setup)."""
+    hidden flag mirrors, pinned column widths, freeze / gridlines / print
+    setup)."""
     _render_banner(ws, spec, theme)
     _render_metadata(ws, spec, theme)
     _render_header(ws, spec, theme)
     _render_data_rows(ws, spec, theme)
+    _set_column_widths(ws, spec)
 
     cf = spec["conditional_formatting"]
     _add_die_rules(ws, cf["die_rules"], theme)

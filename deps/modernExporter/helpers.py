@@ -36,6 +36,10 @@ from deps.SharedSrc import isPass
 # optional decimal, and signed so cold temperatures ("_T-5.5C") match.
 TEMPERATURE_RE = re.compile(r"_T(-?\d+(?:\.\d+)?)C", re.IGNORECASE)
 
+# First integer anywhere in a string (fallback extractor for the DB-shaped
+# "N ms" / "Bin N" metadata values below).
+_FIRST_INT_RE = re.compile(r"-?\d+")
+
 # Default test/param split: "workflow/rest/of/name/param" -> test + last segment.
 DEFAULT_PARAM_PATTERN = re.compile(r"^(?P<test>.+)/(?P<param>[^/]+)$")
 
@@ -73,6 +77,46 @@ def part_id_base(part_id: str | None) -> str:
         return part_id
     last = matches[-1]
     return part_id[: last.start()] + part_id[last.end() :]
+
+
+def parse_test_time(value) -> int | str:
+    """Milliseconds as an int from a DB ``"N ms"`` string.
+
+    The dutInfo Test Time is ``TestTime || ' ms'`` (schema.rs
+    FETCH_SELECT_DUT_SUMMARY): strip the ``ms`` suffix and int() it; when
+    that fails, fall back to the first integer found anywhere. Absent or
+    unparseable values yield ``""`` (blank cell) so the numeric Min/Max/
+    Mean formulas skip the DUT.
+    """
+    if value is None or value == "":
+        return ""
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if text.lower().endswith("ms"):
+        text = text[:-2].strip()
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    match = _FIRST_INT_RE.search(str(value))
+    return int(match.group(0)) if match else ""
+
+
+def parse_bin(value) -> int | str:
+    """Bin number as an int from a DB ``"Bin N"`` string.
+
+    The dutInfo HW/SW Bin values are ``'Bin ' || HBIN`` / ``'Bin ' || SBIN``
+    (schema.rs): extract the first integer so the cells carry bare numbers
+    (no "Bin" repetition) and the Min/Max/Mean formulas stay numeric.
+    Absent or unparseable values yield ``""``.
+    """
+    if value is None or value == "":
+        return ""
+    if isinstance(value, (int, float)):
+        return int(value)
+    match = _FIRST_INT_RE.search(str(value))
+    return int(match.group(0)) if match else ""
 
 
 def compile_param_pattern(pattern: str | None) -> re.Pattern:
@@ -178,6 +222,8 @@ def fails_formula_ftr(row: int, first: str, last: str) -> str:
     return f'=SUMPRODUCT(({rng}<>"")*({rng}=1))'
 
 
-def metadata_minmax_formulas(row: int, first: str, last: str) -> tuple[str, str]:
-    """(MIN, MAX) formula pair for a metadata block row."""
-    return (stat_formula("MIN", row, first, last), stat_formula("MAX", row, first, last))
+def metadata_stat_formulas(row: int, first: str, last: str) -> tuple[str, str, str]:
+    """(MIN, MAX, AVERAGE) formula triple for a numeric metadata block row."""
+    return (stat_formula("MIN", row, first, last),
+            stat_formula("MAX", row, first, last),
+            stat_formula("AVERAGE", row, first, last))

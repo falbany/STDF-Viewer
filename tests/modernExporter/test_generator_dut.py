@@ -39,10 +39,13 @@ def qapp():
 # --------------------------------------------------------------------------
 
 def make_dut_info(fid=1, part_id="", part_txt="", head_site="1--1",
-                  tests_executed=42, test_time="0.5", hw_bin=1, sw_bin=2,
-                  wafer="", xy=(3, -5), dut_flag="Passed"):
+                  tests_executed=42, test_time="123 ms", hw_bin="Bin 1",
+                  sw_bin="Bin 2", wafer="", xy=(3, -5), dut_flag="Passed"):
     """dutInfo tuple: [File ID, Part ID, Part Text, Head-Site, Tests Executed,
-    Test Time, HW Bin, SW Bin, Wafer ID, (X, Y), DUT Flag] (indices 0..10)."""
+    Test Time, HW Bin, SW Bin, Wafer ID, (X, Y), DUT Flag] (indices 0..10).
+
+    Test Time / HW Bin / SW Bin use the raw DB shapes ("123 ms", "Bin 1",
+    "Bin 2" — see schema.rs FETCH_SELECT_DUT_SUMMARY)."""
     return (fid, part_id, part_txt, head_site, tests_executed, test_time,
             hw_bin, sw_bin, wafer, xy, dut_flag)
 
@@ -51,16 +54,16 @@ def make_summary():
     """Classic waitForDutSummary dict: 2 tests x 3 DUTs in file 1."""
     duts = [
         (1, 0, make_dut_info(part_id="SN541_T25C")),
-        (1, 1, make_dut_info(part_id="SN542_T25C", sw_bin=3, xy=(4, -6),
+        (1, 1, make_dut_info(part_id="SN542_T25C", sw_bin="Bin 3", xy=(4, -6),
                              dut_flag="Failed")),
         (1, 2, make_dut_info(part_id="SN543_T85C")),
     ]
     tests = [
-        # parametric with limits (data row 17)
+        # parametric with limits (data row 16)
         dict(name="0_TXCC/VCCC_ASIC", num=10, unit="V", llimit=0.5,
              hlimit=1.5, rec=REC.PTR,
              data={1: ([1.0, 1.2, np.nan], [0, 0, -1])}),
-        # FTR (data row 18): die cells from the flag list
+        # FTR (data row 17): die cells from the flag list
         dict(name="2_Func/scanchain", num=12, unit="", llimit=np.nan,
              hlimit=np.nan, rec=REC.FTR, vect_nam="PAT_TOP",
              data={1: ([0.0, 1.0, 0.0], [0, 0x80, 0])}),
@@ -174,34 +177,50 @@ class TestDutSummarySheet:
     def test_banner_row_one(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        assert ws["A1"].value == "Test"
-        assert ws["M1"].value == "SN541_T25C"        # full part ID banner
+        assert ws["A1"].value == "Test#"              # Test# leads the base labels
+        assert ws["M1"].value == "DUT #1"             # banner labels DUT #n
         assert ws["A1"].fill.fgColor.rgb == "FFCBD5E1"
 
-    def test_repeated_header_row_sixteen(self, generated):
+    def test_repeated_header_row_fifteen(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        assert ws["A16"].value == "Test"
-        assert ws["A16"].fill.fgColor.rgb == "FF1E40AF"
-        assert ws["M16"].value == "SN541"            # part ID base
+        assert ws["A15"].value == "Test#"
+        assert ws["A15"].fill.fgColor.rgb == "FF1E40AF"
+        assert ws["M15"].value == "SN541"             # part ID base
 
-    def test_first_test_formulas_at_row_seventeen(self, generated):
+    def test_metadata_block_layout(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        assert ws["G17"].value.startswith("=MIN(M17:")
-        assert ws["H17"].value.startswith("=MAX(M17:")
-        assert ws["L17"].value.startswith("=SUMPRODUCT(")
+        # 13 metadata rows (2..14), Test# 10000.., numeric cells parsed bare
+        assert ws["A2"].value == 10000
+        assert ws["B2"].value == "METADATA"
+        assert ws["C2"].value == "File ID"
+        # Test Time row (13): parsed to bare ints under MIN/MAX formulas
+        assert ws["C13"].value == "Test Time"
+        assert ws["D13"].value == "ms"
+        assert ws["G13"].value == "=MIN(M13:O13)"
+        # always-fold rows stay hidden (Head-Site 11, Test Time 13, DUT Flag 14)
+        for row in (11, 13, 14):
+            assert ws.row_dimensions[row].hidden is True
+
+    def test_first_test_formulas_at_row_sixteen(self, generated):
+        _, wb, _, _, _ = generated
+        ws = wb["DUT Summary"]
+        assert ws["G16"].value.startswith("=MIN(M16:")
+        assert ws["H16"].value.startswith("=MAX(M16:")
+        assert ws["L16"].value.startswith("=SUMPRODUCT(")
 
     def test_die_values_parametric_and_ftr(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        assert ws["M17"].value == 1.0
-        assert ws["N17"].value == 1.2
+        assert ws["M16"].value == 1.0
+        assert ws["N16"].value == 1.2
         # FTR row: die cells from the flag list (0 pass / 1 fail)
-        assert ws["B18"].value == "PAT_TOP"
-        assert ws["D18"].value == "P/F"
-        assert ws["M18"].value == 0
-        assert ws["N18"].value == 1
+        assert ws["B17"].value == "2_Func"
+        assert ws["C17"].value == "PAT_TOP"
+        assert ws["D17"].value == "P/F"
+        assert ws["M17"].value == 0
+        assert ws["N17"].value == 1
 
     def test_mirror_columns_hidden_after_spacer(self, generated):
         _, wb, _, _, _ = generated
@@ -210,11 +229,14 @@ class TestDutSummarySheet:
         for letter in ("Q", "R", "S"):
             assert dims[letter].hidden is True
 
-    def test_die_columns_pinned_base_autofit(self, generated):
+    def test_fixed_column_widths_no_autofit(self, generated):
+        # 2026-11-10 R9: DUT-sheet widths are fixed by the renderer
         _, wb, _, _, _ = generated
         dims = wb["DUT Summary"].column_dimensions
-        assert dims["M"].width == 10                  # die columns pinned
-        assert dims["A"].width == pytest.approx(len("METADATA") * 1.1)
+        assert dims["A"].width == 8                   # Test#
+        assert dims["B"].width == 30                  # Test name
+        assert dims["C"].width == 8                   # Param
+        assert dims["M"].width == 8                   # die columns pinned
 
 
 # --------------------------------------------------------------------------
@@ -267,31 +289,28 @@ class TestProgressContract:
 
 
 # --------------------------------------------------------------------------
-# die-cell number formats (final review critical 2)
+# die-cell number formats (final review critical 2 + 2026-11-10 R3)
 # --------------------------------------------------------------------------
 
 class TestDieCellNumberFormat:
-    """Parametric die cells must carry an Excel number format derived from
-    the exporter settings, never getFloatFormat()'s printf template verbatim
-    ("%." + precision + notation makes Excel parse % as a percentage code)."""
+    """Parametric die cells carry the hardcoded scientific format — decoupled
+    from the exporter settings (which used to derive a float format via
+    number_format_from_settings; the printf-template trap stays documented
+    in the design addendum)."""
 
-    def test_default_settings_die_cells_general(self, generated):
+    def test_die_cells_scientific_hardcoded(self, generated):
         _, wb, _, _, _ = generated
-        settings = getSetting()
-        expected = number_format_from_settings(settings.gen.data_precision,
-                                               settings.gen.data_notation)
-        assert expected == "General"   # suite-default settings (G, 3)
         ws = wb["DUT Summary"]
-        assert ws["M17"].number_format == expected
-        assert ws["N17"].number_format == expected
-        assert ws["M18"].number_format == "0"   # FTR die cells stay integer
+        assert ws["M16"].number_format == "0.00E+00"
+        assert ws["N16"].number_format == "0.00E+00"
+        assert ws["M17"].number_format == "0"   # FTR die cells stay integer
 
-    def test_fixed_notation_die_cells(self, tmp_path, qapp, monkeypatch):
+    def test_settings_notation_no_longer_affects_die_cells(self, tmp_path, qapp, monkeypatch):
         settings = getSetting()
         monkeypatch.setattr(settings.gen, "data_precision", 3)
         monkeypatch.setattr(settings.gen, "data_notation", "F")
         _, wb, _, _, _ = build_generated(tmp_path, qapp)
         ws = wb["DUT Summary"]
-        assert number_format_from_settings(3, "F") == "0.000"
-        assert ws["M17"].number_format == "0.000"
-        assert ws["N17"].number_format == "0.000"
+        assert number_format_from_settings(3, "F") == "0.000"  # utility intact
+        assert ws["M16"].number_format == "0.00E+00"  # hardcode wins
+        assert ws["N16"].number_format == "0.00E+00"

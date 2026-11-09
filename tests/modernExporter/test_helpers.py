@@ -16,8 +16,10 @@ from deps.modernExporter.helpers import (
     fails_formula_ftr,
     fails_formula_limits,
     flag_value,
-    metadata_minmax_formulas,
+    metadata_stat_formulas,
+    parse_bin,
     parse_temperature,
+    parse_test_time,
     part_id_base,
     split_dut_chunks,
     split_test_name,
@@ -214,9 +216,70 @@ class TestFailsFormulas:
         )
 
 
-class TestMetadataMinMaxFormulas:
-    def test_returns_min_max_tuple(self):
-        assert metadata_minmax_formulas(17, "M", "AZ") == ("=MIN(M17:AZ17)", "=MAX(M17:AZ17)")
+class TestParseTestTime:
+    """DB Test Time arrives as `TestTime || ' ms'` (schema.rs) — "N ms" strings."""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("123 ms", 123),
+            ("123ms", 123),          # no space variant
+            ("  45  ms ", 45),       # stray whitespace
+            ("0 ms", 0),
+            ("123", 123),            # already bare integer
+            (123, 123),              # already numeric (defensive)
+            (12.0, 12),
+            ("", ""),
+            (None, ""),
+            ("ms", ""),              # no number at all
+            ("garbage", ""),
+        ],
+    )
+    def test_spec_cases(self, raw, expected):
+        assert parse_test_time(raw) == expected
+
+    def test_regex_fallback_extracts_first_integer(self):
+        # odd formatting: strip-suffix path fails, the integer regex recovers
+        assert parse_test_time("about 250 msecs") == 250
+
+    def test_returns_int_type(self):
+        assert isinstance(parse_test_time("42 ms"), int)
+
+
+class TestParseBin:
+    """DB HW/SW Bin arrives as `'Bin ' || HBIN` (schema.rs) — "Bin N" strings."""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("Bin 3", 3),
+            ("Bin 0", 0),
+            ("bin 7", 7),            # case-insensitive via regex
+            ("Bin 127", 127),
+            ("3", 3),                # bare integer
+            (3, 3),                  # already numeric (defensive)
+            (0, 0),
+            ("", ""),
+            (None, ""),
+            ("Bin", ""),             # no number at all
+            ("garbage", ""),
+        ],
+    )
+    def test_spec_cases(self, raw, expected):
+        assert parse_bin(raw) == expected
+
+    def test_extracts_first_integer(self):
+        assert parse_bin("Hardware Bin: 5") == 5
+
+    def test_returns_int_type(self):
+        assert isinstance(parse_bin("Bin 2"), int)
+
+
+class TestMetadataStatFormulas:
+    def test_returns_min_max_mean_triple(self):
+        assert metadata_stat_formulas(17, "M", "AZ") == (
+            "=MIN(M17:AZ17)", "=MAX(M17:AZ17)", "=AVERAGE(M17:AZ17)")
 
     def test_other_row(self):
-        assert metadata_minmax_formulas(20, "M", "O") == ("=MIN(M20:O20)", "=MAX(M20:O20)")
+        assert metadata_stat_formulas(20, "M", "O") == (
+            "=MIN(M20:O20)", "=MAX(M20:O20)", "=AVERAGE(M20:O20)")
