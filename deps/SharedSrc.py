@@ -110,6 +110,7 @@ class GeneralConfig(BaseModel):
     id_type: str = Field("Number + Name", alias="Test Item Identifier")
     hide_inf: bool = Field(True, alias="Hide Infinite Value")
     vert_bar: bool = Field(False, alias="Vertical BarGraph")
+    modern_export: bool = Field(True, alias="Modern Export")  # fork(falbany): modern exporter toggle
     file_symbols: dict[int, str] = Field(
         default_factory=lambda: {0: "o"},
         alias="File Symbols (Scatter Points)"

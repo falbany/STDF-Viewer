@@ -73,6 +73,9 @@ class Ui_exportUI(object):
         self.GDR_DTR_cb = QtWidgets.QCheckBox(self.content_selection)
         self.GDR_DTR_cb.setObjectName("GDR_DTR_cb")
         self.gridLayout_2.addWidget(self.GDR_DTR_cb, 1, 3, 1, 1)
+        self.ModernReport_cb = QtWidgets.QCheckBox(self.content_selection)  # fork(falbany): modern exporter toggle
+        self.ModernReport_cb.setObjectName("ModernReport_cb")
+        self.gridLayout_2.addWidget(self.ModernReport_cb, 2, 2, 1, 1)
         self.PPQQ_cb = QtWidgets.QCheckBox(self.content_selection)
         self.PPQQ_cb.setObjectName("PPQQ_cb")
         self.gridLayout_2.addWidget(self.PPQQ_cb, 2, 0, 1, 1)
@@ -408,6 +411,7 @@ class Ui_exportUI(object):
         self.FileInfo_cb.setText(_translate("exportUI", "File Info"))
         self.Stat_cb.setText(_translate("exportUI", "Test Statistics"))
         self.GDR_DTR_cb.setText(_translate("exportUI", "GDR DTR Summary"))
+        self.ModernReport_cb.setText(_translate("exportUI", "Modern Report"))  # fork(falbany): modern exporter toggle
         self.PPQQ_cb.setText(_translate("exportUI", "Normal Validation"))
         self.Correlation_cb.setText(_translate("exportUI", "Correlation"))
         self.exportPath_selection.setTitle(_translate("exportUI", "Export Path Selection"))

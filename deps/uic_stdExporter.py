@@ -668,8 +668,9 @@ class progressDisplayer(QtWidgets.QDialog):
         self.signals.retrieveDutSummarySignal.connect(self.getDutSummaryFromParent)
         
         
-    def setReportInfo(self, reportInfo: tuple):
-        self.rg = reportGenerator(self.signals, 
+    # fork(falbany): pluggable report generator
+    def setReportInfo(self, reportInfo: tuple, generator_class=reportGenerator):
+        self.rg = generator_class(self.signals, 
                                   self.mutex, 
                                   self.condWait, 
                                   reportInfo,
@@ -824,6 +825,9 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.GDR_DTR_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.PPQQ_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.Correlation_cb.clicked.connect(self.changeBtnStyle)
+        # fork(falbany): modern exporter toggle
+        self.exportUI.ModernReport_cb.setChecked(getSetting().gen.modern_export)
+        self.exportUI.ModernReport_cb.toggled.connect(self.onModernToggled)
         # bind check/cancel button to function
         self.exportUI.checkAll.clicked.connect(lambda: self.toggleSite(True))
         self.exportUI.cancelAll.clicked.connect(lambda: self.toggleSite(False))
@@ -831,6 +835,11 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.PPQQ_cb.setHidden(True)
         self.exportUI.Correlation_cb.setHidden(True)
         
+                
+    def onModernToggled(self, checked: bool):
+        # fork(falbany): persist modern exporter toggle
+        getSetting().gen.modern_export = checked
+        dumpConfigFile()
                 
     def showUI(self):
         # used to determine the source of close event
@@ -1195,12 +1204,18 @@ class stdfExporter(QtWidgets.QDialog):
         if ReportSelection.GDR_DTR in selectedContents:
             totalLoopCnt += 1
                     
+        # fork(falbany): select report generator
+        if getSetting().gen.modern_export:
+            from .modernExporter.generator import ModernReportGenerator  # lazy: avoids hard dep at import time
+            gen_class = ModernReportGenerator
+        else:
+            gen_class = reportGenerator
         self.pd = progressDisplayer(parent=self)
         rinfo = (selectedContents, testTuples,
                  selectedFiles, selectedHeads, 
                  selectedSites, reportPath, 
                  waferTuples, totalLoopCnt)
-        self.pd.setReportInfo(rinfo)
+        self.pd.setReportInfo(rinfo, generator_class=gen_class)
         # self.pd.getDutSummaryFromParent([1], [-1], [0, 1], {})
         # print(self.pd.channel.dataListChannel)
         self.pd.start()
