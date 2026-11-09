@@ -26,7 +26,7 @@
 #
 """
 
-"""Modern openpyxl report generator: skeleton with the plain styled sheets.
+"""Modern openpyxl report generator: plain, DUT Summary and chart sheets.
 
 ``ModernReportGenerator`` subclasses the classic ``reportGenerator`` from
 ``deps.uic_stdExporter`` and keeps its threading contract verbatim — the
@@ -37,9 +37,11 @@ renderers instead of xlsxwriter.
 
 Instance state (``self._wb``, ``self._theme``, ``self._row``) replaces the
 classic module-level ``sv`` statics, so several generators can coexist.
-Sheet writers replaced wholesale by Task 8 (DUT Summary matrix, bin, wafer,
-trend, histogram) are stubbed here but keep the classic progress contract
-where the classic totalLoopCnt formula counts them.
+The DUT Summary matrix is rendered through the Task 4/5 spec builder and
+matrix renderer (die chunks beyond the Excel column cap get their own
+"(n)" sheets); the chart sheets (bin, wafer, trend, histogram) embed the
+GUI-provided PNGs and write their stat rows with the themed body style,
+mirroring the classic cursor gaps and progress cadence.
 """
 
 from itertools import product
@@ -48,22 +50,30 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from PyQt5 import QtCore
 
-from deps.SharedSrc import tab
+from deps.SharedSrc import getSetting, tab
 from deps.uic_stdExporter import (
     ReportSelection,
     dataChannel,
     reportGenerator,
     signals,
 )
-from deps.modernExporter.matrix import sanitize_cell
-from deps.modernExporter.sheets import plain_table_spec
+from deps.modernExporter.matrix import build_dut_summary_spec
+from deps.modernExporter.sheets import insert_report_image, plain_table_spec
 from deps.modernExporter.theme import ModernTheme
-from deps.modernExporter.writer import render_plain_table
+from deps.modernExporter.writer import (
+    BASE_COLUMN_COUNT,
+    render_matrix_sheet,
+    render_plain_table,
+    write_body_cell,
+)
 
 # auto-fit column width = max content length * 1.1, capped (classic uses the
 # same *1.1 factor via xlsxwriter set_column; the cap is the modern bound)
 AUTOFIT_FACTOR = 1.1
 AUTOFIT_CAP = 60
+# DUT Summary die columns keep a pinned width — only the fixed A..L block
+# is auto-fitted
+DIE_COLUMN_WIDTH = 10
 
 
 class ModernReportGenerator(reportGenerator):
@@ -80,36 +90,41 @@ class ModernReportGenerator(reportGenerator):
     # helpers
     # ----------------------------------------------------------------------
 
-    def _autofit_columns(self, ws) -> None:
+    def _autofit_columns(self, ws, max_column: int | None = None) -> None:
         """Set each used column's width to max content length * 1.1, capped
         at AUTOFIT_CAP (the modern counterpart of the classic
-        ``set_column(col, col, width*1.1)`` calls)."""
+        ``set_column(col, col, width*1.1)`` calls). ``max_column`` limits
+        the fit to the first N columns — the DUT Summary matrix auto-fits
+        only its fixed A..L block, its die columns stay pinned."""
         widths: dict[int, int] = {}
         for row in ws.iter_rows():
             for cell in row:
-                if cell.value is not None:
-                    length = len(str(cell.value))
-                    if length > widths.get(cell.column, 0):
-                        widths[cell.column] = length
+                if cell.value is None:
+                    continue
+                if max_column is not None and cell.column > max_column:
+                    continue
+                length = len(str(cell.value))
+                if length > widths.get(cell.column, 0):
+                    widths[cell.column] = length
         for column, length in widths.items():
             ws.column_dimensions[get_column_letter(column)].width = (
                 min(length * AUTOFIT_FACTOR, AUTOFIT_CAP))
+
+    def _write_body_row(self, ws, row: int, values: list,
+                        fill=None) -> None:
+        """One themed body row at 1-based ``row``: body font/alignment and
+        thin border via writer.write_body_cell, optional band fill."""
+        for column, value in enumerate(values, start=1):
+            write_body_cell(ws, row, column, value, self._theme, fill=fill)
 
     def _write_plain_body_row(self, ws, row: int, offset: int,
                               values: list) -> None:
         """Write one body row of a plain table at 1-based ``row`` with the
         same styling as writer.render_plain_table (body font/alignment,
         thin border, alternating banding on even offsets)."""
-        band = self._theme.group_fill if offset % 2 == 0 else None
-        for column, value in enumerate(values, start=1):
-            cell = ws.cell(row=row, column=column)
-            cell.value = (value if isinstance(value, str)
-                          and value.startswith("=") else sanitize_cell(value))
-            cell.font = self._theme.body_font
-            cell.alignment = self._theme.body_alignment
-            cell.border = self._theme.border
-            if band is not None:
-                cell.fill = band
+        self._write_body_row(
+            ws, row, values,
+            fill=self._theme.group_fill if offset % 2 == 0 else None)
 
     # ----------------------------------------------------------------------
     # plain sheets (Task 7)
@@ -198,44 +213,172 @@ class ModernReportGenerator(reportGenerator):
         self._autofit_columns(StatSheet)
 
     # ----------------------------------------------------------------------
-    # Task 8 stubs — replaced wholesale when the matrix/chart sheets land
+    # DUT Summary matrix + chart sheets (Task 8)
     # ----------------------------------------------------------------------
 
     def writeDUT_Summary(self):
-        """Stub: the DUT Summary matrix sheet is implemented in Task 8.
-        Keeps the classic progress contract — the dut info part plus one
-        column per test tuple — so loopCount still totals totalLoopCnt
-        whenever DUT is selected."""
         DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
         if DutSheet is None:
             return
 
-        self.loopCount += 1 + len(self.testTuples)
+        # a complex dict structure from the GUI thread
+        # key: Data, value:     testTuple -> {fid, testDataDict}
+        # key: TestInfo, value: testTuple -> testInfoDict
+        # key: dut2ind, value:  fid -> {dutIndex -> dataIndex}
+        # key: dutInfo, value:  fid -> {dutIndex -> dutSummary}
+        summaryTable = self.waitForDutSummary(self.selectedHeads,
+                                              self.selectedSites,
+                                              self.selectedFiles,
+                                              self.testTuples)
+        if self.forceQuit:
+            return
+
+        # use a list to determine the dut order (classic order-building)
+        order = []
+        for fid in sorted(summaryTable["dutInfo"].keys()):
+            for dutIndex in sorted(summaryTable["dutInfo"][fid].keys()):
+                order.append((fid, dutIndex))
+
+        # full part ID per ordered DUT (classic dataRow[1] indexing); a
+        # blank part ID falls back to "DUT #n"
+        dut_ids = []
+        for i, (fid, dutIndex) in enumerate(order):
+            info = summaryTable["dutInfo"][fid][dutIndex]
+            part_id = info[1] if len(info) > 1 and info[1] else ""
+            dut_ids.append(part_id if part_id else f"DUT #{i + 1}")
+
+        specs = build_dut_summary_spec(
+            summaryTable, self.testTuples, order, dut_ids,
+            sheet_name=self.tr("DUT Summary"),
+            float_format=getSetting().getFloatFormat(), tr=self.tr)
+
+        # chunk 0 renders on the existing DUT Summary sheet; chunks 1+
+        # (die overflow beyond the Excel column cap) get their own sheets —
+        # spec names already carry the " (n)" suffixes
+        for chunk_index, spec in enumerate(specs):
+            ws = (DutSheet if chunk_index == 0
+                  else self._wb.create_sheet(spec["name"]))
+            render_matrix_sheet(ws, spec, self._theme)
+            # auto-fit the fixed A..L block only; die columns stay pinned
+            self._autofit_columns(ws, max_column=BASE_COLUMN_COUNT)
+            for column in spec["die_columns"]:
+                ws.column_dimensions[column].width = DIE_COLUMN_WIDTH
+
+        # classic cadence: one tick after the DUT info part...
+        self.loopCount += 1
         self.sendProgress()
+        # ...and one per test column (rows span every chunk)
+        for _ in self.testTuples:
+            self.loopCount += 1
+            self.sendProgress()
 
     def writeBinChart(self):
-        """Stub: the bin chart sheet is implemented in Task 8 (no progress
-        bookkeeping yet — totalLoopCnt only counts it once that lands)."""
-        if self.sheetDict.get(ReportSelection.Bin, None) is None:
+        BinSheet = self.sheetDict.get(ReportSelection.Bin, None)
+        if BinSheet is None:
             return
+
+        key = ReportSelection.Bin
+        row = self._row.get(key, 0)
+        for head, site in product(self.selectedHeads, self.selectedSites):
+            if self.forceQuit:
+                return
+            # get bin image from GUI thread and insert to the sheet
+            image_io = self.waitForImage(testTuple=(0, 0, ""), head=head,
+                                         sites=[site],
+                                         fids=self.selectedFiles,
+                                         chartType=tab.Bin)
+            row += insert_report_image(BinSheet, image_io, row)
+            # get hard bin list, then soft bin list
+            for isHBIN in (True, False):
+                dataTable = self.waitForDataList([head], [site],
+                                                 self.selectedFiles, tab.Bin,
+                                                 {"isHBIN": isHBIN})
+                for dataList in dataTable:
+                    self._write_body_row(BinSheet, row, dataList)
+                    row += 1
+            # gap between head/site blocks
+            row += 3
+        self._row[key] = row
+
+        self.loopCount += 1
+        self.sendProgress()
+        self._autofit_columns(BinSheet)
 
     def writeWaferMap(self):
-        """Stub: the wafer map sheet is implemented in Task 8 (no progress
-        bookkeeping yet — totalLoopCnt only counts it once that lands)."""
-        if self.sheetDict.get(ReportSelection.Wafer, None) is None:
+        WaferSheet = self.sheetDict.get(ReportSelection.Wafer, None)
+        if WaferSheet is None:
             return
+
+        key = ReportSelection.Wafer
+        row = self._row.get(key, 0)
+        for wafer in self.waferTuples:
+            if self.forceQuit:
+                return
+            # wafer map is already associated with head
+            image_io = self.waitForImage(wafer, 0, self.selectedSites,
+                                         self.selectedFiles, tab.Wafer)
+            row += insert_report_image(WaferSheet, image_io, row) + 2
+            # add wafer info
+            dataTable = self.waitForDataList([], self.selectedSites,
+                                             self.selectedFiles, tab.Wafer,
+                                             {"testTuples": [wafer]})
+            for dataList in dataTable:
+                self._write_body_row(WaferSheet, row, dataList)
+                row += 1
+            # gap between images
+            row += 3
+            self.loopCount += 1
+            self.sendProgress()
+        self._row[key] = row
+        self._autofit_columns(WaferSheet)
 
     def writeTrendPlot(self, testTuple: tuple, head: int, site: int):
-        """Stub: the trend sheet is implemented in Task 8 (no progress
-        bookkeeping yet — totalLoopCnt only counts it once that lands)."""
-        if self.sheetDict.get(ReportSelection.Trend, None) is None:
+        TrendSheet = self.sheetDict.get(ReportSelection.Trend, None)
+        if TrendSheet is None:
             return
 
+        # get image and stat from main thread
+        image_io = self.waitForImage(testTuple, head, [site],
+                                     self.selectedFiles, tab.Trend)
+        dataTable = self.waitForDataList([head], [site], self.selectedFiles,
+                                         tab.Trend,
+                                         {"testTuples": [testTuple]})
+        # insert into the work sheet
+        key = ReportSelection.Trend
+        row = self._row.get(key, 0)
+        row += insert_report_image(TrendSheet, image_io, row)
+        for dataList in dataTable:
+            self._write_body_row(TrendSheet, row, dataList)
+            row += 1
+        row += 2
+        self._row[key] = row
+
+        self.loopCount += 1
+        self.sendProgress()
+        self._autofit_columns(TrendSheet)
+
     def writeHistogram(self, testTuple: tuple, head: int, site: int):
-        """Stub: the histogram sheet is implemented in Task 8 (no progress
-        bookkeeping yet — totalLoopCnt only counts it once that lands)."""
-        if self.sheetDict.get(ReportSelection.Histo, None) is None:
+        HistoSheet = self.sheetDict.get(ReportSelection.Histo, None)
+        if HistoSheet is None:
             return
+
+        image_io = self.waitForImage(testTuple, head, [site],
+                                     self.selectedFiles, tab.Histo)
+        dataTable = self.waitForDataList([head], [site], self.selectedFiles,
+                                         tab.Histo,
+                                         {"testTuples": [testTuple]})
+        key = ReportSelection.Histo
+        row = self._row.get(key, 0)
+        row += insert_report_image(HistoSheet, image_io, row)
+        for dataList in dataTable:
+            self._write_body_row(HistoSheet, row, dataList)
+            row += 1
+        row += 2
+        self._row[key] = row
+
+        self.loopCount += 1
+        self.sendProgress()
+        self._autofit_columns(HistoSheet)
 
     # ----------------------------------------------------------------------
     # report assembly

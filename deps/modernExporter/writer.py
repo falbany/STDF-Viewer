@@ -100,6 +100,18 @@ def _add_rule(ws, cell_range, formula, fill, stop=True):
     return rule
 
 
+def write_body_cell(ws: Worksheet, row: int, column: int, value, theme,
+                    border: bool = True, fill=None):
+    """One themed body cell: body font + centered alignment, optional thin
+    border and band fill. Formula strings are written verbatim, everything
+    else is sanitized — the public cell-level counterpart of the internal
+    matrix renderers, for generator-written body rows (plain sheets, chart
+    stat rows)."""
+    return _write_cell(ws, row, column, value, theme.body_font,
+                       theme.body_alignment,
+                       border=theme.border if border else None, fill=fill)
+
+
 # --------------------------------------------------------------------------
 # matrix sheet sections
 # --------------------------------------------------------------------------
