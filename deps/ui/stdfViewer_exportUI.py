@@ -73,9 +73,6 @@ class Ui_exportUI(object):
         self.GDR_DTR_cb = QtWidgets.QCheckBox(self.content_selection)
         self.GDR_DTR_cb.setObjectName("GDR_DTR_cb")
         self.gridLayout_2.addWidget(self.GDR_DTR_cb, 1, 3, 1, 1)
-        self.ModernReport_cb = QtWidgets.QCheckBox(self.content_selection)  # fork(falbany): modern exporter toggle
-        self.ModernReport_cb.setObjectName("ModernReport_cb")
-        self.gridLayout_2.addWidget(self.ModernReport_cb, 2, 2, 1, 1)
         self.PPQQ_cb = QtWidgets.QCheckBox(self.content_selection)
         self.PPQQ_cb.setObjectName("PPQQ_cb")
         self.gridLayout_2.addWidget(self.PPQQ_cb, 2, 0, 1, 1)
@@ -121,6 +118,9 @@ class Ui_exportUI(object):
         self.toolButton.setObjectName("toolButton")
         self.horizontalLayout_3.addWidget(self.toolButton)
         self.verticalLayout_2.addWidget(self.exportPath_selection)
+        self.ModernReport_cb = QtWidgets.QCheckBox(self.contentPage)  # fork(falbany): modern exporter toggle
+        self.ModernReport_cb.setObjectName("ModernReport_cb")
+        self.verticalLayout_2.addWidget(self.ModernReport_cb)
         self.stackedWidget.addWidget(self.contentPage)
         self.testPage = QtWidgets.QWidget()
         self.testPage.setObjectName("testPage")

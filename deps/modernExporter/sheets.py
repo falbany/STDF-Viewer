@@ -46,19 +46,26 @@ ROW_HEIGHT_IN = 0.21  # one default Excel row ≈ 0.21 inch (classic spacing mat
 
 
 def plain_table_spec(sheet_name: str, headers: list[str], rows: list[list],
-                     tr=lambda s: s) -> dict:
-    """Build a plain-table spec ``{"name","headers","rows"}`` for
-    ``render_plain_table``.
+                     tr=lambda s: s,
+                     cell_number_formats: dict | None = None) -> dict:
+    """Build a plain-table spec ``{"name","headers","rows",
+    "cell_number_formats"}`` for ``render_plain_table``.
 
     Headers are translated with ``tr`` (the sheet name arrives already
     translated from the caller); every row cell passes through
     ``sanitize_cell`` (NaN/None -> blank, illegal XML chars stripped).
     ``rows`` may be a generator — it is materialized to a list.
+
+    ``cell_number_formats`` is the optional fix-wave-2 contract extension:
+    ``{(row_index, col_index): fmt}`` — 0-based indices over the data grid
+    EXCLUDING the header row — applied by ``render_plain_table`` after the
+    cells are written (e.g. the File Info Yield row's ``"0.00%"``).
     """
     return {
         "name": sheet_name,
         "headers": [tr(header) for header in headers],
         "rows": [[sanitize_cell(cell) for cell in row] for row in rows],
+        "cell_number_formats": dict(cell_number_formats or {}),
     }
 
 

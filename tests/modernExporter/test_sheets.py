@@ -60,6 +60,23 @@ class TestPlainTableSpec:
         assert isinstance(spec["rows"], list)
         assert spec["rows"] == [["x"], ["y"]]
 
+    def test_cell_number_formats_passthrough(self):
+        # fix wave 2 contract: optional {(row_index, col_index): fmt} over
+        # the data grid EXCLUDING the header row (0-based)
+        spec = plain_table_spec("S", ["A", "B"], [[0.985, "10"]],
+                                cell_number_formats={(0, 0): "0.00%"})
+        assert spec["cell_number_formats"] == {(0, 0): "0.00%"}
+
+    def test_cell_number_formats_default_empty(self):
+        spec = plain_table_spec("S", ["A"], [["x"]])
+        assert spec["cell_number_formats"] == {}
+
+    def test_rows_still_sanitized_with_formats(self):
+        nan = float("nan")
+        spec = plain_table_spec("S", ["A"], [[nan]],
+                                cell_number_formats={(0, 0): "0.00%"})
+        assert spec["rows"] == [[""]]
+
 
 # --------------------------------------------------------------------------
 # insert_report_image

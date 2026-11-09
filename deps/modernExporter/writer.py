@@ -28,11 +28,9 @@
 Pure rendering of the spec dicts built by matrix.py (and later spec
 builders) — every data decision was made upstream. This module writes
 values (formulas verbatim, everything else through ``sanitize_cell``),
-styles, conditional formatting, the Excel Table, hidden mirror columns
-and print setup.
+styles, conditional formatting, the native AutoFilter, hidden mirror
+columns and print setup.
 """
-
-import re
 
 from openpyxl.formatting.rule import ColorScaleRule, FormulaRule
 from openpyxl.styles import Alignment, Border, PatternFill, Side
@@ -42,7 +40,6 @@ from openpyxl.utils import (
     range_boundaries,
 )
 from openpyxl.worksheet.properties import PageSetupProperties
-from openpyxl.worksheet.table import Table, TableColumn
 from openpyxl.worksheet.worksheet import Worksheet
 
 from deps.modernExporter.matrix import sanitize_cell
@@ -59,7 +56,6 @@ ROW_HEIGHT = 22
 
 MIRROR_HEADER_TEXT = "flags (do not edit)"
 GROUP_BORDER_HEX = "FF94A3B8"  # heavier side color on workflow boundaries
-FALLBACK_TABLE_NAME = "DUTSummary"
 
 # Fixed column geometry (2026-11-10): A=Test#, B=Test (wide, right-aligned),
 # C=Param (left-aligned). The DUT-sheet widths are pinned — no autofit.
@@ -171,7 +167,7 @@ def _render_metadata(ws, spec, theme):
 
 
 def _render_header(ws, spec, theme):
-    """Row 15: blue repeated header (part ID base); leads the Excel Table."""
+    """Row 15: blue repeated header (part ID base); leads the AutoFilter."""
     for column, value in enumerate(spec["secondary_header"], start=1):
         _write_cell(ws, HEADER_ROW, column, value, theme.header_font,
                     theme.header_alignment, border=theme.border,
@@ -311,7 +307,7 @@ def _add_fails_scale(ws, cf):
 # --------------------------------------------------------------------------
 
 def _hide_mirror_columns(ws, spec, theme):
-    """Hide the flag mirror columns; grey marker header outside the Table."""
+    """Hide the flag mirror columns; grey marker header outside the AutoFilter."""
     first = column_index_from_string(spec["flag_first_col"])
     for offset in range(len(spec["die_columns"])):
         column = first + offset
@@ -322,70 +318,16 @@ def _hide_mirror_columns(ws, spec, theme):
 
 
 # --------------------------------------------------------------------------
-# Excel Table
+# native AutoFilter (fix wave 2: replaces the Excel Table)
 # --------------------------------------------------------------------------
 
-def _sanitize_table_name(name):
-    """Excel table displayName: letter/underscore start, [A-Za-z0-9_] only."""
-    cleaned = re.sub(r"[^A-Za-z0-9_]", "_", str(name or ""))
-    if not cleaned:
-        cleaned = FALLBACK_TABLE_NAME
-    if cleaned[0].isdigit():
-        cleaned = "_" + cleaned
-    return cleaned
-
-
-def _unique_table_name(ws, base):
-    """Append _2, _3, ... when the name is already used in this workbook."""
-    taken = set()
-    for sheet in ws.parent.worksheets:
-        taken.update(sheet.tables)
-    if base not in taken:
-        return base
-    suffix = 2
-    while f"{base}_{suffix}" in taken:
-        suffix += 1
-    return f"{base}_{suffix}"
-
-
-def _unique_column_names(headers):
-    """Internal TableColumn names: unique, while visible text stays as-is.
-
-    Collision -> "{base} #{k}"; blank -> "DUT #n"; a leading digit gets an
-    underscore prefix (n is the 1-based column position within the table).
-    """
-    names = []
-    used = set()
-    for index, header in enumerate(headers, start=1):
-        base = "" if header is None else str(header)
-        if base == "":
-            base = f"DUT #{index}"
-        elif base[0].isdigit():
-            base = "_" + base
-        name = base
-        collision = 2
-        while name in used:
-            name = f"{base} #{collision}"
-            collision += 1
-        used.add(name)
-        names.append(name)
-    return names
-
-
-def _add_dut_table(ws, spec):
-    """Excel Table over the spec ref; explicit uniquified tableColumns."""
-    table_spec = spec.get("table")
-    if not table_spec:
-        return
-    columns = [
-        TableColumn(id=index, name=name)
-        for index, name in enumerate(
-            _unique_column_names(spec["secondary_header"]), start=1)
-    ]
-    display_name = _unique_table_name(
-        ws, _sanitize_table_name(table_spec["name"]))
-    ws.add_table(Table(displayName=display_name, ref=table_spec["ref"],
-                       tableColumns=columns))
+def _set_auto_filter(ws, spec):
+    """Native AutoFilter over the spec ref (duplicated header text is legal
+    — nothing for Excel to repair, unlike the removed Table whose
+    tableColumn names had to equal the header-cell text)."""
+    ref = (spec.get("auto_filter") or {}).get("ref")
+    if ref:
+        ws.auto_filter.ref = ref
 
 
 # --------------------------------------------------------------------------
@@ -410,9 +352,9 @@ def _set_column_widths(ws, spec):
 
 def render_matrix_sheet(ws: Worksheet, spec: dict, theme) -> None:
     """Render one DUT Summary spec dict onto ``ws`` (banner, metadata block,
-    repeated header, data rows, live conditional formatting, Excel Table,
-    hidden flag mirrors, pinned column widths, freeze / gridlines / print
-    setup)."""
+    repeated header, data rows, live conditional formatting, native
+    AutoFilter, hidden flag mirrors, pinned column widths, freeze /
+    gridlines / print setup)."""
     _render_banner(ws, spec, theme)
     _render_metadata(ws, spec, theme)
     _render_header(ws, spec, theme)
@@ -425,7 +367,7 @@ def render_matrix_sheet(ws: Worksheet, spec: dict, theme) -> None:
     _add_fails_scale(ws, cf)
 
     _hide_mirror_columns(ws, spec, theme)
-    _add_dut_table(ws, spec)
+    _set_auto_filter(ws, spec)
 
     ws.freeze_panes = spec["freeze_panes"]
     ws.sheet_view.showGridLines = False
@@ -435,9 +377,12 @@ def render_matrix_sheet(ws: Worksheet, spec: dict, theme) -> None:
 
 
 def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
-    """Render a plain table spec ``{"name","headers","rows","number_formats"?}``:
-    styled header row, thin borders, alternating banding, auto-filter,
-    frozen header, gridlines off. ``number_formats`` keys are column letters."""
+    """Render a plain table spec ``{"name","headers","rows","number_formats"?,
+    "cell_number_formats"?}``: styled header row, thin borders, alternating
+    banding, auto-filter, frozen header, gridlines off. ``number_formats``
+    keys are column letters; ``cell_number_formats`` (fix wave 2) maps
+    ``(row_index, col_index)`` — 0-based over the data grid EXCLUDING the
+    header row — to a per-cell number format applied after writing."""
     headers = spec["headers"]
     rows = spec.get("rows") or []
     formats = spec.get("number_formats") or {}
@@ -460,6 +405,11 @@ def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
             _write_cell(ws, 2 + offset, column, value, theme.body_font,
                         theme.body_alignment, border=theme.border, fill=band,
                         number_format=formats.get(get_column_letter(column)))
+
+    # per-cell formats after the cells exist (0-based data grid -> Excel)
+    for (row_index, col_index), fmt in (
+            spec.get("cell_number_formats") or {}).items():
+        ws.cell(row=2 + row_index, column=1 + col_index).number_format = fmt
 
     width = max([len(headers)] + [len(values) for values in rows])
     ws.auto_filter.ref = f"A1:{get_column_letter(width)}{1 + len(rows)}"

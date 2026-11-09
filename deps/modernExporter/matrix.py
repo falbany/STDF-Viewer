@@ -138,9 +138,9 @@ def build_dut_summary_spec(summaryTable, testTuples, order, dut_ids, sheet_name,
     `dut_ids` carries the full part ID per ordered DUT (blank entries get a
     "DUT #n" fallback for the repeated header).
 
-    Since 2026-11-10 the banner row labels are "DUT #n" (global numbering)
-    and the numeric cell formats are hardcoded scientific — no float format
-    is passed in anymore.
+    Since 2026-11-10 the banner row carries plain numeric DUT indices
+    (global numbering, fix wave 2) and the numeric cell formats are
+    hardcoded scientific — no float format is passed in anymore.
     """
     display_ids = [
         dut_id if dut_id not in (None, "") else f"DUT #{i + 1}"
@@ -432,13 +432,6 @@ def _row_groups(tests):
     return groups
 
 
-def _table_name(sheet_name, chunk_index):
-    sanitized = re.sub(r"[^A-Za-z0-9_]", "_", sheet_name)
-    if not sanitized:
-        sanitized = "DUTSummary"
-    return sanitized if chunk_index == 0 else f"{sanitized}_{chunk_index + 1}"
-
-
 def _build_chunk(summaryTable, tests, order, chunk_start, chunk_ids, display_ids,
                  sheet_name, base_labels, chunk_index):
     die_count = len(chunk_ids)
@@ -470,10 +463,12 @@ def _build_chunk(summaryTable, tests, order, chunk_start, chunk_ids, display_ids
 
     spec = {
         "name": sheet_name if chunk_index == 0 else f"{sheet_name} ({chunk_index + 1})",
-        # banner row 1: base labels + global "DUT #n" per die column (the
-        # raw part IDs stay on the repeated header and the Part ID row)
+        # banner row 1: base labels + plain numeric DUT indices (fix wave
+        # 2 — cell value is the int 1, 2, 3…; chunk-global numbering, so
+        # chunk 2 starts at its global offset; the raw part IDs stay on
+        # the repeated header and the Part ID row)
         "headers": list(base_labels) + [
-            f"DUT #{chunk_start + i + 1}" for i in range(die_count)
+            chunk_start + i + 1 for i in range(die_count)
         ],
         "metadata_rows": metadata_rows,
         "masked_rows": masked_rows,
@@ -508,8 +503,12 @@ def _build_chunk(summaryTable, tests, order, chunk_start, chunk_ids, display_ids
         },
     }
     if rows:
-        spec["table"] = {
+        # fix wave 2: native AutoFilter over the header..last-data range —
+        # the old Excel Table required every tableColumn name to equal the
+        # header-cell text, which the duplicated part-ID headers violate
+        # (Excel repaired /xl/tables/table1.xml on every open). Autofilters
+        # accept duplicated header text, so nothing needs repairing.
+        spec["auto_filter"] = {
             "ref": f"A{HEADER_ROW}:{last_die}{last_data_row}",
-            "name": _table_name(sheet_name, chunk_index),
         }
     return spec

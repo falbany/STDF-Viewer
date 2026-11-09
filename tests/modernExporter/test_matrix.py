@@ -350,10 +350,11 @@ class TestStructure:
         return build(base_tests(), base_duts())[0]
 
     def test_name_and_banner_labels(self):
-        # banner row 1: base labels + global "DUT #n" per die column
+        # banner row 1: base labels + plain numeric DUT indices (fix wave 2)
         spec = self.spec()
         assert spec["name"] == "DUT Summary"
-        assert spec["headers"] == BASE_HEADERS + ["DUT #1", "DUT #2", "DUT #3"]
+        assert spec["headers"] == BASE_HEADERS + [1, 2, 3]
+        assert all(isinstance(v, int) for v in spec["headers"][12:])
 
     def test_secondary_header_part_id_base(self):
         assert self.spec()["secondary_header"] == BASE_HEADERS + ["SN541", "SN542", "SN543"]
@@ -396,10 +397,11 @@ class TestStructure:
         duts = [(1, 0, make_dut_info(part_id="D0"))]
         assert build(tests, duts)[0]["row_groups"] == [0, 2]
 
-    def test_table(self):
-        table = self.spec()["table"]
-        assert table["ref"] == "A15:O18"
-        assert table["name"] == "DUT_Summary"
+    def test_auto_filter(self):
+        # fix wave 2: the Excel Table was replaced by a native AutoFilter
+        # over the same range (duplicated header text is legal for autofilters)
+        assert self.spec()["auto_filter"] == {"ref": "A15:O18"}
+        assert "table" not in self.spec()
 
     def test_conditional_formatting(self):
         cf = self.spec()["conditional_formatting"]
@@ -411,7 +413,8 @@ class TestStructure:
     def test_tr_translates_base_labels_only(self):
         spec = build(base_tests(), base_duts(), tr=str.upper)[0]
         assert spec["headers"][:12] == [h.upper() for h in BASE_HEADERS]
-        assert spec["headers"][12:] == ["DUT #1", "DUT #2", "DUT #3"]
+        # numeric banner labels are not translated (ints, fix wave 2)
+        assert spec["headers"][12:] == [1, 2, 3]
         assert spec["secondary_header"][12:] == ["SN541", "SN542", "SN543"]
         # metadata field names are not translated
         assert spec["metadata_rows"][0][2] == "File ID"
@@ -436,20 +439,20 @@ class TestChunking:
 
     def test_chunk_one_layout(self):
         spec = self.specs()[0]
-        assert spec["headers"][12:] == ["DUT #1", "DUT #2"]
+        assert spec["headers"][12:] == [1, 2]
         assert spec["flag_first_col"] == "P"  # die M..N, spacer O, mirror P..Q
         assert spec["rows"][0][6] == "=MIN(M16:N16)"
         assert spec["rows"][0][12:14] == [1.0, 1.2]
         assert spec["metadata_rows"][0][6] == "=MIN(M2:N2)"
+        assert spec["auto_filter"]["ref"] == "A15:N18"
 
     def test_chunk_two_references_own_columns(self):
         spec = self.specs()[1]
-        assert spec["headers"][12:] == ["DUT #3"]  # global banner numbering
+        assert spec["headers"][12:] == [3]  # global banner numbering (int)
         assert spec["rows"][0][6] == "=MIN(M16:M16)"
         assert spec["rows"][0][12:] == ["", "", ""]  # nan value, spacer, blank mirror
         assert spec["metadata_rows"][0][6] == "=MIN(M2:M2)"
-        assert spec["table"]["ref"] == "A15:M18"
-        assert spec["table"]["name"] == "X_2"
+        assert spec["auto_filter"]["ref"] == "A15:M18"
         assert spec["conditional_formatting"]["die_rules"]["flag_col_offset"] == 2
         assert spec["conditional_formatting"]["fails_max"] == 0.2 * 1
 
@@ -502,11 +505,11 @@ class TestColumnCapBoundaries:
                            + die_count - 1)
             assert mirror_last <= 16384                 # mirrors inside XFD
             assert spec["die_columns"][0] == "M"        # per-chunk restart
-        # per-chunk banner labels continue the global DUT numbering
-        assert specs[0]["headers"][12] == "DUT #1"
-        assert specs[0]["headers"][-1] == f"DUT #{DUT_CHUNK_CAP}"
-        assert specs[1]["headers"][12] == f"DUT #{DUT_CHUNK_CAP + 1}"
-        assert specs[1]["headers"][-1] == "DUT #16301"
+        # per-chunk banner labels continue the global DUT numbering (ints)
+        assert specs[0]["headers"][12] == 1
+        assert specs[0]["headers"][-1] == DUT_CHUNK_CAP
+        assert specs[1]["headers"][12] == DUT_CHUNK_CAP + 1
+        assert specs[1]["headers"][-1] == 16301
 
 
 # --------------------------------------------------------------------------
@@ -519,10 +522,11 @@ class TestZeroDutChunk:
     flag range); no-limit FAILS formulas degenerate onto the empty visible
     range instead."""
 
-    def test_empty_order_builds_valid_spec_without_table(self):
+    def test_empty_order_builds_valid_spec_without_auto_filter(self):
         spec = build([], [])[0]
         assert spec["die_columns"] == []
         assert spec["flag_first_col"] == "M"   # no mirrors past a zero-width die span
+        assert "auto_filter" not in spec
         assert "table" not in spec
         assert spec["headers"] == BASE_HEADERS
         assert spec["freeze_panes"] == "M16"
@@ -543,12 +547,13 @@ class TestZeroDutChunk:
 # --------------------------------------------------------------------------
 
 class TestEdgeCases:
-    def test_empty_test_tuples_omit_table(self):
+    def test_empty_test_tuples_omit_auto_filter(self):
         spec = build([], base_duts())[0]
         assert spec["rows"] == []
+        assert "auto_filter" not in spec
         assert "table" not in spec
         assert len(spec["metadata_rows"]) == 13
-        assert spec["headers"] == BASE_HEADERS + ["DUT #1", "DUT #2", "DUT #3"]
+        assert spec["headers"] == BASE_HEADERS + [1, 2, 3]
         assert spec["freeze_panes"] == "M16"
         assert spec["row_groups"] == []
 
@@ -560,8 +565,8 @@ class TestEdgeCases:
         tests = [dict(name="0_T/v", num=10, unit="V", llimit=0.0, hlimit=1.0,
                       rec=REC.PTR, data={1: ([1.0, 0.5], [0, 0])})]
         spec = build(tests, duts)[0]
-        # banner labels are DUT #n; secondary header keeps the part ID base
-        assert spec["headers"][12:] == ["DUT #1", "DUT #2"]
+        # banner labels are plain ints; secondary header keeps the part ID base
+        assert spec["headers"][12:] == [1, 2]
         assert spec["secondary_header"][12:] == ["SN1", "DUT #2"]
         rows = spec["metadata_rows"]
         assert rows[1][12:] == ["SN1_T25C", ""]   # Part ID: raw, blank stays blank

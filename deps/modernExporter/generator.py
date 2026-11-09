@@ -72,6 +72,37 @@ from deps.modernExporter.writer import (
 AUTOFIT_FACTOR = 1.1
 AUTOFIT_CAP = 60
 
+# File Info rows whose values must be written as numeric cells (fix wave 2).
+# Labels arrive TRANSLATED from the main window (getFileInfoForReport) with
+# a trailing space after the colon; matching runs on the whitespace-
+# normalized label, so it fires in the English locale — under other locales
+# the values degrade to their classic string cells (harmless).
+FILE_INFO_NUMERIC_LABELS = frozenset({
+    "Yield:", "DUTs Tested:", "DUTs Passed:", "DUTs Failed:",
+    "DUTs Superseded:", "DUTs Unknown:",
+})
+YIELD_FORMAT = "0.00%"
+
+
+def _numeric_file_info_cell(value):
+    """(cell_value, number_format) for one File Info metadata value.
+
+    Count values arrive as str(int) -> int cell (unconvertible strings are
+    kept); Yield arrives as "98.50%" -> 0.985 with the "0.00%" display
+    format (numeric AND showing 98.50%); "?" (no DUTs) and any
+    unconvertible value stay strings.
+    """
+    text = str(value)
+    if text.endswith("%"):
+        try:
+            return float(text[:-1]) / 100, YIELD_FORMAT
+        except ValueError:
+            return value, None
+    try:
+        return int(text), None
+    except ValueError:
+        return value, None
+
 
 class ModernReportGenerator(reportGenerator):
     def __init__(self, signals: signals, mutex: QtCore.QMutex,
@@ -134,9 +165,36 @@ class ModernReportGenerator(reportGenerator):
         if self.forceQuit:
             return
 
-        spec = plain_table_spec(self.tr("File Info"),
-                                [self.tr("Property Name"), self.tr("Value")],
-                                dataTable, self.tr)
+        # numeric metadata rows (fix wave 2): labels are translated
+        # upstream with a trailing space after the colon — match on the
+        # whitespace-normalized label; count values become int cells, Yield
+        # becomes a 0.xx fraction with the "0.00%" display format
+        cell_number_formats: dict[tuple[int, int], str] = {}
+        rows = []
+        for row_index, row in enumerate(dataTable):
+            label = row[0] if row else ""
+            if " ".join(str(label).split()) not in FILE_INFO_NUMERIC_LABELS:
+                rows.append(row)
+                continue
+            converted = [label]
+            for col_index, value in enumerate(row[1:], start=1):
+                cell, fmt = _numeric_file_info_cell(value)
+                converted.append(cell)
+                if fmt is not None:
+                    cell_number_formats[(row_index, col_index)] = fmt
+            rows.append(converted)
+
+        # header spans every selected file column (fix wave 2): one
+        # "File #n" per selected fid, position-matched with
+        # getFileInfoForReport's per-file value order — the labels carry
+        # the ACTUAL file ids (selecting files 0 and 2 -> "File #1",
+        # "File #3"); applied unconditionally (single file -> "File #1")
+        spec = plain_table_spec(
+            self.tr("File Info"),
+            [self.tr("Property Name")]
+            + [f"File #{fid + 1}" for fid in self.selectedFiles],
+            rows, self.tr,
+            cell_number_formats=cell_number_formats)
         render_plain_table(InfoSheet, spec, self._theme)
         self._autofit_columns(InfoSheet)
 

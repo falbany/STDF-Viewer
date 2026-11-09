@@ -68,8 +68,8 @@ def make_rows():
 def make_matrix_spec(**overrides):
     spec = {
         "name": "DUT Summary",
-        # banner row 1: base labels + global DUT #n per die column
-        "headers": BASE_HEADERS + ["DUT #1", "DUT #2", "DUT #3"],
+        # banner row 1: base labels + plain numeric DUT indices (fix wave 2)
+        "headers": BASE_HEADERS + [1, 2, 3],
         "metadata_rows": make_metadata_rows(),
         "masked_rows": [8],  # "Wafer" row
         # repeated header row 15: part ID base (duplicated + blank)
@@ -91,7 +91,7 @@ def make_matrix_spec(**overrides):
             "fails_range": "L16:L18",
             "fails_max": 0.6,
         },
-        "table": {"ref": "A15:O18", "name": "DUT Summary"},
+        "auto_filter": {"ref": "A15:O18"},
     }
     spec.update(overrides)
     return spec
@@ -131,7 +131,7 @@ class TestMatrixLayout:
     def test_banner_row_values_and_style(self):
         ws = self.wb()["DUT Summary"]
         assert ws["A1"].value == "Test#"
-        assert ws["M1"].value == "DUT #1"  # banner labels DUT #n, not part IDs
+        assert ws["M1"].value == 1  # banner labels are plain numeric DUT indices
         assert ws["A1"].fill.fgColor.rgb == "FFCBD5E1"
         assert ws.row_dimensions[1].height == 22
 
@@ -386,48 +386,26 @@ class TestMatrixRowGroups:
 
 
 # --------------------------------------------------------------------------
-# Matrix sheet: Excel Table
+# Matrix sheet: native AutoFilter (fix wave 2 — replaces the Excel Table)
 # --------------------------------------------------------------------------
 
-class TestMatrixTable:
+class TestMatrixAutoFilter:
     def wb(self):
         return roundtrip(render())
 
-    def test_table_unique_internal_names_under_duplicate_headers(self):
+    def test_auto_filter_ref_over_full_range_with_duplicate_headers(self):
+        # the root-cause fix for Excel repairing /xl/tables/table1.xml: a
+        # native AutoFilter over the same range. Duplicated header text
+        # ("SN541" twice) is legal for autofilters — the ref still covers
+        # the full header..last-data range, and no Excel Table is written.
         ws = self.wb()["DUT Summary"]
-        assert list(ws.tables) == ["DUT_Summary"]
-        table = ws.tables["DUT_Summary"]
-        assert table.ref == "A15:O18"
-        assert [c.name for c in table.tableColumns] == [
-            "Test#", "Test", "Param", "Unit", "SpecMin", "SpecMax",
-            "Min", "Max", "Mean", "STD", "Cpk", "FAILS",
-            "SN541", "SN541 #2", "DUT #15",
-        ]
-        names = [c.name for c in table.tableColumns]
-        assert len(names) == len(set(names))  # uniqueness is the point
-        # visible header text untouched: duplicates + blank survive
+        assert ws.auto_filter.ref == "A15:O18"
+        assert list(ws.tables) == []   # no /xl/tables/table1.xml anymore
         assert ws["M15"].value == "SN541"
         assert ws["N15"].value == "SN541"
+        assert ws["A15"].value == "Test#"
 
-    def test_table_name_sanitized_and_collision_safe(self):
-        spec = make_matrix_spec()
-        spec["table"] = {"ref": "A15:O18", "name": "1 DUT/Summary"}
-        wb = Workbook()
-        ws1 = wb.active
-        ws1.title = "One"
-        render_matrix_sheet(ws1, spec, ModernTheme())
-        # same sanitized name again on a second sheet -> suffix, no ValueError
-        ws2 = wb.create_sheet("Two")
-        spec2 = make_matrix_spec()
-        spec2["table"] = {"ref": "A15:O18", "name": "1 DUT/Summary"}
-        render_matrix_sheet(ws2, spec2, ModernTheme())
-        reloaded = roundtrip(wb)
-        names1 = list(reloaded["One"].tables)
-        names2 = list(reloaded["Two"].tables)
-        assert names1 == ["_1_DUT_Summary"]
-        assert names2 == ["_1_DUT_Summary_2"]
-
-    def test_no_table_without_data_rows(self):
+    def test_no_auto_filter_without_spec_key(self):
         spec = make_matrix_spec(rows=[], row_groups=[],
                                 conditional_formatting={
                                     "die_rules": {"range": "M16:M16", "first_die": "M",
@@ -436,8 +414,9 @@ class TestMatrixTable:
                                     "fails_range": "L16:L16",
                                     "fails_max": 0.2,
                                 })
-        spec.pop("table")
+        spec.pop("auto_filter")
         ws = roundtrip(render(spec))["DUT Summary"]
+        assert ws.auto_filter.ref is None
         assert list(ws.tables) == []
 
 
@@ -522,6 +501,27 @@ class TestPlainTable:
         assert ws["B2"].number_format == "0.000"
         assert ws["A2"].number_format == "General"
 
+    def test_cell_number_formats_applied_after_writing(self):
+        # fix wave 2 contract: per-cell {(row, col): fmt} applied after the
+        # cells are written (used by the File Info Yield row)
+        spec = self.spec()
+        spec["rows"] = [[0.985, 10, "x"]]
+        spec["cell_number_formats"] = {(0, 0): "0.00%"}
+        ws = self.render_and_reload(spec)
+        assert ws["A2"].value == 0.985
+        assert ws["A2"].number_format == "0.00%"
+        assert ws["B2"].number_format == "General"
+        assert ws["A1"].number_format == "General"   # header untouched
+
+    def test_cell_number_formats_indices_zero_based_data_grid(self):
+        # (row_index, col_index) is 0-based over the data grid EXCLUDING the
+        # header row: (1, 2) -> Excel C3
+        spec = self.spec()
+        spec["cell_number_formats"] = {(1, 2): "0.00%"}
+        ws = self.render_and_reload(spec)
+        assert ws["C3"].number_format == "0.00%"
+        assert ws["C2"].number_format == "General"
+
     def test_illegal_characters_sanitized(self):
         spec = self.spec()
         spec["rows"][0][0] = "bad\x00name"
@@ -559,6 +559,6 @@ class TestRealSpecIntegration:
         assert ws["B16"].value == "0_TXCC"
         assert ws["D18"].value == "P/F"
         assert ws["M15"].value == "SN541"
-        assert ws["M1"].value == "DUT #1"
-        assert list(ws.tables) == ["DUT_Summary"]
+        assert ws["M1"].value == 1
+        assert ws.auto_filter.ref == "A15:O18"
         assert cf_block(ws, "M16:O18")  # die-range CF present on the real spec

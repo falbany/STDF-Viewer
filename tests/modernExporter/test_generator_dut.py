@@ -178,7 +178,7 @@ class TestDutSummarySheet:
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
         assert ws["A1"].value == "Test#"              # Test# leads the base labels
-        assert ws["M1"].value == "DUT #1"             # banner labels DUT #n
+        assert ws["M1"].value == 1                    # banner labels are plain ints
         assert ws["A1"].fill.fgColor.rgb == "FFCBD5E1"
 
     def test_repeated_header_row_fifteen(self, generated):
