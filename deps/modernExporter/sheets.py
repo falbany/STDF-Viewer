@@ -1,0 +1,80 @@
+"""
+#
+# sheets.py - modernExporter package - STDF Viewer
+#
+# Author: falbany (fork)
+# Created Date: November 9th 2026
+# -----
+# Last Modified: Mon Nov 9 2026
+# Modified By: falbany (fork)
+# -----
+# Copyright (c) 2026 falbany (fork)
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+"""
+
+"""Plain-table spec builders and scaled image embedding.
+
+``plain_table_spec`` is pure spec construction for the Task 5 renderer's
+``render_plain_table`` (headers translated, every cell sanitized, generator
+rows materialized); ``insert_report_image`` embeds a chart PNG scaled to a
+target print width and returns the sheet rows it spans, mirroring the
+classic exporter's spacing math (uic_stdExporter.py).
+"""
+
+from io import BytesIO
+from math import ceil
+
+from openpyxl.drawing.image import Image
+from openpyxl.worksheet.worksheet import Worksheet
+
+from deps.modernExporter.matrix import sanitize_cell
+
+PX_PER_INCH = 96
+ROW_HEIGHT_IN = 0.21  # one default Excel row ≈ 0.21 inch (classic spacing math)
+
+
+def plain_table_spec(sheet_name: str, headers: list[str], rows: list[list],
+                     tr=lambda s: s) -> dict:
+    """Build a plain-table spec ``{"name","headers","rows"}`` for
+    ``render_plain_table``.
+
+    Headers are translated with ``tr`` (the sheet name arrives already
+    translated from the caller); every row cell passes through
+    ``sanitize_cell`` (NaN/None -> blank, illegal XML chars stripped).
+    ``rows`` may be a generator — it is materialized to a list.
+    """
+    return {
+        "name": sheet_name,
+        "headers": [tr(header) for header in headers],
+        "rows": [[sanitize_cell(cell) for cell in row] for row in rows],
+    }
+
+
+def insert_report_image(ws: Worksheet, image_io: BytesIO, row: int,
+                        target_width_in: float = 12.0) -> int:
+    """Embed ``image_io`` (PNG) at column A of 0-based ``row``, scaled to
+    ``target_width_in`` inches wide with the aspect ratio preserved.
+
+    Returns the number of sheet rows the scaled image spans —
+    ``ceil((scaled_height_px / 96) / 0.21)`` — mirroring the classic
+    exporter's post-image row advance so following content clears the image.
+    """
+    image = Image(image_io)
+    scale = (target_width_in * PX_PER_INCH) / image.width
+    image.width = int(target_width_in * PX_PER_INCH)
+    image.height = int(image.height * scale)
+    image.anchor = f"A{row + 1}"  # 0-based row -> 1-based Excel anchor
+    ws.add_image(image)
+    return ceil((image.height / PX_PER_INCH) / ROW_HEIGHT_IN)
