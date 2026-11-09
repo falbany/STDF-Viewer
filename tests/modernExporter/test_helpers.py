@@ -13,7 +13,6 @@ from deps.modernExporter.helpers import (
     cpk_formula,
     die_col,
     fails_formula_flags,
-    fails_formula_ftr,
     fails_formula_limits,
     flag_value,
     metadata_stat_formulas,
@@ -209,11 +208,12 @@ class TestFailsFormulas:
             == '=SUMPRODUCT((Q17:S17<>"")*(Q17:S17=1))'
         )
 
-    def test_ftr_variant_over_visible_range(self):
-        assert (
-            fails_formula_ftr(17, "M", "AZ")
-            == '=SUMPRODUCT((M17:AZ17<>"")*(M17:AZ17=1))'
-        )
+    def test_ftr_variant_removed(self):
+        # third wave: FTR rows carry real limits and use the limits variant;
+        # the FTR-specific formula was removed from helpers (grep: no refs)
+        import deps.modernExporter.helpers as helpers_module
+
+        assert not hasattr(helpers_module, "fails_formula_ftr")
 
 
 class TestParseTestTime:
@@ -276,10 +276,12 @@ class TestParseBin:
 
 
 class TestMetadataStatFormulas:
-    def test_returns_min_max_mean_triple(self):
-        assert metadata_stat_formulas(17, "M", "AZ") == (
+    def test_mean_true_returns_min_max_mean_triple(self):
+        assert metadata_stat_formulas(17, "M", "AZ", mean=True) == (
             "=MIN(M17:AZ17)", "=MAX(M17:AZ17)", "=AVERAGE(M17:AZ17)")
 
-    def test_other_row(self):
-        assert metadata_stat_formulas(20, "M", "O") == (
-            "=MIN(M20:O20)", "=MAX(M20:O20)", "=AVERAGE(M20:O20)")
+    def test_mean_false_drops_average(self):
+        # third wave: only Temperature keeps a Mean cell — other numeric
+        # metadata rows take the (MIN, MAX) pair and pad Mean with a dash
+        assert metadata_stat_formulas(20, "M", "O", mean=False) == (
+            "=MIN(M20:O20)", "=MAX(M20:O20)")

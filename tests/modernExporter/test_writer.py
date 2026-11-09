@@ -11,8 +11,8 @@ from openpyxl import Workbook, load_workbook
 from deps.modernExporter.theme import ModernTheme
 from deps.modernExporter.writer import render_matrix_sheet, render_plain_table
 
-BASE_HEADERS = ["Test#", "Test", "Param", "Unit", "SpecMin", "SpecMax",
-                "Min", "Max", "Mean", "STD", "Cpk", "FAILS"]
+BASE_HEADERS = ["Test#", "Test Name", "Param", "Unit", "SpecMin", "SpecMax",
+                "Min", "Max", "Mean", "St. Dev.", "Cpk", "Fails"]
 
 # Layout (2026-11-10): banner 1, metadata 2..14, header 15, data 16+.
 DATA_START = 16
@@ -24,8 +24,8 @@ CPK_16 = '=IFERROR(MIN((F16-I16)/(3*J16),(I16-E16)/(3*J16)),"")'
 CPK_17 = '=IFERROR(MIN((F17-I17)/(3*J17),(I17-E17)/(3*J17)),"")'
 CPK_18 = '=IFERROR(MIN((F18-I18)/(3*J18),(I18-E18)/(3*J18)),"")'
 FAILS_LIMITS_16 = '=SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16)))'
+FAILS_LIMITS_18 = '=SUMPRODUCT((M18:O18<>"")*((E18<>"")*(M18:O18<E18)+(F18<>"")*(M18:O18>F18)))'
 FAILS_FLAGS_17 = '=SUMPRODUCT((Q17:S17<>"")*(Q17:S17=1))'
-FAILS_FTR_18 = '=SUMPRODUCT((M18:O18<>"")*(M18:O18=1))'
 
 METADATA_NAMES = ["File ID", "Part ID", "Part TXT", "Temperature",
                   "HW Bin", "SW Bin", "Wafer", "X", "Y", "Head-Site",
@@ -35,16 +35,17 @@ METADATA_NAMES = ["File ID", "Part ID", "Part TXT", "Temperature",
 def make_metadata_rows():
     rows = []
     for i, name in enumerate(METADATA_NAMES):
-        # the numeric File ID row carries live MIN/MAX/MEAN formulas like the
-        # real spec builder; text rows are all dashes
+        # the numeric File ID row carries live MIN/MAX formulas like the
+        # real spec builder (third wave: no Mean outside Temperature);
+        # text rows are all dashes
         if name == "File ID":
-            stats = ("=MIN(M2:O2)", "=MAX(M2:O2)", "=AVERAGE(M2:O2)")
+            stats = ["=MIN(M2:O2)", "=MAX(M2:O2)", "-", "-", "-", "-"]
             unit = "INT"
         else:
-            stats = ("-", "-", "-")
+            stats = ["-"] * 6
             unit = "TEXT"
         rows.append([10000 + i, "METADATA", name, unit, "-", "-",
-                     stats[0], stats[1], stats[2], "-", "-", "-", 1, 2, 3])
+                     *stats, 1, 2, 3])
     return rows
 
 
@@ -58,10 +59,11 @@ def make_rows():
         [11, "1_RX", "Margin", "dB", "", "",
          "=MIN(M17:O17)", "=MAX(M17:O17)", "=AVERAGE(M17:O17)", "=STDEV(M17:O17)",
          CPK_17, FAILS_FLAGS_17, 2.0, 0.1, 3.0, "", 0, 1, 0],
-        # FTR row (row 18): Unit "P/F", die cells carry 0/1 flags
-        [12, "2_Func", "PAT_TOP", "P/F", "", "",
+        # FTR row (row 18): Unit "P/F", synthetic real limits 0/0.999999
+        # (third wave), die cells carry 0/1 flags
+        [12, "2_Func", "PAT_TOP", "P/F", 0.0, 0.999999,
          "=MIN(M18:O18)", "=MAX(M18:O18)", "=AVERAGE(M18:O18)", "=STDEV(M18:O18)",
-         CPK_18, FAILS_FTR_18, 0, 1, 0, "", 0, 1, 0],
+         CPK_18, FAILS_LIMITS_18, 0, 1, 0, "", 0, 1, 0],
     ]
 
 
@@ -79,8 +81,8 @@ def make_matrix_spec(**overrides):
         "number_formats": {"M": SCIENTIFIC, "N": SCIENTIFIC, "O": SCIENTIFIC,
                            "SpecMin": SCIENTIFIC, "SpecMax": SCIENTIFIC,
                            "Min": SCIENTIFIC, "Max": SCIENTIFIC,
-                           "Mean": SCIENTIFIC, "STD": SCIENTIFIC,
-                           "FAILS": "0", "Cpk": "0.00", "Test#": "0"},
+                           "Mean": SCIENTIFIC, "St. Dev.": SCIENTIFIC,
+                           "Fails": "0", "Cpk": "0.00", "Test#": "0"},
         "freeze_panes": "M16",
         "row_groups": [0, 1, 2],
         "die_columns": ["M", "N", "O"],
@@ -148,7 +150,7 @@ class TestMatrixLayout:
         ws = self.wb()["DUT Summary"]
         assert ws["G16"].value == "=MIN(M16:O16)"
         assert ws["K17"].value == CPK_17
-        assert ws["L18"].value == FAILS_FTR_18
+        assert ws["L18"].value == FAILS_LIMITS_18
 
     def test_metadata_label_font_and_formulas(self):
         ws = self.wb()["DUT Summary"]
@@ -195,11 +197,12 @@ class TestMatrixLayout:
         assert ws["G16"].number_format == SCIENTIFIC   # Min
         assert ws["H17"].number_format == SCIENTIFIC   # Max
         assert ws["I17"].number_format == SCIENTIFIC   # Mean
-        assert ws["J17"].number_format == SCIENTIFIC   # STD
+        assert ws["J17"].number_format == SCIENTIFIC   # St. Dev.
         assert ws["K16"].number_format == "0.00"       # Cpk
-        assert ws["L16"].number_format == "0"          # FAILS
+        assert ws["L16"].number_format == "0"          # Fails
         assert ws["M16"].number_format == SCIENTIFIC   # parametric die cell
         assert ws["O17"].number_format == SCIENTIFIC
+        assert ws["E18"].number_format == SCIENTIFIC   # FTR synthetic SpecMin
         assert ws["M18"].number_format == "0"          # FTR (P/F) die cell
         assert ws["O18"].number_format == "0"
 
@@ -313,6 +316,10 @@ class TestMatrixConditionalFormatting:
         return roundtrip(render())
 
     def test_die_range_rules_exact_order_and_stop(self):
+        # third wave: the P/F visible-flag rule is GONE — FTR rows now carry
+        # real limits (0 / 0.999999), so the limit rules fire naturally on
+        # them. Remaining set: blank-neutral, fail-low, fail-high,
+        # flag-mirror, pass.
         ws = self.wb()["DUT Summary"]
         rules = cf_block(ws, "M16:O18")
         assert len(rules) >= 3
@@ -320,7 +327,6 @@ class TestMatrixConditionalFormatting:
             ['M16=""'],
             ['AND(M16<>"",$E16<>"",M16<$E16)'],
             ['AND(M16<>"",$F16<>"",M16>$F16)'],
-            ['AND(M16=1,$E16="",$F16="",LEFT($D16,3)="P/F")'],
             ['AND(Q16=1,$E16="",$F16="")'],
             ['M16<>""'],
         ]
@@ -329,7 +335,16 @@ class TestMatrixConditionalFormatting:
         assert priorities == sorted(priorities)  # insertion order = priority
         fills = [r.dxf.fill.fgColor.rgb for r in rules]
         assert fills == ["FFFFF3CD", "FFFFCCCC", "FFFFCCCC",
-                         "FFFFCCCC", "FFFFCCCC", "FFCCFFCC"]
+                         "FFFFCCCC", "FFCCFFCC"]
+
+    def test_no_pf_visible_flag_rule_anywhere(self):
+        # the removed rule keyed on LEFT($D...,3)="P/F" must not exist in
+        # any die-range rule set (FTR rows are limit-styled now)
+        ws = self.wb()["DUT Summary"]
+        for cf in ws.conditional_formatting:
+            for rule in cf.rules:
+                for formula in rule.formula:
+                    assert "P/F" not in formula
 
     def test_cpk_bands(self):
         ws = self.wb()["DUT Summary"]
@@ -500,6 +515,49 @@ class TestPlainTable:
         ws = self.render_and_reload(spec)
         assert ws["B2"].number_format == "0.000"
         assert ws["A2"].number_format == "General"
+
+    def test_column_fills_override_banding(self):
+        # third wave contract: {"column_letter": hex6} paints a static fill
+        # on the DATA cells of those columns, applied after banding so it
+        # wins (the plain-table counterpart of the DUT Summary's yellow
+        # SpecMin/SpecMax); header cells keep their own blue fill
+        spec = self.spec()
+        spec["column_fills"] = {"B": "FFF3CD"}
+        ws = self.render_and_reload(spec)
+        assert ws["B2"].fill.fgColor.rgb == "FFFFF3CD"  # banded row overridden
+        assert ws["B3"].fill.fgColor.rgb == "FFFFF3CD"  # unbanded row filled
+        assert ws["B4"].fill.fgColor.rgb == "FFFFF3CD"
+        assert ws["A2"].fill.fgColor.rgb == "FFE9EEF6"  # banding elsewhere
+        assert ws["C2"].fill.fgColor.rgb == "FFE9EEF6"
+        assert ws["A3"].fill.patternType is None
+        assert ws["B1"].fill.fgColor.rgb == "FF1E40AF"  # header untouched
+
+    def test_column_fills_with_number_formats(self):
+        # the Test Statistics SpecMin/SpecMax pairing: scientific format on
+        # the same columns that carry the static fill
+        spec = self.spec()
+        spec["number_formats"] = {"B": "0.00E+00"}
+        spec["column_fills"] = {"B": "FFF3CD"}
+        ws = self.render_and_reload(spec)
+        assert ws["B2"].number_format == "0.00E+00"
+        assert ws["B2"].fill.fgColor.rgb == "FFFFF3CD"
+        assert ws["B1"].number_format == "General"      # header untouched
+
+    def test_no_column_fills_keeps_banding(self):
+        # absent key -> exactly the pre-wave behavior
+        ws = self.render_and_reload()
+        assert ws["B2"].fill.fgColor.rgb == "FFE9EEF6"
+        assert ws["B3"].fill.patternType is None
+
+    def test_column_fills_ignore_short_rows(self):
+        # a row shorter than the fill column gets no phantom filled cell
+        spec = self.spec()
+        spec["rows"][1] = ["b.stdf", 4]          # C cell missing in row 2
+        spec["column_fills"] = {"C": "FFF3CD"}
+        ws = self.render_and_reload(spec)
+        assert ws["C2"].fill.fgColor.rgb == "FFFFF3CD"
+        assert ws["C3"].fill.patternType is None
+        assert ws["C4"].fill.fgColor.rgb == "FFFFF3CD"
 
     def test_cell_number_formats_applied_after_writing(self):
         # fix wave 2 contract: per-cell {(row, col): fmt} applied after the

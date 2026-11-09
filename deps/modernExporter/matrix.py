@@ -41,7 +41,6 @@ from deps.modernExporter.helpers import (
     cpk_formula,
     die_col,
     fails_formula_flags,
-    fails_formula_ftr,
     fails_formula_limits,
     flag_value,
     metadata_stat_formulas,
@@ -64,15 +63,25 @@ HEADER_ROW = 15
 DATA_START = 16
 
 # Fixed A..L columns of the DUT Summary sheet (2026-11-10: Test# permuted
-# from C to A; only A/B/C move, so every formula's column letters stay put).
+# from C to A; only A/B/C move, so every formula's column letters stay put.
+# Third wave renames: "Test" -> "Test Name" (consistency with the Test
+# Statistics sheet), "STD" -> "St. Dev.", "FAILS" -> "Fails").
 BASE_HEADERS = (
-    "Test#", "Test", "Param", "Unit", "SpecMin", "SpecMax",
-    "Min", "Max", "Mean", "STD", "Cpk", "FAILS",
+    "Test#", "Test Name", "Param", "Unit", "SpecMin", "SpecMax",
+    "Min", "Max", "Mean", "St. Dev.", "Cpk", "Fails",
 )
 FORMULA_COLUMNS = [6, 7, 8, 9, 10, 11]  # G..L carry formulas
 
 # Synthetic Test# of the metadata block.
 METADATA_TEST_NUM_BASE = 10000
+
+# FTR rows carry synthetic real limits (third wave) so the limit CF rules
+# and the limit-variant FAILS formula fire like on parametric rows: a die
+# cell of 1 fails the high comparison, 0 passes, blank stays neutral.
+# NOTE: 0.999999 DISPLAYS AS "1.00E+00" under the scientific 0.00E+00
+# format (2-decimal rounding) — accepted, see design addendum §13.
+FTR_SPEC_MIN = 0.0
+FTR_SPEC_MAX = 0.999999
 
 # Scientific format of the numeric data cells (2026-11-10: E..J stat columns
 # and parametric die cells; hardcoded, decoupled from the exporter settings).
@@ -93,21 +102,22 @@ MASK_ALWAYS = "always"
 # Test Time, HW Bin, SW Bin, Wafer ID, (X, Y), DUT Flag]; None marks the
 # derived row (Temperature = parsed from the raw Part ID). Test Time and
 # HW/SW Bin arrive as DB-shaped strings ("123 ms" / "Bin 1") and parse to
-# bare numerics.
+# bare numerics. `mean` (third wave) keeps the live AVERAGE formula —
+# True only for Temperature; other numeric rows show MIN/MAX and a dash.
 METADATA_ROWS = (
-    {"name": "File ID", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 0},
-    {"name": "Part ID", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 1},
-    {"name": "Part TXT", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 2},
-    {"name": "Temperature", "unit_type": "CELSIUS", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": None},
-    {"name": "HW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 6},
-    {"name": "SW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 7},
-    {"name": "Wafer", "unit_type": "INT", "numeric": True, "mask": MASK_BLANK, "dutinfo_index": 8},
-    {"name": "X", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9},
-    {"name": "Y", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9},
-    {"name": "Head-Site", "unit_type": "TEXT", "numeric": False, "mask": MASK_ALWAYS, "dutinfo_index": 3},
-    {"name": "Tests Executed", "unit_type": "INT", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 4},
-    {"name": "Test Time", "unit_type": "ms", "numeric": True, "mask": MASK_ALWAYS, "dutinfo_index": 5},
-    {"name": "DUT Flag", "unit_type": "TEXT", "numeric": False, "mask": MASK_ALWAYS, "dutinfo_index": 10},
+    {"name": "File ID", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 0, "mean": False},
+    {"name": "Part ID", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 1, "mean": False},
+    {"name": "Part TXT", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 2, "mean": False},
+    {"name": "Temperature", "unit_type": "CELSIUS", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": None, "mean": True},
+    {"name": "HW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 6, "mean": False},
+    {"name": "SW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 7, "mean": False},
+    {"name": "Wafer", "unit_type": "INT", "numeric": True, "mask": MASK_BLANK, "dutinfo_index": 8, "mean": False},
+    {"name": "X", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9, "mean": False},
+    {"name": "Y", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9, "mean": False},
+    {"name": "Head-Site", "unit_type": "TEXT", "numeric": False, "mask": MASK_ALWAYS, "dutinfo_index": 3, "mean": False},
+    {"name": "Tests Executed", "unit_type": "INT", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 4, "mean": False},
+    {"name": "Test Time", "unit_type": "ms", "numeric": True, "mask": MASK_ALWAYS, "dutinfo_index": 5, "mean": False},
+    {"name": "DUT Flag", "unit_type": "TEXT", "numeric": False, "mask": MASK_ALWAYS, "dutinfo_index": 10, "mean": False},
 )
 
 # First two integers inside a preformatted "(X, Y)" string.
@@ -346,9 +356,11 @@ def _is_masked(meta, values):
 def _metadata_block(summaryTable, chunk_cells, first_die, last_die):
     """The 13 metadata row-lists plus the absolute Excel rows to hide.
 
-    Numeric rows carry live MIN/MAX/MEAN over their die range (Mean added
-    2026-11-10); text rows are all dashes. The row shape puts Test# first:
-    [test#, "METADATA", name, unit, "-", "-", MIN, MAX, MEAN, "-", "-", "-"].
+    Numeric rows carry live MIN/MAX over their die range; only the
+    Temperature row still keeps a live MEAN (third wave 2026-11-10 — every
+    other numeric row pads the Mean cell with a dash); text rows are all
+    dashes. The row shape puts Test# first:
+    [test#, "METADATA", name, unit, "-", "-", MIN, MAX, MEAN?, "-", "-", "-"].
     """
     rows = []
     masked_rows = []
@@ -361,8 +373,10 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die):
         prefix = [METADATA_TEST_NUM_BASE + position, "METADATA", meta["name"],
                   meta["unit_type"], "-", "-"]
         if meta["numeric"]:
-            prefix.extend(metadata_stat_formulas(excel_row, first_die, last_die))
-            prefix.extend(["-", "-", "-"])
+            prefix.extend(metadata_stat_formulas(excel_row, first_die,
+                                                 last_die, mean=meta["mean"]))
+            prefix.extend(["-", "-", "-"] if meta["mean"]
+                          else ["-", "-", "-", "-"])
         else:
             prefix.extend(["-"] * 6)
         rows.append(prefix + values)
@@ -396,18 +410,26 @@ def _test_rows(summaryTable, tests, chunk_cells, first_die, last_die,
             else:
                 die_cells.append(_die_cell(value))
         if test["is_ftr"]:
-            fails = fails_formula_ftr(row_index, first_die, last_die)
+            # third wave: FTR rows always take the limits path with the
+            # synthetic 0/0.999999 cells — the limit CF rules and the
+            # limit-variant FAILS formula fire like on parametric rows
+            # (die cell 1 fails high, 0 passes, blank neutral)
+            spec_min, spec_max = FTR_SPEC_MIN, FTR_SPEC_MAX
+            fails = fails_formula_limits(row_index, first_die, last_die)
         elif test["has_limits"]:
+            spec_min = _limit_cell(test["llimit"])
+            spec_max = _limit_cell(test["hlimit"])
             fails = fails_formula_limits(row_index, first_die, last_die)
         else:
+            spec_min = spec_max = ""
             fails = fails_formula_flags(row_index, mirror_first, mirror_last)
         rows.append([
             test["num"],
             test["test"],
             test["param"],
             "P/F" if test["is_ftr"] else test["unit"],
-            "" if test["is_ftr"] else _limit_cell(test["llimit"]),
-            "" if test["is_ftr"] else _limit_cell(test["hlimit"]),
+            spec_min,
+            spec_max,
             stat_formula("MIN", row_index, first_die, last_die),
             stat_formula("MAX", row_index, first_die, last_die),
             stat_formula("AVERAGE", row_index, first_die, last_die),
@@ -481,9 +503,9 @@ def _build_chunk(summaryTable, tests, order, chunk_start, chunk_ids, display_ids
             "Min": SCIENTIFIC_FORMAT,
             "Max": SCIENTIFIC_FORMAT,
             "Mean": SCIENTIFIC_FORMAT,
-            "STD": SCIENTIFIC_FORMAT,
+            "St. Dev.": SCIENTIFIC_FORMAT,
             **{die_col(i): SCIENTIFIC_FORMAT for i in range(die_count)},
-            "FAILS": "0",
+            "Fails": "0",
             "Cpk": "0.00",
             "Test#": "0",
         },

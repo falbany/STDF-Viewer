@@ -45,6 +45,7 @@ mirroring the classic cursor gaps and progress cadence.
 """
 
 from itertools import product
+import re
 
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
@@ -57,6 +58,7 @@ from deps.uic_stdExporter import (
     reportGenerator,
     signals,
 )
+from deps.modernExporter.helpers import split_test_name
 from deps.modernExporter.matrix import build_dut_summary_spec
 from deps.modernExporter.sheets import insert_report_image, plain_table_spec
 from deps.modernExporter.theme import ModernTheme
@@ -64,6 +66,7 @@ from deps.modernExporter.writer import (
     render_matrix_sheet,
     render_plain_table,
     write_body_cell,
+    write_plain_row,
 )
 
 # auto-fit column width = max content length * 1.1, capped (classic uses the
@@ -82,6 +85,149 @@ FILE_INFO_NUMERIC_LABELS = frozenset({
     "DUTs Superseded:", "DUTs Unknown:",
 })
 YIELD_FORMAT = "0.00%"
+
+
+# --------------------------------------------------------------------------
+# Test Statistics transforms (third improvement wave, 2026-11-10)
+# --------------------------------------------------------------------------
+
+# The GUI's waitForDataList rows (DataInterface.getStatistics) arrive as
+# header = [""] + translated hHeader and data rows = [VHeader, TestName,
+# ...value cells]. The transforms below reshape them for the modern sheet:
+# split the VHeader column, rename the limit columns, insert a Param
+# column, and paste the stat values as numeric cells. Header matching is
+# English-only (whitespace-normalized), same ruling as the File Info wave:
+# under translated UIs the rename/Param transforms degrade to untransformed
+# columns, while the VHeader split and the numericize stay structural.
+
+# The received leading "" VHeader header cell expands into these labels.
+STAT_VHEADER_LABELS = ("Test#", "Head", "Sites", "File ID")
+
+# VHeader shape (DataInterface.py:521-524):
+# "{test_num} / Head{head} / {All Sites|Site<site>}[ / File{fid}]"
+VHEADER_RE = re.compile(
+    r"^(\d+)\s*/\s*Head(\d+)\s*/\s*(All Sites|Site(-?\d+))(?:\s*/\s*File(\d+))?$")
+
+# SpecMin/SpecMax stylization on the Test Statistics sheet (B4), mirroring
+# the DUT Summary E/F columns.
+STAT_SPEC_FORMAT = "0.00E+00"
+STAT_SPEC_FILL_HEX = "FFF3CD"
+
+# English-only header anchors (whitespace-normalized matching).
+_STAT_RENAMES = {"Low Limit": "SpecMin", "High Limit": "SpecMax"}
+_STAT_TEST_NAME = "Test Name"
+
+
+def _norm_header_text(cell) -> str:
+    """Whitespace-normalized header text for the English-only matching."""
+    return " ".join(str(cell).split())
+
+
+def parse_vheader(raw) -> tuple[int, int, "int | str", "int | str"] | None:
+    """(test_num, head, site, fid) from one VHeader string, or None.
+
+    ``site`` is the string ``"All Sites"`` when the DUT row aggregates all
+    sites (site == -1), else an int; ``fid`` is an int when the VHeader
+    carries a ``/ File<n>`` segment (multi-file export) and ``""`` for the
+    single-file shape. Unparseable / non-string input returns None (the
+    caller degrades the row gracefully, never crashes).
+    """
+    if not isinstance(raw, str):
+        return None
+    match = VHEADER_RE.match(raw.strip())
+    if match is None:
+        return None
+    site = ("All Sites" if match.group(3) == "All Sites"
+            else int(match.group(4)))
+    fid = int(match.group(5)) if match.group(5) is not None else ""
+    return int(match.group(1)), int(match.group(2)), site, fid
+
+
+def numericize_value(value):
+    """int for int-like strings, float for float-like strings, else the
+    value unchanged (identity on non-strings).
+
+    ``"12"`` -> 12, ``"1.500"`` -> 1.5, ``"1e3"`` -> 1000.0; the upstream
+    sentinels ``"N/A"`` / ``"∞"`` / ``"?"`` and empty cells stay strings,
+    so the sheet holds real numbers wherever the source was numeric.
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        return value
+
+
+def transform_stat_header(header_row) -> dict:
+    """Transform the received Test Statistics header row.
+
+    - the structural leading ``""`` VHeader cell expands into the four
+      split labels (Test#, Head, Sites, File ID);
+    - ``"Low Limit"`` / ``"High Limit"`` rename to ``"SpecMin"`` /
+      ``"SpecMax"`` in place (normalized, English-only);
+    - ``"Param"`` is inserted right after the ``"Test Name"`` entry
+      (English-only anchor).
+
+    Returns ``{"header": [...], "enabled": bool, "param_inserted": bool,
+    "spec_cols": (i, j) | None}`` where ``spec_cols`` is the 0-based
+    (SpecMin, SpecMax) column pair in the TRANSFORMED header (None when
+    either limit anchor was missing — translated UIs degrade to
+    untransformed columns). An unexpected non-blank first cell disables
+    the whole transform (header returned untouched).
+    """
+    cells = [str(cell) if cell is not None else "" for cell in header_row]
+    if not cells or _norm_header_text(cells[0]) != "":
+        return {"header": list(header_row), "enabled": False,
+                "param_inserted": False, "spec_cols": None}
+    body = [str(cell) for cell in cells[1:]]
+    normalized = [_norm_header_text(cell) for cell in body]
+    renamed = [_STAT_RENAMES.get(norm, cell)
+               for norm, cell in zip(normalized, body)]
+    header = list(STAT_VHEADER_LABELS) + renamed
+    param_inserted = _STAT_TEST_NAME in normalized
+    if param_inserted:
+        header.insert(4 + normalized.index(_STAT_TEST_NAME) + 1, "Param")
+    spec_cols = None
+    if "SpecMin" in renamed and "SpecMax" in renamed:
+        spec_cols = (header.index("SpecMin"), header.index("SpecMax"))
+    return {"header": header, "enabled": True,
+            "param_inserted": param_inserted, "spec_cols": spec_cols}
+
+
+def transform_stat_row(row, header_info: dict) -> list:
+    """Transform one received data row to mirror ``transform_stat_header``.
+
+    - cell 0 (VHeader) parses into (Test#, Head, Sites, File ID); a
+      parse failure degrades to [raw VHeader, "", "", ""] — never a crash;
+    - the Test Name cell splits into (prefix, Param leaf) via
+      ``split_test_name`` when the Param column exists (English anchor);
+      otherwise the full name stays untransformed;
+    - every remaining value cell (Unit onward, including Pattern Name /
+      MPR mix columns) goes through ``numericize_value``.
+    """
+    if not header_info.get("enabled"):
+        return list(row)
+    cells = list(row)
+    raw_vheader = cells[0] if cells else ""
+    parsed = parse_vheader(raw_vheader)
+    out = (list(parsed) if parsed is not None
+           else [raw_vheader, "", "", ""])
+    rest = cells[1:]
+    if header_info.get("param_inserted"):
+        name = rest[0] if rest else ""
+        prefix, leaf = split_test_name(name if isinstance(name, str)
+                                       else str(name))
+        out.extend([prefix, leaf])
+    elif rest:
+        out.append(rest[0])
+    out.extend(numericize_value(value) for value in rest[1:])
+    return out
 
 
 def _numeric_file_info_cell(value):
@@ -141,15 +287,6 @@ class ModernReportGenerator(reportGenerator):
         thin border via writer.write_body_cell, optional band fill."""
         for column, value in enumerate(values, start=1):
             write_body_cell(ws, row, column, value, self._theme, fill=fill)
-
-    def _write_plain_body_row(self, ws, row: int, offset: int,
-                              values: list) -> None:
-        """Write one body row of a plain table at 1-based ``row`` with the
-        same styling as writer.render_plain_table (body font/alignment,
-        thin border, alternating banding on even offsets)."""
-        self._write_body_row(
-            ws, row, values,
-            fill=self._theme.group_fill if offset % 2 == 0 else None)
 
     # ----------------------------------------------------------------------
     # plain sheets (Task 7)
@@ -237,31 +374,57 @@ class ModernReportGenerator(reportGenerator):
         if not dataTable:
             return
         # the GUI sends the (already translated) header row as the first
-        # element: [""] + headers — write it verbatim, untranslated, as the
-        # plain-table header row; everything after it is data
+        # element: [""] + headers — transform it for the modern sheet
+        # (third wave): the "" VHeader cell splits into Test#/Head/Sites/
+        # File ID, Low/High Limit rename to SpecMin/SpecMax, "Param" joins
+        # after "Test Name". English-only anchors — translated UIs degrade
+        # to untransformed columns (same ruling as the File Info wave).
         headerRow, dataRows = dataTable[0], dataTable[1:]
+        header_info = transform_stat_header(headerRow)
+
+        # SpecMin/SpecMax stylization (B4): the transformed header gives the
+        # two column indices -> letters; the spec carries the scientific
+        # format + static yellow fill (render_plain_table's column_fills
+        # mechanism) and the per-row loop below applies the same to the rows
+        # it writes itself (the classic per-row cadence bypasses spec rows).
+        number_formats: dict[str, str] = {}
+        column_fills: dict[str, str] = {}
+        if header_info["spec_cols"] is not None:
+            for column_index in header_info["spec_cols"]:
+                letter = get_column_letter(column_index + 1)
+                number_formats[letter] = STAT_SPEC_FORMAT
+                column_fills[letter] = STAT_SPEC_FILL_HEX
 
         # header only (identity tr: no re-translation of the GUI header)
-        spec = plain_table_spec(self.tr("Test Statistics"), headerRow, [],
-                                tr=lambda s: s)
+        spec = plain_table_spec(self.tr("Test Statistics"),
+                                header_info["header"], [], tr=lambda s: s)
+        spec["number_formats"] = number_formats
+        spec["column_fills"] = column_fills
         render_plain_table(StatSheet, spec, self._theme)
 
         # data rows keep the classic cadence: forceQuit check, one loopCount
-        # and one sendProgress per row
+        # and one sendProgress per row — the transforms happen per row
+        # before writing, without altering the progress semantics
+        written_rows = []
         for offset, dataRow in enumerate(dataRows):
             if self.forceQuit:
                 return
-            self._write_plain_body_row(StatSheet, 2 + offset, offset,
-                                       dataRow)
+            stat_row = transform_stat_row(dataRow, header_info)
+            written_rows.append(stat_row)
+            write_plain_row(
+                StatSheet, 2 + offset, stat_row, self._theme,
+                band=(self._theme.group_fill if offset % 2 == 0 else None),
+                number_formats=number_formats, column_fills=column_fills)
             self._row[ReportSelection.Stat] = 2 + offset
             self.loopCount += 1
             self.sendProgress()
 
         # extend the auto-filter over the written rows (render_plain_table
         # only knew about the header when it drew the sheet)
-        width = max([len(headerRow)] + [len(row) for row in dataRows])
+        width = max([len(header_info["header"])]
+                    + [len(row) for row in written_rows])
         StatSheet.auto_filter.ref = (
-            f"A1:{get_column_letter(width)}{1 + len(dataRows)}")
+            f"A1:{get_column_letter(width)}{1 + len(written_rows)}")
         self._autofit_columns(StatSheet)
 
     # ----------------------------------------------------------------------

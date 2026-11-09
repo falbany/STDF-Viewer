@@ -216,14 +216,17 @@ def fails_formula_flags(row: int, first: str, last: str) -> str:
     return f'=SUMPRODUCT(({mrng}<>"")*({mrng}=1))'
 
 
-def fails_formula_ftr(row: int, first: str, last: str) -> str:
-    """FAILS count of 0/1 FTR cells over the visible die range."""
-    rng = col_range(first, last, row)
-    return f'=SUMPRODUCT(({rng}<>"")*({rng}=1))'
+def metadata_stat_formulas(row: int, first: str, last: str,
+                           mean: bool = True) -> tuple[str, ...]:
+    """(MIN, MAX[, AVERAGE]) formula set for a numeric metadata block row.
 
-
-def metadata_stat_formulas(row: int, first: str, last: str) -> tuple[str, str, str]:
-    """(MIN, MAX, AVERAGE) formula triple for a numeric metadata block row."""
-    return (stat_formula("MIN", row, first, last),
-            stat_formula("MAX", row, first, last),
-            stat_formula("AVERAGE", row, first, last))
+    ``mean=False`` drops the AVERAGE formula and returns the 2-tuple
+    ``(MIN, MAX)`` — since the 2026-11-10 third wave only the Temperature
+    row keeps a live Mean cell; the caller pads the Mean column with a
+    dash for every other row.
+    """
+    formulas = [stat_formula("MIN", row, first, last),
+                stat_formula("MAX", row, first, last)]
+    if mean:
+        formulas.append(stat_formula("AVERAGE", row, first, last))
+    return tuple(formulas)

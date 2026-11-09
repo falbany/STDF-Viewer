@@ -70,10 +70,12 @@ DIE_COLUMN_WIDTH = 8
 TEST_NAME_ALIGNMENT = Alignment(horizontal="right", vertical="center")
 PARAM_ALIGNMENT = Alignment(horizontal="left", vertical="center")
 
-# spec["number_formats"] keys that target fixed (non-die) columns.
+# spec["number_formats"] keys that target fixed (non-die) columns
+# (third wave: "STD"/"FAILS" renamed to "St. Dev."/"Fails" alongside the
+# BASE_HEADERS renames).
 FIXED_FORMAT_COLUMNS = {
     "Test#": 1, "SpecMin": 5, "SpecMax": 6, "Min": 7, "Max": 8,
-    "Mean": 9, "STD": 10, "Cpk": 11, "FAILS": 12,
+    "Mean": 9, "St. Dev.": 10, "Cpk": 11, "Fails": 12,
 }
 
 
@@ -246,10 +248,15 @@ def _odd_group_offsets(spec):
 # --------------------------------------------------------------------------
 
 def _add_die_rules(ws, die_rules, theme):
-    """Six rules over the die range, priority order, all stopIfTrue.
+    """Five rules over the die range, priority order, all stopIfTrue.
 
-    Formulas are written relative to the range's top-left cell; openpyxl
-    shifts them across the range like Excel does.
+    Third wave: the P/F visible-flag rule (LEFT($D...,3)="P/F") is gone —
+    FTR rows now carry real limits (0 / 0.999999), so the limit rules fire
+    naturally on them (die cell 1 -> fail-high, 0 -> pass, blank ->
+    neutral). Remaining set: blank-neutral, fail-low, fail-high,
+    flag-mirror (no-limit parametric rows), pass. Formulas are written
+    relative to the range's top-left cell; openpyxl shifts them across the
+    range like Excel does.
     """
     cell_range = die_rules["range"]
     min_col, min_row, _, _ = range_boundaries(cell_range)
@@ -262,9 +269,6 @@ def _add_die_rules(ws, die_rules, theme):
               theme.fail_fill)
     _add_rule(ws, cell_range,
               f'AND({die}{row}<>"",$F{row}<>"",{die}{row}>$F{row})',
-              theme.fail_fill)
-    _add_rule(ws, cell_range,
-              f'AND({die}{row}=1,$E{row}="",$F{row}="",LEFT($D{row},3)="P/F")',
               theme.fail_fill)
     _add_rule(ws, cell_range,
               f'AND({mirror}{row}=1,$E{row}="",$F{row}="")',
@@ -376,16 +380,42 @@ def render_matrix_sheet(ws: Worksheet, spec: dict, theme) -> None:
     ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
 
 
+def write_plain_row(ws: Worksheet, row: int, values: list, theme,
+                    band=None, number_formats: dict | None = None,
+                    column_fills: dict | None = None) -> None:
+    """One plain-table data row: themed body cells with thin borders, the
+    band fill, letter-keyed per-column number formats, and static column
+    fills (``{column_letter: hex6}``) that override the banding — the
+    plain-table counterpart of the DUT Summary's static yellow SpecMin/
+    SpecMax (third wave). Rows shorter than a fill column simply never
+    reach it (no phantom filled cells). Shared by ``render_plain_table``
+    and the generator's per-row loops (Test Statistics keeps its classic
+    per-row progress cadence, so its rows bypass the spec's ``rows``)."""
+    formats = number_formats or {}
+    fills = column_fills or {}
+    for column, value in enumerate(values, start=1):
+        letter = get_column_letter(column)
+        hex6 = fills.get(letter)
+        fill = _solid_fill(hex6) if hex6 else band
+        _write_cell(ws, row, column, value, theme.body_font,
+                    theme.body_alignment, border=theme.border, fill=fill,
+                    number_format=formats.get(letter))
+
+
 def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
-    """Render a plain table spec ``{"name","headers","rows","number_formats"?,
-    "cell_number_formats"?}``: styled header row, thin borders, alternating
-    banding, auto-filter, frozen header, gridlines off. ``number_formats``
-    keys are column letters; ``cell_number_formats`` (fix wave 2) maps
-    ``(row_index, col_index)`` — 0-based over the data grid EXCLUDING the
-    header row — to a per-cell number format applied after writing."""
+    """Render a plain table spec ``{"name","headers","rows",
+    "number_formats"?,"cell_number_formats"?,"column_fills"?}``: styled
+    header row, thin borders, alternating banding, auto-filter, frozen
+    header, gridlines off. ``number_formats`` keys are column letters;
+    ``cell_number_formats`` (fix wave 2) maps ``(row_index, col_index)`` —
+    0-based over the data grid EXCLUDING the header row — to a per-cell
+    number format applied after writing; ``column_fills`` (third wave)
+    maps a column letter to a static data-cell fill hex that wins over
+    the banding (headers untouched)."""
     headers = spec["headers"]
     rows = spec.get("rows") or []
     formats = spec.get("number_formats") or {}
+    column_fills = spec.get("column_fills") or {}
 
     if not headers and not rows:
         # degenerate all-empty table: nothing to draw — return before the
@@ -401,10 +431,8 @@ def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
 
     for offset, values in enumerate(rows):
         band = theme.group_fill if offset % 2 == 0 else None
-        for column, value in enumerate(values, start=1):
-            _write_cell(ws, 2 + offset, column, value, theme.body_font,
-                        theme.body_alignment, border=theme.border, fill=band,
-                        number_format=formats.get(get_column_letter(column)))
+        write_plain_row(ws, 2 + offset, values, theme, band=band,
+                        number_formats=formats, column_fills=column_fills)
 
     # per-cell formats after the cells exist (0-based data grid -> Excel)
     for (row_index, col_index), fmt in (

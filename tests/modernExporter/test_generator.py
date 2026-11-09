@@ -11,7 +11,13 @@ import pytest
 from openpyxl import load_workbook
 from PyQt5 import QtCore
 
-from deps.modernExporter.generator import ModernReportGenerator
+from deps.modernExporter.generator import (
+    ModernReportGenerator,
+    numericize_value,
+    parse_vheader,
+    transform_stat_header,
+    transform_stat_row,
+)
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
 
 
@@ -47,8 +53,9 @@ def generated(tmp_path, qapp):
                                 QtCore.QWaitCondition(), reportInfo, channel)
 
     # GUI-side tables: two distinct file-info / GDR-DTR tables keyed by the
-    # isFileInfo flag, one statistics table (header row from the GUI is
-    # [""] + translated headers, then one row per head/site/file combo).
+    # isFileInfo flag, one statistics table shaped like DataInterface's
+    # getStatistics (header row = [""] + hHeader, rows = [VHeader, TestName,
+    # ...value cells]; all stat values arrive as floatFormat strings).
     # File Info raw shapes (buildFileMetaData): translated labels with a
     # trailing space after the colon, counts as str(int), Yield "98.50%".
     file_info_table = [["File Name", "demo.stdf"],
@@ -60,8 +67,12 @@ def generated(tmp_path, qapp):
                        ["DUTs Superseded: ", "0"],
                        ["DUTs Unknown: ", "0"]]
     gdr_dtr_table = [["DTR", "Hello Datalog\n", "Record #1\n"]]
-    stat_table = [["", "Tests", "Mean", "Cpk"],
-                  ["10000\tVCCC_ASIC\nHead 1 Site -1", 1024, 1.0]]
+    stat_table = [
+        ["", "Test Name", "Unit", "Low Limit", "High Limit", "Fail Num",
+         "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"],
+        ["10000 / Head1 / All Sites", "VCCC_ASIC/vcc", "V", "0.500", "1.500",
+         "1", "1.23", "1.000", "1.000", "0.010", "0.980", "1.020"],
+    ]
     gen.waitForTableData = lambda isFileInfo: (file_info_table
                                                if isFileInfo else gdr_dtr_table)
     gen.waitForDataList = (lambda heads, sites, fids, chartType, kargs:
@@ -115,8 +126,14 @@ def generated_multi(tmp_path, qapp):
         ["Note", "x", "y"],
     ]
     gdr_dtr_table = [["DTR", "Hello Datalog\n", "Record #1\n"]]
-    stat_table = [["", "Tests", "Mean", "Cpk"],
-                  ["10000\tVCCC_ASIC\nHead 1 Site -1", 1024, 1.0]]
+    stat_table = [
+        ["", "Test Name", "Unit", "Low Limit", "High Limit", "Fail Num",
+         "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"],
+        ["10000 / Head1 / All Sites / File0", "VCCC_ASIC/vcc", "V", "0.500",
+         "1.500", "1", "1.23", "1.000", "1.000", "0.010", "0.980", "1.020"],
+        ["10000 / Head1 / All Sites / File2", "VCCC_ASIC/vcc", "V", "0.500",
+         "1.500", "3", "1.10", "1.100", "1.100", "0.020", "0.960", "1.040"],
+    ]
     gen.waitForTableData = lambda isFileInfo: (file_info_table
                                                if isFileInfo else gdr_dtr_table)
     gen.waitForDataList = (lambda heads, sites, fids, chartType, kargs:
@@ -208,18 +225,277 @@ class TestPlainSheets:
         assert ws["B2"].value == "Hello Datalog"
         assert ws["C2"].value == "Record #1"
 
-    def test_statistics_header_verbatim_and_rows(self, generated):
+
+# --------------------------------------------------------------------------
+# Test Statistics transforms (third wave): pure helpers
+# --------------------------------------------------------------------------
+
+STAT_HHEADER = ["Test Name", "Unit", "Low Limit", "High Limit", "Fail Num",
+                "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"]
+
+
+class TestParseVHeader:
+    def test_all_sites_single_file(self):
+        assert parse_vheader("10000 / Head1 / All Sites") == (
+            10000, 1, "All Sites", "")
+
+    def test_site_with_file(self):
+        assert parse_vheader("12 / Head0 / Site3 / File1") == (12, 0, 3, 1)
+
+    def test_negative_site_no_file(self):
+        assert parse_vheader("7 / Head2 / Site-3") == (7, 2, -3, "")
+
+    def test_all_sites_with_file_zero(self):
+        # the File segment carries the ACTUAL fid (0-based), even file 0
+        assert parse_vheader("10 / Head1 / All Sites / File0") == (
+            10, 1, "All Sites", 0)
+
+    def test_tolerates_extra_whitespace(self):
+        assert parse_vheader(" 10  /  Head1 / Site2 ") == (10, 1, 2, "")
+
+    def test_garbage_degrades_to_none(self):
+        # classic-style blob (or any unexpected shape) -> None, never raises
+        assert parse_vheader("10000\tVCCC_ASIC\nHead 1 Site -1") is None
+        assert parse_vheader("") is None
+        assert parse_vheader("Head1 / Site2") is None
+        assert parse_vheader("10 / Head1 / Site") is None
+
+    def test_non_string_degrades_to_none(self):
+        assert parse_vheader(5) is None
+        assert parse_vheader(None) is None
+
+    def test_split_values_are_python_ints(self):
+        parsed = parse_vheader("12 / Head0 / Site3 / File1")
+        assert all(isinstance(v, int) for v in parsed)
+        parsed = parse_vheader("12 / Head0 / All Sites")
+        assert isinstance(parsed[0], int) and isinstance(parsed[1], int)
+        assert parsed[2] == "All Sites"
+        assert parsed[3] == ""
+
+
+class TestNumericizeValue:
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("12", 12), ("-3", -3), ("007", 7), ("+5", 5),
+            ("1.5", 1.5), ("-0.25", -0.25), ("1.0", 1.0), ("1e3", 1000.0),
+            ("  2.50 ", 2.5),                      # stripped before parsing
+            ("N/A", "N/A"), ("∞", "∞"), ("?", "?"),  # upstream sentinels stay
+            ("", ""), ("1,5", "1,5"), ("abc", "abc"),
+            (5, 5), (2.5, 2.5), (None, None),      # non-strings pass through
+        ],
+    )
+    def test_spec_cases(self, raw, expected):
+        assert numericize_value(raw) == expected
+
+    def test_int_like_returns_int(self):
+        assert isinstance(numericize_value("12"), int)
+        assert isinstance(numericize_value("1.0"), float)
+
+    def test_string_passthrough_is_identity(self):
+        value = "N/A"
+        assert numericize_value(value) is value
+
+
+class TestTransformStatHeader:
+    def test_full_english_header(self):
+        info = transform_stat_header([""] + STAT_HHEADER)
+        assert info["header"] == [
+            "Test#", "Head", "Sites", "File ID",
+            "Test Name", "Param", "Unit", "SpecMin", "SpecMax", "Fail Num",
+            "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"]
+        assert info["spec_cols"] == (7, 8)     # 0-based in the TRANSFORMED list
+        assert info["param_inserted"] is True
+        assert info["enabled"] is True
+
+    def test_ftr_mix_pattern_name_after_param(self):
+        header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
+        info = transform_stat_header(header)
+        assert info["header"][4:7] == ["Test Name", "Param", "Pattern Name"]
+        assert info["spec_cols"] == (8, 9)
+
+    def test_mpr_mix_four_columns_after_param(self):
+        header = ([""] + STAT_HHEADER[:1]
+                  + ["PMR Index", "Logical Name", "Physical Name", "Channel Name"]
+                  + STAT_HHEADER[1:])
+        info = transform_stat_header(header)
+        assert info["header"][4:10] == ["Test Name", "Param", "PMR Index",
+                                        "Logical Name", "Physical Name",
+                                        "Channel Name"]
+        assert info["spec_cols"] == (11, 12)
+
+    def test_limit_renames_are_in_place(self):
+        # only the two matched entries change text; siblings keep theirs
+        info = transform_stat_header(["", "Test Name", "Low Limit",
+                                      "High Limit", "Fail Num"])
+        assert info["header"] == ["Test#", "Head", "Sites", "File ID",
+                                  "Test Name", "Param", "SpecMin", "SpecMax",
+                                  "Fail Num"]
+
+    def test_missing_limit_columns_degrade(self):
+        info = transform_stat_header(["", "Tests", "Mean", "Cpk"])
+        assert info["header"] == ["Test#", "Head", "Sites", "File ID",
+                                  "Tests", "Mean", "Cpk"]
+        assert info["spec_cols"] is None
+        assert info["param_inserted"] is False
+
+    def test_missing_test_name_skips_param(self):
+        info = transform_stat_header(["", "Unit", "Low Limit", "High Limit"])
+        assert info["header"] == ["Test#", "Head", "Sites", "File ID",
+                                  "Unit", "SpecMin", "SpecMax"]
+        assert info["spec_cols"] == (5, 6)
+        assert info["param_inserted"] is False
+
+    def test_normalized_matching_tolerates_spacing(self):
+        info = transform_stat_header(["", "Test Name ", "Unit",
+                                      "Low  Limit", "High Limit"])
+        # normalized "Low  Limit" renamed; "Test Name " (trailing space)
+        # matched for the Param insert but keeps its original cell text
+        assert info["header"] == ["Test#", "Head", "Sites", "File ID",
+                                  "Test Name ", "Param", "Unit",
+                                  "SpecMin", "SpecMax"]
+        assert info["spec_cols"] == (7, 8)
+
+    def test_non_blank_first_cell_disables_everything(self):
+        # unexpected shape (no structural "" VHeader cell): degrade untouched
+        header = ["VHeader", "Test Name", "Low Limit"]
+        info = transform_stat_header(header)
+        assert info["enabled"] is False
+        assert info["header"] == header
+        assert info["spec_cols"] is None
+        assert info["param_inserted"] is False
+
+
+class TestTransformStatRow:
+    def info(self, header=None):
+        return transform_stat_header(header if header is not None
+                                     else [""] + STAT_HHEADER)
+
+    def test_full_row_split_and_numericized(self):
+        row = ["10000 / Head1 / All Sites", "VCCC_ASIC/vcc", "V",
+               "0.500", "1.500", "1", "1.23", "1.000", "1.000",
+               "0.010", "0.980", "1.020"]
+        assert transform_stat_row(row, self.info()) == [
+            10000, 1, "All Sites", "", "VCCC_ASIC", "vcc",
+            "V", 0.5, 1.5, 1, 1.23, 1.0, 1.0, 0.01, 0.98, 1.02]
+
+    def test_no_slash_name_blank_param(self):
+        row = ["7 / Head0 / Site2", "CONTINUITY", "V", "0", "1", "0"]
+        assert transform_stat_row(row, self.info())[4:6] == ["CONTINUITY", ""]
+
+    def test_unparseable_vheader_degrades_gracefully(self):
+        row = ["10000\tVCCC_ASIC\nHead 1 Site -1", "VCCC_ASIC/vcc", "V", "1"]
+        assert transform_stat_row(row, self.info()) == [
+            "10000\tVCCC_ASIC\nHead 1 Site -1", "", "", "",
+            "VCCC_ASIC", "vcc", "V", 1]
+
+    def test_sentinel_strings_stay_strings(self):
+        row = ["12 / Head1 / All Sites", "2_F/x", "P/F", "N/A", "∞", "?"]
+        assert transform_stat_row(row, self.info())[6:] == [
+            "P/F", "N/A", "∞", "?"]
+
+    def test_ftr_mix_row(self):
+        header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
+        row = ["12 / Head1 / All Sites", "2_Func/scanchain", "PAT_TOP",
+               "P/F", "N/A", "N/A", "0", "1.5", "1.0", "0.1", "0.2", "0.3",
+               "0.4"]
+        assert transform_stat_row(row, self.info(header)) == [
+            12, 1, "All Sites", "", "2_Func", "scanchain", "PAT_TOP",
+            "P/F", "N/A", "N/A", 0, 1.5, 1.0, 0.1, 0.2, 0.3, 0.4]
+
+    def test_mpr_mix_row_pmr_index_numericized(self):
+        header = ([""] + STAT_HHEADER[:1]
+                  + ["PMR Index", "Logical Name", "Physical Name", "Channel Name"]
+                  + STAT_HHEADER[1:])
+        row = ["30 / Head1 / All Sites", "3_MPR/ch_a", "5", "LOG1", "PHY1",
+               "CHAN1", "A", "0.1", "2.0", "1", "2.0", "1.5", "1.5",
+               "0.1", "0.2", "0.3"]
+        assert transform_stat_row(row, self.info(header)) == [
+            30, 1, "All Sites", "", "3_MPR", "ch_a", 5, "LOG1", "PHY1",
+            "CHAN1", "A", 0.1, 2.0, 1, 2.0, 1.5, 1.5, 0.1, 0.2, 0.3]
+
+    def test_disabled_transform_returns_row_untouched(self):
+        info = transform_stat_header(["VHeader", "Test Name", "Mean"])
+        row = ["raw", "name", "1.5"]
+        assert transform_stat_row(row, info) == ["raw", "name", "1.5"]
+
+    def test_missing_param_anchor_keeps_full_name(self):
+        info = transform_stat_header(["", "Unit", "Low Limit", "High Limit"])
+        row = ["7 / Head0 / Site2", "CONTINUITY", "V", "1"]
+        assert transform_stat_row(row, info) == [
+            7, 0, 2, "", "CONTINUITY", "V", 1]
+
+    def test_empty_row_does_not_crash(self):
+        # 4 blank identifier cells + blank Test Name/Param pair
+        assert transform_stat_row([], self.info()) == ["", "", "", "", "", ""]
+
+
+# --------------------------------------------------------------------------
+# Test Statistics sheet (third wave): transformed columns in the workbook
+# --------------------------------------------------------------------------
+
+class TestStatisticsSheet:
+    def test_header_transformed(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["Test Statistics"]
-        # first GUI row is the (already translated) header: written verbatim
-        # (openpyxl round-trips the empty leading cell as None)
-        assert ws["A1"].value in ("", None)
-        assert ws["B1"].value == "Tests"
-        assert ws["B1"].fill.fgColor.rgb == "FF1E40AF"
-        assert ws["A2"].value == "10000\tVCCC_ASIC\nHead 1 Site -1"
-        assert ws["B2"].value == 1024
-        assert ws["C2"].value == 1.0
-        assert ws.auto_filter.ref == "A1:D2"
+        assert [ws.cell(row=1, column=c).value for c in range(1, 17)] == [
+            "Test#", "Head", "Sites", "File ID", "Test Name", "Param", "Unit",
+            "SpecMin", "SpecMax", "Fail Num", "Cpk", "Average", "Median",
+            "St. Dev.", "Min", "Max"]
+        # headers keep the blue styling including the new columns
+        for cell in ("A1", "E1", "F1", "H1", "I1"):
+            assert ws[cell].fill.fgColor.rgb == "FF1E40AF", cell
+
+    def test_row_split_first_column(self, generated):
+        _, wb, _, _, _ = generated
+        ws = wb["Test Statistics"]
+        assert ws["A2"].value == 10000
+        assert isinstance(ws["A2"].value, int)
+        assert ws["B2"].value == 1
+        assert ws["C2"].value == "All Sites"
+        assert ws["D2"].value in ("", None)   # single file -> blank File ID
+        assert ws["E2"].value == "VCCC_ASIC"      # Test Name keeps the prefix
+        assert ws["F2"].value == "vcc"            # Param carries the leaf
+
+    def test_row_values_numeric(self, generated):
+        _, wb, _, _, _ = generated
+        ws = wb["Test Statistics"]
+        assert ws["H2"].value == 0.5       # SpecMin was "0.500"
+        assert isinstance(ws["H2"].value, float)
+        assert ws["I2"].value == 1.5       # SpecMax was "1.500"
+        assert ws["J2"].value == 1         # Fail Num was "1"
+        assert isinstance(ws["J2"].value, int)
+        assert ws["K2"].value == 1.23      # Cpk was "1.23"
+        assert ws["O2"].value == 0.98      # Min was "0.980"
+        assert ws["P2"].value == 1.02      # Max was "1.020"
+        # text cells stay text
+        assert ws["G2"].value == "V"
+
+    def test_spec_columns_stylized_like_dut_summary(self, generated):
+        _, wb, _, _, _ = generated
+        ws = wb["Test Statistics"]
+        # scientific format + static neutral yellow on the two renamed
+        # columns' data cells, overriding the row banding
+        assert ws["H2"].number_format == "0.00E+00"
+        assert ws["I2"].number_format == "0.00E+00"
+        assert ws["H2"].fill.fgColor.rgb == "FFFFF3CD"
+        assert ws["I2"].fill.fgColor.rgb == "FFFFF3CD"
+        # banding survives on the other columns of the same (even) row
+        assert ws["A2"].fill.fgColor.rgb == "FFE9EEF6"
+        assert ws["G2"].fill.fgColor.rgb == "FFE9EEF6"
+        # non-spec numeric columns keep General
+        assert ws["O2"].number_format == "General"
+
+    def test_auto_filter_over_transformed_width(self, generated):
+        _, wb, _, _, _ = generated
+        ws = wb["Test Statistics"]
+        assert ws.auto_filter.ref == "A1:P2"
+
+    def test_loop_count_still_one_tick_per_row(self, generated):
+        gen, _, _, _, _ = generated
+        # FileInfo +1, GDR_DTR +1, Stat +1 per data row -> 3 (unchanged
+        # cadence: the transforms do not alter progress semantics)
+        assert gen.loopCount == gen.totalLoopCnt == 3
 
 
 class TestFileInfoMultiFile:
