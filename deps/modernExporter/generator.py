@@ -59,7 +59,7 @@ from deps.uic_stdExporter import (
 )
 from deps.modernExporter.matrix import build_dut_summary_spec
 from deps.modernExporter.sheets import insert_report_image, plain_table_spec
-from deps.modernExporter.theme import ModernTheme
+from deps.modernExporter.theme import ModernTheme, number_format_from_settings
 from deps.modernExporter.writer import (
     BASE_COLUMN_COUNT,
     render_matrix_sheet,
@@ -250,7 +250,13 @@ class ModernReportGenerator(reportGenerator):
         specs = build_dut_summary_spec(
             summaryTable, self.testTuples, order, dut_ids,
             sheet_name=self.tr("DUT Summary"),
-            float_format=getSetting().getFloatFormat(), tr=self.tr)
+            # getFloatFormat() is a printf template ("%.3G"), not an Excel
+            # number format (% reads as a percentage code); convert via the
+            # theme converter instead
+            float_format=number_format_from_settings(
+                getSetting().gen.data_precision,
+                getSetting().gen.data_notation),
+            tr=self.tr)
 
         # chunk 0 renders on the existing DUT Summary sheet; chunks 1+
         # (die overflow beyond the Excel column cap) get their own sheets —

@@ -6,6 +6,7 @@ import pytest
 
 from deps.modernExporter.helpers import (
     DEFAULT_PARAM_PATTERN,
+    DUT_CHUNK_CAP,
     TEMPERATURE_RE,
     col_range,
     compile_param_pattern,
@@ -133,27 +134,35 @@ class TestSplitDutChunks:
         assert split_dut_chunks(ids) == (("a", "b", "c"),)
 
     def test_exact_cap_single_chunk(self):
-        ids = [str(i) for i in range(16300)]
+        ids = [str(i) for i in range(DUT_CHUNK_CAP)]
         chunks = split_dut_chunks(ids)
         assert len(chunks) == 1
         assert chunks[0] == tuple(ids)
 
     def test_one_over_cap_two_chunks(self):
-        ids = list(range(16301))
+        ids = list(range(DUT_CHUNK_CAP + 1))
         chunks = split_dut_chunks(ids)
         assert len(chunks) == 2
-        assert len(chunks[0]) == 16300
+        assert len(chunks[0]) == DUT_CHUNK_CAP
         assert len(chunks[1]) == 1
         assert chunks[0][0] == 0
-        assert chunks[0][-1] == 16299
-        assert chunks[1][0] == 16300
+        assert chunks[0][-1] == DUT_CHUNK_CAP - 1
+        assert chunks[1][0] == DUT_CHUNK_CAP
 
     def test_chunks_are_consecutive(self):
-        ids = list(range(16300 * 2 + 5))
+        ids = list(range(DUT_CHUNK_CAP * 2 + 5))
         chunks = split_dut_chunks(ids)
-        assert [len(c) for c in chunks] == [16300, 16300, 5]
+        assert [len(c) for c in chunks] == [DUT_CHUNK_CAP, DUT_CHUNK_CAP, 5]
         flat = [x for c in chunks for x in c]
         assert flat == ids
+
+    def test_cap_derivation_fits_excel_column_limit_with_mirrors(self):
+        # A chunk sheet is 13 base columns + n dies + 1 spacer + n hidden
+        # mirrors, all within Excel's 16384-column cap:
+        # 13 + n + 1 + n <= 16384  ->  n <= (16384 - 13 - 1) // 2 = 8185.
+        assert DUT_CHUNK_CAP == (16384 - 13 - 1) // 2 == 8185
+        # the arithmetic boundary: one DUT over the cap spills to chunk 2
+        assert [len(c) for c in split_dut_chunks(list(range(8186)))] == [8185, 1]
 
 
 class TestColumns:

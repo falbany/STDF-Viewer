@@ -19,8 +19,9 @@ from openpyxl import load_workbook
 from PIL import Image as PILImage
 from PyQt5 import QtCore
 
-from deps.SharedSrc import REC, tab
+from deps.SharedSrc import REC, getSetting, tab
 from deps.modernExporter.generator import ModernReportGenerator
+from deps.modernExporter.theme import number_format_from_settings
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
 
 
@@ -94,8 +95,7 @@ def png_bytes(width=96, height=48):
 PNG_BYTES = png_bytes()
 
 
-@pytest.fixture
-def generated(tmp_path, qapp):
+def build_generated(tmp_path, qapp):
     """Run report_core() once for {DUT, Trend, Bin, Wafer} and return
     (generator, reloaded workbook, report path, close/error capture)."""
     testTuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
@@ -143,6 +143,11 @@ def generated(tmp_path, qapp):
     assert Path(reportPath).exists(), "report file was not written"
     wb = load_workbook(reportPath)
     return gen, wb, reportPath, closed, errors
+
+
+@pytest.fixture
+def generated(tmp_path, qapp):
+    return build_generated(tmp_path, qapp)
 
 
 # --------------------------------------------------------------------------
@@ -259,3 +264,34 @@ class TestProgressContract:
         _, _, _, closed, errors = generated
         assert closed == [True]
         assert errors == []
+
+
+# --------------------------------------------------------------------------
+# die-cell number formats (final review critical 2)
+# --------------------------------------------------------------------------
+
+class TestDieCellNumberFormat:
+    """Parametric die cells must carry an Excel number format derived from
+    the exporter settings, never getFloatFormat()'s printf template verbatim
+    ("%." + precision + notation makes Excel parse % as a percentage code)."""
+
+    def test_default_settings_die_cells_general(self, generated):
+        _, wb, _, _, _ = generated
+        settings = getSetting()
+        expected = number_format_from_settings(settings.gen.data_precision,
+                                               settings.gen.data_notation)
+        assert expected == "General"   # suite-default settings (G, 3)
+        ws = wb["DUT Summary"]
+        assert ws["M17"].number_format == expected
+        assert ws["N17"].number_format == expected
+        assert ws["M18"].number_format == "0"   # FTR die cells stay integer
+
+    def test_fixed_notation_die_cells(self, tmp_path, qapp, monkeypatch):
+        settings = getSetting()
+        monkeypatch.setattr(settings.gen, "data_precision", 3)
+        monkeypatch.setattr(settings.gen, "data_notation", "F")
+        _, wb, _, _, _ = build_generated(tmp_path, qapp)
+        ws = wb["DUT Summary"]
+        assert number_format_from_settings(3, "F") == "0.000"
+        assert ws["M17"].number_format == "0.000"
+        assert ws["N17"].number_format == "0.000"

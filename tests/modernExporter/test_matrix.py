@@ -1,8 +1,10 @@
 """Tests for deps/modernExporter/matrix.py: DUT Summary spec builder."""
 
 import numpy as np
+from openpyxl.utils import column_index_from_string
 
 from deps.SharedSrc import REC
+from deps.modernExporter.helpers import DUT_CHUNK_CAP, die_col
 from deps.modernExporter.matrix import (
     METADATA_ROWS,
     build_dut_summary_spec,
@@ -103,7 +105,7 @@ def base_tests():
 
 
 def build(tests, duts, sheet_name="DUT Summary", float_format=FLOAT_FORMAT,
-          die_cap=16300, tr=None):
+          die_cap=DUT_CHUNK_CAP, tr=None):
     summary = make_summary(tests, duts)
     test_tuples = [(t["num"], 0, t["name"]) for t in tests]
     if tr is None:
@@ -377,6 +379,89 @@ class TestChunking:
         assert spec["table"]["name"] == "X_2"
         assert spec["conditional_formatting"]["die_rules"]["flag_col_offset"] == 2
         assert spec["conditional_formatting"]["fails_max"] == 0.2 * 1
+
+
+# --------------------------------------------------------------------------
+# Excel column-cap boundaries (final review critical 1)
+# --------------------------------------------------------------------------
+
+class TestColumnCapBoundaries:
+    """A chunk sheet is 13 base columns + n dies + 1 spacer + n hidden flag
+    mirrors, so the real per-sheet capacity is (16384 - 13 - 1) // 2 = 8185
+    DUTs — not 16384 - 13 - 1. Chunks wider than that push mirror columns
+    past XFD and kill the export (get_column_letter ValueError at 2n+14)."""
+
+    @staticmethod
+    def build_ids_spec(dut_ids, test_tuples=()):
+        """Minimal spec build: empty summaryTable + N synthetic DUT IDs."""
+        summary = {"Data": {}, "TestInfo": {}, "dut2ind": {}, "dutInfo": {}}
+        return build_dut_summary_spec(summary, test_tuples, [], dut_ids,
+                                      "DUT Summary", FLOAT_FORMAT)
+
+    def test_spec_at_true_cap_fits_excel_columns(self):
+        # 8185 dies with the default die_cap: exactly one chunk whose last
+        # mirror column lands at/before XFD (16384)
+        specs = self.build_ids_spec(
+            [f"DUT #{i}" for i in range(DUT_CHUNK_CAP)],
+            test_tuples=[(10, 0, "0_T/v")])
+        assert len(specs) == 1
+        spec = specs[0]
+        assert len(spec["die_columns"]) == DUT_CHUNK_CAP
+        mirror_first = column_index_from_string(spec["flag_first_col"])
+        assert mirror_first == 13 + DUT_CHUNK_CAP + 1      # dies + spacer
+        assert mirror_first + DUT_CHUNK_CAP - 1 <= 16384   # last mirror <= XFD
+        # formulas build against the full-width ranges
+        last_die = die_col(DUT_CHUNK_CAP - 1)
+        assert spec["metadata_rows"][0][6] == f"=MIN(M2:{last_die}2)"
+        assert spec["rows"][0][6] == f"=MIN(M17:{last_die}17)"
+
+    def test_16301_dies_two_valid_chunks(self):
+        # the old 16300-boundary count now spans two chunks; BOTH must build
+        # specs whose columns stay inside the 16384 cap (chunk 0 used to die:
+        # mirror_last = die_col(2 * 16300) -> get_column_letter ValueError)
+        specs = self.build_ids_spec([f"DUT #{i}" for i in range(16301)])
+        assert [len(s["die_columns"]) for s in specs] == [DUT_CHUNK_CAP,
+                                                          16301 - DUT_CHUNK_CAP]
+        assert [s["name"] for s in specs] == ["DUT Summary", "DUT Summary (2)"]
+        for spec in specs:
+            die_count = len(spec["die_columns"])
+            mirror_last = (column_index_from_string(spec["flag_first_col"])
+                           + die_count - 1)
+            assert mirror_last <= 16384                 # mirrors inside XFD
+            assert spec["die_columns"][0] == "M"        # per-chunk restart
+        # per-chunk display ids: chunk 1 continues the global numbering
+        assert specs[0]["headers"][12] == "DUT #0"
+        assert specs[0]["headers"][-1] == f"DUT #{DUT_CHUNK_CAP - 1}"
+        assert specs[1]["headers"][12] == f"DUT #{DUT_CHUNK_CAP}"
+        assert specs[1]["headers"][-1] == "DUT #16300"
+
+
+# --------------------------------------------------------------------------
+# Zero-DUT degenerate chunk (final review minor 3)
+# --------------------------------------------------------------------------
+
+class TestZeroDutChunk:
+    """An empty order must produce a valid spec: no mirror geometry (the
+    naive mirror_last = die_col(0) = "M" < mirror_first = "N" inverts the
+    flag range); no-limit FAILS formulas degenerate onto the empty visible
+    range instead."""
+
+    def test_empty_order_builds_valid_spec_without_table(self):
+        spec = build([], [])[0]
+        assert spec["die_columns"] == []
+        assert spec["flag_first_col"] == "M"   # no mirrors past a zero-width die span
+        assert "table" not in spec
+        assert spec["headers"] == BASE_HEADERS
+        assert spec["freeze_panes"] == "M17"
+        # metadata formulas stay well-formed (M2:M2, not the inverted N2:M2)
+        assert spec["metadata_rows"][0][6:8] == ["=MIN(M2:M2)", "=MAX(M2:M2)"]
+
+    def test_no_limit_fails_formula_degenerates_to_visible_range(self):
+        tests = [dict(name="1_RX/Margin", num=11, unit="dB", llimit=np.nan,
+                      hlimit=np.nan, rec=REC.PTR, data={})]
+        spec = build(tests, [])[0]
+        # mirror range collapses onto M (the empty visible range), not N:M
+        assert spec["rows"][0][11] == '=SUMPRODUCT((M17:M17<>"")*(M17:M17=1))'
 
 
 # --------------------------------------------------------------------------

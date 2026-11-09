@@ -75,8 +75,10 @@ class TestModernTheme:
     def test_cpk_band_fills_order(self, theme):
         assert theme.cpk_band_fills() == ["A7F3D0", "D1FAE5", "FEF3C7", "FECACA"]
 
-    def test_thin_border_sides(self, theme):
-        border = theme.thin_border
+    def test_border_sides(self, theme):
+        # single border style (the duplicate `thin_border` alias was removed)
+        assert not hasattr(theme, "thin_border")
+        border = theme.border
         for side in (border.left, border.right, border.top, border.bottom):
             assert side is not None
             assert side.style == "thin"
@@ -86,5 +88,5 @@ class TestModernTheme:
         # Repeated access must return the same object (styles are reused across cells).
         assert theme.header_font is theme.header_font
         assert theme.header_fill is theme.header_fill
-        assert theme.thin_border is theme.thin_border
+        assert theme.border is theme.border
         assert theme.body_alignment is theme.body_alignment

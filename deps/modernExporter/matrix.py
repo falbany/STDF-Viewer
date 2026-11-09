@@ -37,6 +37,7 @@ from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 
 from deps.SharedSrc import REC
 from deps.modernExporter.helpers import (
+    DUT_CHUNK_CAP,
     cpk_formula,
     die_col,
     fails_formula_flags,
@@ -117,7 +118,7 @@ def sanitize_cell(value):
 
 
 def build_dut_summary_spec(summaryTable, testTuples, order, dut_ids, sheet_name,
-                           float_format, die_cap=16300, tr=lambda s: s):
+                           float_format, die_cap=DUT_CHUNK_CAP, tr=lambda s: s):
     """Build one spec dict per die chunk of the DUT Summary sheet.
 
     `summaryTable` is the classic protocol dict (Data/TestInfo/dut2ind/dutInfo)
@@ -426,9 +427,15 @@ def _build_chunk(summaryTable, tests, order, chunk_start, chunk_ids, display_ids
 
     first_die = die_col(0)
     last_die = die_col(die_count - 1) if die_count > 0 else first_die
-    # Mirror columns follow the dies plus one spacer column.
-    mirror_first = die_col(die_count + 1)
-    mirror_last = die_col(2 * die_count)
+    if die_count > 0:
+        # Mirror columns follow the dies plus one spacer column.
+        mirror_first = die_col(die_count + 1)
+        mirror_last = die_col(2 * die_count)
+    else:
+        # Zero-DUT chunk: no mirrors exist; point the mirror range at the
+        # empty visible range so no-limit FAILS formulas stay well-formed
+        # (the naive die_col(0)/die_col(1) pair would invert to N:M).
+        mirror_first = mirror_last = first_die
 
     metadata_rows, masked_rows = _metadata_block(summaryTable, chunk_cells,
                                                  first_die, last_die)

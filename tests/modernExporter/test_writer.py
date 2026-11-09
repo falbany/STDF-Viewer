@@ -399,6 +399,18 @@ class TestPlainTable:
         ws = self.render_and_reload(spec)
         assert ws["A2"].value == "badname"
 
+    def test_empty_headers_and_rows_renders_empty_sheet(self):
+        # degenerate all-empty table: must not raise (the auto-filter width
+        # computation used to call get_column_letter(0) -> ValueError)
+        wb = Workbook()
+        ws = wb.active
+        render_plain_table(ws, {"name": "Empty", "headers": [], "rows": []},
+                           ModernTheme())
+        assert ws.auto_filter.ref is None
+        assert ws.sheet_view.showGridLines is False
+        reloaded = roundtrip(wb)["Sheet"]
+        assert reloaded.auto_filter.ref is None
+
 
 # --------------------------------------------------------------------------
 # Integration: render a spec built by the real matrix.py builder

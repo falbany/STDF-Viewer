@@ -381,6 +381,12 @@ def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
     rows = spec.get("rows") or []
     formats = spec.get("number_formats") or {}
 
+    if not headers and not rows:
+        # degenerate all-empty table: nothing to draw — return before the
+        # zero-width auto-filter would call get_column_letter(0)
+        ws.sheet_view.showGridLines = False
+        return
+
     for column, value in enumerate(headers, start=1):
         _write_cell(ws, 1, column, value, theme.header_font,
                     theme.header_alignment, border=theme.border,

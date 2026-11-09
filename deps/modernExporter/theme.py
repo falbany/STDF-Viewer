@@ -157,7 +157,3 @@ class ModernTheme:
     @cached_property
     def group_fill(self) -> PatternFill:
         return self._solid_fill(GROUP_FILL_HEX)
-
-    @cached_property
-    def thin_border(self) -> Border:
-        return self._thin_border()
