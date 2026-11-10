@@ -365,6 +365,38 @@ class TestTransformStatHeader:
         assert info["param_inserted"] is True
         assert info["enabled"] is True
 
+    def test_stat_anchors_captured(self):
+        # fifth wave: Average / St. Dev. / Cpk anchors for the live Cpk
+        # formula — 0-based indices in the TRANSFORMED header (Param shifts
+        # everything right of Test Name)
+        info = transform_stat_header([""] + STAT_HHEADER)
+        assert info["avg_col"] == 11
+        assert info["std_col"] == 13
+        assert info["cpk_col"] == 10
+
+    def test_stat_anchors_shift_with_pattern_name_column(self):
+        header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
+        info = transform_stat_header(header)
+        assert (info["avg_col"], info["std_col"], info["cpk_col"]) == (12, 14, 11)
+
+    def test_stat_anchors_missing_degrade_to_none(self):
+        info = transform_stat_header(["", "Tests", "Mean"])
+        assert info["avg_col"] is None
+        assert info["std_col"] is None
+        assert info["cpk_col"] is None
+
+    def test_disabled_transform_anchors_none(self):
+        info = transform_stat_header(["VHeader", "Average", "Cpk"])
+        assert info["avg_col"] is None
+        assert info["std_col"] is None
+        assert info["cpk_col"] is None
+
+    def test_stat_anchors_normalized_matching(self):
+        # whitespace-normalized anchors, same ruling as the renames
+        info = transform_stat_header(
+            ["", "Average ", "St.  Dev.", "Cpk"])
+        assert (info["avg_col"], info["std_col"], info["cpk_col"]) == (4, 5, 6)
+
     def test_ftr_mix_pattern_name_after_param(self):
         header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
         info = transform_stat_header(header)
@@ -681,11 +713,28 @@ class TestStatisticsSheet:
         assert ws["I2"].value == 1.5       # SpecMax was "1.500"
         assert ws["J2"].value == 1         # Fail Num was "1"
         assert isinstance(ws["J2"].value, int)
-        assert ws["K2"].value == 1.23      # Cpk was "1.23"
         assert ws["O2"].value == 0.98      # Min was "0.980"
         assert ws["P2"].value == 1.02      # Max was "1.020"
         # text cells stay text
         assert ws["G2"].value == "V"
+
+    def test_cpk_cell_is_live_formula(self, generated):
+        # fifth wave: the Cpk cell overwrites the upstream-formatted string
+        # with the DUT-Summary-shaped formula over SpecMin (H) / SpecMax (I)
+        # / Average (L) / St. Dev. (N) at the row's Excel row
+        _, wb, _, _, _ = generated
+        ws = wb["Test Statistics"]
+        assert ws["K2"].value == (
+            '=IFERROR(MIN((I2-L2)/(3*N2),(L2-H2)/(3*N2)),"")')
+
+    def test_cpk_column_number_format(self, generated):
+        # controller ruling: "0.00" on the Cpk column, computed from the
+        # transformed header like the wave-3 spec_cols scientific formats
+        _, wb, _, _, _ = generated
+        ws = wb["Test Statistics"]
+        assert ws["K2"].number_format == "0.00"
+        # sibling numeric columns keep General
+        assert ws["O2"].number_format == "General"
 
     def test_spec_columns_stylized_like_dut_summary(self, generated):
         _, wb, _, _, _ = generated
@@ -765,12 +814,19 @@ class TestStatOnlyFtrFallback:
             ["AND(ISNUMBER(L2),L2>=1.67)"], ["AND(ISNUMBER(L2),L2>=1.33)"],
             ["AND(ISNUMBER(L2),L2>=1)"], ["AND(ISNUMBER(L2),L2<1)"]]
 
-    def test_infinity_cpk_cell_guarded_and_string(self, generated_stat_ftr):
+    def test_infinity_cpk_cell_replaced_by_formula(self, generated_stat_ftr):
         _, wb, _, _, _ = generated_stat_ftr
         ws = wb["Test Statistics"]
-        # the "∞" sentinel stays a string; the ISNUMBER guard is what keeps
-        # it unstyled in Excel (openpyxl only persists the rule formulas)
-        assert ws["L3"].value == "∞"
+        # fifth wave: the "∞" sentinel is gone — the Cpk cell holds the live
+        # formula (letters shifted by the Pattern Name column: SpecMin I,
+        # SpecMax J, Average M, St. Dev. O). σ=0 on the FTR row, so Excel
+        # evaluates IFERROR to "" — the display change is documented in the
+        # design addendum §16; the ISNUMBER guard keeps the cell unstyled
+        # either way (openpyxl only persists the rule formulas)
+        assert ws["L3"].value == (
+            '=IFERROR(MIN((J3-M3)/(3*O3),(M3-I3)/(3*O3)),"")')
+        assert ws["L2"].value == (
+            '=IFERROR(MIN((J2-M2)/(3*O2),(M2-I2)/(3*O2)),"")')
         for rule in cf_block(ws, "L2:L3"):
             for formula in rule.formula:
                 assert formula.startswith("AND(ISNUMBER(")

@@ -234,3 +234,52 @@ def metadata_stat_formulas(row: int, first: str, last: str,
     if std:
         formulas.append(stat_formula("STDEV", row, first, last))
     return tuple(formulas)
+
+
+# --------------------------------------------------------------------------
+# Fifth user-feedback wave (2026-11-10): live Test Statistics Cpk formula
+# --------------------------------------------------------------------------
+
+def build_stat_cpk_formula(spec_min_l: str, spec_max_l: str, avg_l: str,
+                           std_l: str, row_number: int) -> str:
+    """Live Cpk formula for one Test Statistics row, DUT-Summary shaped.
+
+    ``=IFERROR(MIN((<max>-<avg>)/(3*<std>),(<avg>-<min>)/(3*<std>)),"")``
+    with the column letters substituted: substituting the DUT Summary's
+    fixed E/F/I/J letters reproduces :func:`cpk_formula` verbatim (one
+    formula shape, two sheets). ``row_number`` is the 1-based Excel row.
+    The IFERROR blank covers σ=0 and missing/one-sided limits, so the
+    "∞" / "N/A" string sentinels disappear from the column.
+    """
+    return (f'=IFERROR(MIN(({spec_max_l}{row_number}-{avg_l}{row_number})'
+            f'/(3*{std_l}{row_number}),({avg_l}{row_number}-{spec_min_l}'
+            f'{row_number})/(3*{std_l}{row_number})),"")')
+
+
+def apply_cpk_formula(stat_row: list, header_info: dict, row_number: int) -> None:
+    """Overwrite the Cpk cell of one transformed Test Statistics row in
+    place with :func:`build_stat_cpk_formula`, computed from the row's
+    SpecMin/SpecMax/Average/St. Dev. columns.
+
+    ``header_info`` carries the 0-based anchors from
+    ``generator.transform_stat_header`` (``spec_cols``, ``avg_col``,
+    ``std_col``, ``cpk_col``). No-op when the transform is disabled or any
+    of the four anchors is missing (translated-UI degradation — the cell
+    keeps its upstream string), and when a degraded row is shorter than
+    the Cpk column (no IndexError, no phantom cells).
+    """
+    if not header_info.get("enabled"):
+        return
+    spec_cols = header_info.get("spec_cols")
+    avg_col = header_info.get("avg_col")
+    std_col = header_info.get("std_col")
+    cpk_col = header_info.get("cpk_col")
+    if (spec_cols is None or avg_col is None or std_col is None
+            or cpk_col is None):
+        return
+    if not cpk_col < len(stat_row):
+        return
+    stat_row[cpk_col] = build_stat_cpk_formula(
+        get_column_letter(spec_cols[0] + 1), get_column_letter(spec_cols[1] + 1),
+        get_column_letter(avg_col + 1), get_column_letter(std_col + 1),
+        row_number)

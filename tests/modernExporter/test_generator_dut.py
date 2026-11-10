@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from openpyxl import load_workbook
+from openpyxl.chart import PieChart
 from PIL import Image as PILImage
 from PyQt5 import QtCore
 
@@ -23,6 +24,23 @@ from deps.SharedSrc import REC, getSetting, tab
 from deps.modernExporter.generator import ModernReportGenerator
 from deps.modernExporter.theme import number_format_from_settings
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
+
+
+def chart_title_text(chart) -> str:
+    """Concatenated rich-text runs of a chart title (reload-safe)."""
+    return "".join(run.t for p in chart.title.tx.rich.p
+                   for run in (p.r or []) if run.t)
+
+
+def bin_table(bin_type: str) -> list[list]:
+    """One classic waitForDataList(tab.Bin) row (single file): VHeader +
+    yield/total/count cells + one '"name"\\nBin N: P.P%' cell per non-zero
+    bin (DataInterface.py:596-608 flattened by STDF-Viewer.py:1600-1604;
+    all strings)."""
+    label = "Hardware Bin" if bin_type == "HB" else "Software Bin"
+    return [[f"{label} / Head1 / All Sites", "Yield: 90.00%", "Total: 10",
+             "Pass: 9", "Failed: 1", "Unknown: 0", "Superseded: 0",
+             '"PASS_BIN"\nBin 1: 90.0%', '"FAIL_BIN"\nBin 3: 10.0%']]
 
 
 @pytest.fixture(scope="module")
@@ -152,8 +170,8 @@ def build_generated(tmp_path, qapp, with_stat=False):
             # rows pass a single-tuple list — never equal here, two tests)
             return stat_table
         if chartType == tab.Bin:
-            return ([["BIN-HB-ROW", "count", 3]] if kargs.get("isHBIN")
-                    else [["BIN-SB-ROW", "count", 3]])
+            return (bin_table("HB") if kargs.get("isHBIN")
+                    else bin_table("SB"))
         if chartType == tab.Wafer:
             return [["WAFER-W01-ROW", "Total DUTs", 3]]
         return [["TREND-ROW", "mean", 1.1]]
@@ -270,17 +288,108 @@ class TestDutSummarySheet:
 # --------------------------------------------------------------------------
 
 class TestChartSheets:
+    @pytest.fixture(autouse=True)
+    def seed_bin_colors(self):
+        """The global bin-color dicts are empty until a STDF loads
+        (setSettingDefaultColor); seed both so the pies carry per-slice
+        DataPoint colors, restored afterwards."""
+        settings = getSetting()
+        seeded = {1: "#00CC00", 3: "#CC0000"}
+        settings.color.hbin_colors.update(seeded)
+        settings.color.sbin_colors.update(seeded)
+        yield
+        for key in seeded:
+            settings.color.hbin_colors.pop(key, None)
+            settings.color.sbin_colors.pop(key, None)
+
     def test_images_embedded(self, generated):
+        # fifth wave: Wafer/Trend keep the embedded PNGs — Bin no longer
+        # calls waitForImage at all
         gen, _, _, _, _ = generated
-        for name in ("Bin Chart", "Wafer Map", "Trend Chart"):
+        for name in ("Wafer Map", "Trend Chart"):
             assert len(gen._wb[name]._images) >= 1, name
 
-    def test_bin_stat_rows_written(self, generated):
+    def test_bin_sheet_has_no_images(self, generated):
+        gen, _, _, _, _ = generated
+        assert len(gen._wb["Bin Chart"]._images) == 0
+
+    def test_bin_native_pie_charts(self, generated):
+        # fifth wave: two native pies per head/site block (hardware + software
+        # bins) — charts survive the save/reload round-trip
         _, wb, _, _, _ = generated
-        values = {c.value for row in wb["Bin Chart"].iter_rows()
-                  for c in row if c.value is not None}
-        assert "BIN-HB-ROW" in values
-        assert "BIN-SB-ROW" in values
+        charts = wb["Bin Chart"]._charts
+        assert len(charts) == 2
+        assert all(isinstance(c, PieChart) for c in charts)
+        titles = [chart_title_text(c) for c in charts]
+        assert titles == ["Hardware Bin — Head1 / All Sites",
+                          "Software Bin — Head1 / All Sites"]
+        # side-by-side anchors: HB at A1 (row 0 / col 0), SB at H1 (col 7)
+        assert [(c.anchor._from.row, c.anchor._from.col) for c in charts] == [
+            (0, 0), (0, 7)]
+        # hidden helper columns must still be plotted (survives the
+        # round-trip: plotVisOnly val="0")
+        assert all(c.visible_cells_only is False for c in charts)
+
+    def test_bin_chart_construction_in_memory(self, generated):
+        # in-memory-only attributes (style / size are defaults after a
+        # reload): built-in style 10, 9x7 cm, percent data labels
+        gen, _, _, _, _ = generated
+        for chart in gen._wb["Bin Chart"]._charts:
+            assert chart.style == 10
+            assert chart.width == 9
+            assert chart.height == 7
+            assert chart.dataLabels.showPercent is True
+
+    def test_bin_slice_colors_from_settings(self, generated):
+        # per-slice DataPoint colors from the settings bin-color dicts,
+        # 6-digit hex without the leading "#"
+        gen, _, _, _, _ = generated
+        settings = getSetting()
+        for chart, color_dict in (
+                (gen._wb["Bin Chart"]._charts[0], settings.color.hbin_colors),
+                (gen._wb["Bin Chart"]._charts[1], settings.color.sbin_colors)):
+            points = chart.series[0].data_points
+            assert [p.idx for p in points] == [0, 1]
+            assert [p.graphicalProperties.solidFill.srgbClr for p in points] \
+                == [color_dict[1].lstrip("#")[:6],
+                    color_dict[3].lstrip("#")[:6]]
+
+    def test_bin_helper_block_hidden_columns(self, generated):
+        # helper data in fixed far columns BJ/BK, header "Bin"/"Count" +
+        # one row per bin; both columns hidden; the two charts of the block
+        # use distinct helper row ranges (HB 1..3, SB 5..7)
+        _, wb, _, _, _ = generated
+        ws = wb["Bin Chart"]
+        assert ws["BJ1"].value == "Bin"
+        assert ws["BK1"].value == "Count"
+        assert ws["BJ2"].value == "Bin 1 - PASS_BIN"
+        assert ws["BK2"].value == 9
+        assert isinstance(ws["BK2"].value, int)
+        assert ws["BJ3"].value == "Bin 3 - FAIL_BIN"
+        assert ws["BK3"].value == 1
+        assert ws["BJ5"].value == "Bin"
+        assert ws["BJ6"].value == "Bin 1 - PASS_BIN"
+        assert ws["BJ7"].value == "Bin 3 - FAIL_BIN"
+        for letter in ("BJ", "BK"):
+            assert ws.column_dimensions[letter].hidden is True
+
+    def test_bin_stat_rows_written(self, generated):
+        # the themed HB/SB text tables survive below the pies (first block:
+        # charts consume 15 rows = ceil(7cm/0.21in) + 1 gap, tables at 15+)
+        _, wb, _, _, _ = generated
+        ws = wb["Bin Chart"]
+        assert ws["A15"].value == "Hardware Bin / Head1 / All Sites"
+        assert ws["A16"].value == "Software Bin / Head1 / All Sites"
+        assert ws["B15"].value == "Yield: 90.00%"
+        assert ws["C15"].value == "Total: 10"
+
+    def test_bin_sheet_gridlines_off_and_autofit_kept(self, generated):
+        # the brief lists gridlines-off as existing Bin-sheet behavior; the
+        # chart sheets bypass render_plain_table (where plain sheets get
+        # it), so writeBinChart now pins it explicitly — autofit unchanged
+        _, wb, _, _, _ = generated
+        ws = wb["Bin Chart"]
+        assert ws.sheet_view.showGridLines is False
 
     def test_wafer_and_trend_stat_rows_written(self, generated):
         _, wb, _, _, _ = generated
@@ -294,7 +403,9 @@ class TestChartSheets:
     def test_chart_columns_autofit(self, generated):
         _, wb, _, _, _ = generated
         dims = wb["Bin Chart"].column_dimensions
-        assert dims["A"].width == pytest.approx(len("BIN-SB-ROW") * 1.1)
+        # longest column-A cell: the two 32-char VHeaders
+        assert dims["A"].width == pytest.approx(
+            len("Software Bin / Head1 / All Sites") * 1.1)
 
 
 # --------------------------------------------------------------------------

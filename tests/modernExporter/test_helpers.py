@@ -8,6 +8,8 @@ from deps.modernExporter.helpers import (
     DEFAULT_PARAM_PATTERN,
     DUT_CHUNK_CAP,
     TEMPERATURE_RE,
+    apply_cpk_formula,
+    build_stat_cpk_formula,
     col_range,
     compile_param_pattern,
     cpk_formula,
@@ -298,3 +300,81 @@ class TestMetadataStatFormulas:
         # though no metadata row uses that combination today
         assert metadata_stat_formulas(22, "M", "O", mean=False, std=True) == (
             "=MIN(M22:O22)", "=MAX(M22:O22)", "=STDEV(M22:O22)")
+
+
+# --------------------------------------------------------------------------
+# Fifth user-feedback wave: live Test Statistics Cpk formula
+# --------------------------------------------------------------------------
+
+class TestBuildStatCpkFormula:
+    """DUT-Summary-shaped Cpk formula with dynamic column letters (the
+    Test Statistics columns shift with the Param / Pattern Name / MPR mix
+    inserts, so the letters are parameters, never literals)."""
+
+    def test_spec_string(self):
+        # standard transformed header: SpecMin H, SpecMax I, Average L,
+        # St. Dev. N, first data row 2
+        assert build_stat_cpk_formula("H", "I", "L", "N", 2) == (
+            '=IFERROR(MIN((I2-L2)/(3*N2),(L2-H2)/(3*N2)),"")')
+
+    def test_same_shape_as_dut_summary_formula(self):
+        # substituting the DUT Summary's fixed E/F/I/J letters reproduces
+        # helpers.cpk_formula verbatim — one formula shape, two sheets
+        assert build_stat_cpk_formula("E", "F", "I", "J", 17) == cpk_formula(17)
+
+    def test_double_digit_rows(self):
+        formula = build_stat_cpk_formula("A", "B", "C", "D", 123)
+        assert "(B123-C123)" in formula
+        assert "(C123-A123)/(3*D123)" in formula
+        assert formula.endswith('),"")')
+
+
+class TestApplyCpkFormula:
+    """Overwrites the Cpk cell of a transformed stat row with the live
+    formula; graceful no-ops for the degradation cases."""
+
+    # standard transformed header indices: SpecMin 7, SpecMax 8, Cpk 10,
+    # Average 11, Median 12, St. Dev. 13
+    INFO = {"enabled": True, "spec_cols": (7, 8), "avg_col": 11,
+            "std_col": 13, "cpk_col": 10}
+
+    def test_overwrites_cpk_cell_in_place(self):
+        row = [0] * 14
+        row[10] = "1.23"   # upstream-formatted string
+        apply_cpk_formula(row, self.INFO, 2)
+        assert row[10] == '=IFERROR(MIN((I2-L2)/(3*N2),(L2-H2)/(3*N2)),"")'
+
+    def test_row_number_is_the_excel_row(self):
+        row = [0] * 14
+        apply_cpk_formula(row, self.INFO, 7)
+        assert row[10] == '=IFERROR(MIN((I7-L7)/(3*N7),(L7-H7)/(3*N7)),"")'
+
+    def test_disabled_transform_noop(self):
+        info = dict(self.INFO, enabled=False)
+        row = [0] * 14
+        apply_cpk_formula(row, info, 2)
+        assert row[10] == 0
+
+    @pytest.mark.parametrize("key",
+                             ["spec_cols", "avg_col", "std_col", "cpk_col"])
+    def test_missing_anchor_noop(self, key):
+        # translated UI: any of the four anchors missing degrades to a no-op
+        info = dict(self.INFO)
+        info[key] = None
+        row = [0] * 14
+        apply_cpk_formula(row, info, 2)
+        assert row[10] == 0
+
+    def test_missing_anchor_keys_tolerated(self):
+        # header_info dicts without the fifth-wave keys (older call sites)
+        # degrade to a no-op, never a KeyError
+        row = [0] * 14
+        apply_cpk_formula(row, {"enabled": True}, 2)
+        assert row[10] == 0
+
+    def test_short_degraded_row_no_crash(self):
+        # unparseable VHeader shrinks the row; a cpk_col off the end writes
+        # nothing (no IndexError, no phantom cells)
+        row = [0] * 5
+        apply_cpk_formula(row, self.INFO, 2)
+        assert row == [0] * 5

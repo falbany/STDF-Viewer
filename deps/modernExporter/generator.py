@@ -45,26 +45,37 @@ mirroring the classic cursor gaps and progress cadence.
 """
 
 from itertools import product
+from math import ceil
 import re
 
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from PyQt5 import QtCore
 
-from deps.SharedSrc import REC, tab
+from deps.SharedSrc import REC, getSetting, tab
 from deps.uic_stdExporter import (
     ReportSelection,
     dataChannel,
     reportGenerator,
     signals,
 )
-from deps.modernExporter.helpers import split_test_name
+from deps.modernExporter.charts import (
+    BIN_CHART_HEIGHT_CM,
+    aggregate_bin_counts,
+    bin_label,
+    build_bin_pie,
+)
+from deps.modernExporter.helpers import apply_cpk_formula, split_test_name
 from deps.modernExporter.matrix import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
     build_dut_summary_spec,
 )
-from deps.modernExporter.sheets import insert_report_image, plain_table_spec
+from deps.modernExporter.sheets import (
+    ROW_HEIGHT_IN,
+    insert_report_image,
+    plain_table_spec,
+)
 from deps.modernExporter.theme import ModernTheme
 from deps.modernExporter.writer import (
     render_matrix_sheet,
@@ -117,11 +128,22 @@ VHEADER_RE = re.compile(
 STAT_SPEC_FORMAT = "0.00E+00"
 STAT_SPEC_FILL_HEX = "FFF3CD"
 
+# Live Cpk display format (fifth wave 2026-11-10, controller ruling): the
+# formula results render with 2 decimals like the DUT Summary's Cpk column.
+STAT_CPK_FORMAT = "0.00"
+
+# Bin Chart pie helper blocks live in this fixed far column (labels) and
+# the next one (counts); both are hidden by the chart factory. A fixed far
+# column keeps them clear of the auto-fitted table columns (BJ/BK > cap 60).
+BIN_HELPER_COL = 62
+
 # English-only header anchors (whitespace-normalized matching).
 _STAT_RENAMES = {"Low Limit": "SpecMin", "High Limit": "SpecMax"}
 _STAT_TEST_NAME = "Test Name"
 _STAT_FAIL_NUM = "Fail Num"
 _STAT_CPK = "Cpk"
+_STAT_AVERAGE = "Average"
+_STAT_STD = "St. Dev."
 _STAT_PATTERN_NAME = "Pattern Name"
 
 
@@ -182,16 +204,20 @@ def transform_stat_header(header_row) -> dict:
       (English-only anchor).
 
     Returns ``{"header": [...], "enabled": bool, "param_inserted": bool,
-    "spec_cols": (i, j) | None}`` where ``spec_cols`` is the 0-based
-    (SpecMin, SpecMax) column pair in the TRANSFORMED header (None when
-    either limit anchor was missing — translated UIs degrade to
-    untransformed columns). An unexpected non-blank first cell disables
-    the whole transform (header returned untouched).
+    "spec_cols": (i, j) | None, "avg_col": int | None, "std_col": int | None,
+    "cpk_col": int | None}`` where ``spec_cols`` is the 0-based (SpecMin,
+    SpecMax) column pair in the TRANSFORMED header (None when either limit
+    anchor was missing — translated UIs degrade to untransformed columns)
+    and the fifth-wave keys carry the 0-based Average / St. Dev. / Cpk
+    anchors for the live Cpk formula (normalized matching, None when
+    missing). An unexpected non-blank first cell disables the whole
+    transform (header returned untouched, all anchors None).
     """
     cells = [str(cell) if cell is not None else "" for cell in header_row]
     if not cells or _norm_header_text(cells[0]) != "":
         return {"header": list(header_row), "enabled": False,
-                "param_inserted": False, "spec_cols": None}
+                "param_inserted": False, "spec_cols": None,
+                "avg_col": None, "std_col": None, "cpk_col": None}
     body = [str(cell) for cell in cells[1:]]
     normalized = [_norm_header_text(cell) for cell in body]
     renamed = [_STAT_RENAMES.get(norm, cell)
@@ -203,8 +229,16 @@ def transform_stat_header(header_row) -> dict:
     spec_cols = None
     if "SpecMin" in renamed and "SpecMax" in renamed:
         spec_cols = (header.index("SpecMin"), header.index("SpecMax"))
+    norm_header = [_norm_header_text(cell) for cell in header]
+
+    def _anchor(text):
+        return norm_header.index(text) if text in norm_header else None
+
     return {"header": header, "enabled": True,
-            "param_inserted": param_inserted, "spec_cols": spec_cols}
+            "param_inserted": param_inserted, "spec_cols": spec_cols,
+            "avg_col": _anchor(_STAT_AVERAGE),
+            "std_col": _anchor(_STAT_STD),
+            "cpk_col": _anchor(_STAT_CPK)}
 
 
 def transform_stat_row(row, header_info: dict) -> list:
@@ -483,6 +517,12 @@ class ModernReportGenerator(reportGenerator):
                 letter = get_column_letter(column_index + 1)
                 number_formats[letter] = STAT_SPEC_FORMAT
                 column_fills[letter] = STAT_SPEC_FILL_HEX
+        # Cpk display format (fifth wave, controller ruling): "0.00" on the
+        # formula column, letter computed from the transformed header like
+        # the spec_cols formats above
+        cpk_col = header_info.get("cpk_col")
+        if cpk_col is not None:
+            number_formats[get_column_letter(cpk_col + 1)] = STAT_CPK_FORMAT
 
         # Fail Num / Cpk conditional formatting (fourth wave): letters from
         # the transformed header, data rows only — render_plain_table adds
@@ -508,6 +548,10 @@ class ModernReportGenerator(reportGenerator):
             stat_row = transform_stat_row(dataRow, header_info)
             if stat_row_is_ftr(stat_row, header_info, self._ftr_tests):
                 apply_ftr_pseudo_limits(stat_row, header_info)
+            # live Cpk formula (fifth wave): AFTER the pseudo-limits, so FTR
+            # rows compute from the ±0.999999 synthetic limits exactly like
+            # the DUT Summary; row_number = 2 + data_row_index (header row 1)
+            apply_cpk_formula(stat_row, header_info, 2 + offset)
             written_rows.append(stat_row)
             write_plain_row(
                 StatSheet, 2 + offset, stat_row, self._theme,
@@ -603,20 +647,39 @@ class ModernReportGenerator(reportGenerator):
 
         key = ReportSelection.Bin
         row = self._row.get(key, 0)
+        settings = getSetting()
+        # hidden helper blocks (fixed far column) advance per chart so the
+        # series references of earlier blocks stay intact
+        helper_row = 1
         for head, site in product(self.selectedHeads, self.selectedSites):
             if self.forceQuit:
                 return
-            # get bin image from GUI thread and insert to the sheet
-            image_io = self.waitForImage(testTuple=(0, 0, ""), head=head,
-                                         sites=[site],
-                                         fids=self.selectedFiles,
-                                         chartType=tab.Bin)
-            row += insert_report_image(BinSheet, image_io, row)
-            # get hard bin list, then soft bin list
-            for isHBIN in (True, False):
-                dataTable = self.waitForDataList([head], [site],
-                                                 self.selectedFiles, tab.Bin,
-                                                 {"isHBIN": isHBIN})
+            # get hard bin list, then soft bin list — the same
+            # waitForDataList calls as before; each table feeds BOTH the
+            # pie chart and the themed text rows below it
+            tables = [self.waitForDataList([head], [site],
+                                           self.selectedFiles, tab.Bin,
+                                           {"isHBIN": isHBIN})
+                      for isHBIN in (True, False)]
+            # native pies replace the embedded PNG (fifth wave): HB anchored
+            # at column A, SB at H; rows consumed mirror
+            # insert_report_image's spacing math (chart height + 1 gap)
+            site_label = "All Sites" if site == -1 else f"Site{site}"
+            for isHBIN, dataTable in zip((True, False), tables):
+                title = ("Hardware Bin" if isHBIN else "Software Bin")
+                colors = (settings.color.hbin_colors if isHBIN
+                          else settings.color.sbin_colors)
+                bins = [(bin_num, bin_label(bin_num, name), count)
+                        for bin_num, name, count
+                        in aggregate_bin_counts(dataTable)]
+                anchor = f"{'A' if isHBIN else 'H'}{row + 1}"
+                build_bin_pie(BinSheet, f"{title} — Head{head} / {site_label}",
+                              bins, colors, anchor, BIN_HELPER_COL,
+                              helper_row=helper_row)
+                helper_row += 2 + len(bins)   # header + data rows + gap
+            row += ceil((BIN_CHART_HEIGHT_CM / 2.54) / ROW_HEIGHT_IN) + 1
+            # themed bin tables under the charts (unchanged)
+            for dataTable in tables:
                 for dataList in dataTable:
                     self._write_body_row(BinSheet, row, dataList)
                     row += 1
@@ -626,6 +689,9 @@ class ModernReportGenerator(reportGenerator):
 
         self.loopCount += 1
         self.sendProgress()
+        # gridlines off (every other sheet's look; the chart sheets bypass
+        # render_plain_table, which is where the plain sheets get it)
+        BinSheet.sheet_view.showGridLines = False
         self._autofit_columns(BinSheet)
 
     def writeWaferMap(self):
