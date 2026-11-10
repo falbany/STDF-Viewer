@@ -5,8 +5,7 @@
 # Author: falbany (fork)
 # Created Date: November 10th 2026
 # -----
-# Last Modified: Tue Nov 10 2026
-# Modified By: falbany (fork)
+# Last Modified: Tue Nov 10 2026# Modified By: falbany (fork)
 # -----
 # Copyright (c) 2026 falbany (fork)
 # This program is free software: you can redistribute it and/or modify
@@ -101,6 +100,15 @@ blocks is a SINGLE blank row, the tables move right to columns B:E under
 a B:E title band, and each KPI card gains a medium outline in its own
 accent (``apply_card_border``, reusing the fill palette constants — the
 band rows derive from the chart height: ``BIN_CHART_ROW_SPAN = 12``).
+
+Ninth user-feedback wave (2026-11-10, A4 print — see the
+2026-11-10-bin-chart-a4-print design): the donuts grow to 8.5 x 7 cm on
+built-in color palette 1 (``BIN_CHART_ROW_SPAN = 14``), columns A:F
+share width 20.4 (each chart = 3 columns ≈ 8.5 cm under the Times New
+Roman 8 workbook default), the KPI card borders switch to dark accent
+tokens, and the sheet gains a Title-banner / Headline 1 headline
+hierarchy (banner, "Charts", "Detailed Bin Contribution") with the
+per-table bands on built-in ``Headline 2``.
 """
 
 import re
@@ -127,26 +135,27 @@ from deps.exporter.theme import (
 )
 
 # Chart geometry in centimetres (openpyxl chart.width / chart.height units).
-# Eighth wave: two 7 x 6 cm donuts TILE the Bin sheet's A:F page — each
-# chart spans 3 columns of the uniform width 12 (3 x ~2.35 cm ≈ 7.05 cm),
-# HB on A..C and SB on D..F of the same band rows.
-BIN_CHART_WIDTH_CM = 7.0
-BIN_CHART_HEIGHT_CM = 6.0
+# Ninth wave: two 8.5 x 7 cm donuts TILE the Bin sheet's A:F page — each
+# chart spans 3 columns of the uniform width 20.4 (3 x ~2.83 cm ≈ 8.5 cm;
+# MDW=5 px for Times New Roman 8), HB on A..C and SB on D..F of the same
+# band rows.
+BIN_CHART_WIDTH_CM = 8.5
+BIN_CHART_HEIGHT_CM = 7.0
 
-# Rows one charts band spans vertically (eighth wave: the band is its own
+# Rows one charts band spans vertically (ninth wave: the band is its own
 # fixed layout region between two single-blank separator rows — no gap
 # row folded into the constant anymore):
-# ceil((6 / 2.54) / 0.21) == 12 (block rows 7..18).
+# ceil((7 / 2.54) / 0.21) == 14 (block rows 10..23).
 BIN_CHART_ROW_SPAN = ceil((BIN_CHART_HEIGHT_CM / 2.54) / ROW_HEIGHT_IN)
 
 # Donut hole diameter as a percentage of the chart diameter (sixth wave,
 # user mockup: 50-60 band; openpyxl clamps to NestedMinMax 1..90).
 BIN_DONUT_HOLE_SIZE = 55
 
-# Built-in chart style (eighth wave, builtin disposition 7 — was 6): the
-# OOXML legacy style id selects a gallery color scheme; slices are NOT
+# Built-in chart style (ninth wave: built-in color palette 1 — was 7):
+# the OOXML legacy style id selects a gallery color scheme; slices are NOT
 # overridden per-slice (ruled in the seventh wave, unchanged).
-BIN_CHART_STYLE = 7
+BIN_CHART_STYLE = 1
 
 # Helper block headers: labels column helper_col, counts column
 # helper_col + 1, one header row + one row per bin.
@@ -166,11 +175,13 @@ BIN_TOTAL_FONT = Font(name=FONT_NAME, size=FONT_SIZE, bold=True)
 # Structured tables live in columns B:E (eighth wave: column A belongs to
 # the page grid the KPI cards and the tiled donuts share).
 BIN_TABLE_FIRST_COL = 2
-# Uniform Bin-sheet page width (eighth wave, R2): columns A:F all share
-# width 12 — the KPI cards span the same grid and each tiled 7 cm donut
-# needs 3 of these columns (~7.05 cm); G+ keep their autofit widths.
+# Uniform Bin-sheet page width (ninth wave): columns A:F all share width
+# 20.4 — each tiled 8.5 cm donut needs 3 of these columns (3 x (20.4 * 5
+# + 5) px = 321 px = 8.50 cm at MDW=5 px for Times New Roman 8 — the
+# workbook Normal font set by set_workbook_default_font); G+ keep their
+# autofit widths.
 BIN_PAGE_WIDTH_RANGE = ("A", "F")
-BIN_PAGE_COLUMN_WIDTH = 12
+BIN_PAGE_COLUMN_WIDTH = 20.4
 
 # Upstream "Total: N" cell (DataInterface.py:595) — the reconstruction
 # denominator; unparseable cells are skipped by the callers.

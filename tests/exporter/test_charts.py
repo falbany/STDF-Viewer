@@ -38,6 +38,7 @@ from deps.exporter.charts import (
     BIN_CHART_ROW_SPAN,
     BIN_CHART_WIDTH_CM,
     BIN_DONUT_HOLE_SIZE,
+    BIN_PAGE_COLUMN_WIDTH,
     BIN_TABLE_HEADERS,
     aggregate_bin_counts,
     aggregate_kpi,
@@ -568,12 +569,15 @@ class TestApplyCardBorder:
 
 class TestChartGeometry:
     def test_tile_size_and_band_rows(self):
-        # the two donuts tile the A:F page: 7 cm wide = 3 columns at the
-        # uniform width 12 (~3 x 2.35 cm), 6 cm tall = 12 default rows
-        assert BIN_CHART_WIDTH_CM == 7.0
-        assert BIN_CHART_HEIGHT_CM == 6.0
+        # ninth wave: two 8.5 x 7 cm donuts tile the A:F page; 7 cm tall
+        # = 14 default rows; each chart spans 3 columns of width 20.4
+        # (3 x (20.4 * 5 + 5) px = 321 px = 8.50 cm at MDW=5 for TNR 8)
+        assert BIN_CHART_WIDTH_CM == 8.5
+        assert BIN_CHART_HEIGHT_CM == 7.0
         assert BIN_CHART_ROW_SPAN == ceil((BIN_CHART_HEIGHT_CM / 2.54) / ROW_HEIGHT_IN)
-        assert BIN_CHART_ROW_SPAN == 12  # band rows 7..18 of each block
+        assert BIN_CHART_ROW_SPAN == 14  # band rows 10..23 of each block
+        px = 3 * (BIN_PAGE_COLUMN_WIDTH * 5 + 5)
+        assert abs(px / 96 * 2.54 - 8.5) < 0.05
 
 
 # --------------------------------------------------------------------------
@@ -608,10 +612,10 @@ class TestBuildBinDonut:
         assert isinstance(chart, DoughnutChart)
         assert chart.anchor == "A6"
         assert chart.title is not None
-        assert chart.style == 7  # eighth wave: builtin disposition 7
+        assert chart.style == 1  # ninth wave: built-in color palette 1
         assert chart.dataLabels.showPercent is True
-        assert chart.width == 7  # eighth wave: tiles 3 width-12 columns
-        assert chart.height == 6  # 12 default rows = BIN_CHART_ROW_SPAN
+        assert chart.width == 8.5  # ninth wave: tiles 3 width-20.4 columns
+        assert chart.height == 7  # 14 default rows = BIN_CHART_ROW_SPAN
         # mockup: donut hole (openpyxl 3.1.5 DoughnutChart.holeSize,
         # NestedMinMax 1..90 — the factory constant sits in the 50-60 band)
         assert chart.holeSize == BIN_DONUT_HOLE_SIZE

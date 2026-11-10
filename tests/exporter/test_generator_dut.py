@@ -497,13 +497,13 @@ class TestChartSheets:
 
     def test_bin_chart_construction_in_memory(self, generated):
         # in-memory-only attributes (style / size are defaults after a
-        # reload): built-in style 7 (eighth wave — builtin disposition 7),
-        # 7x6 cm tiles, percent data labels
+        # reload): built-in palette 1 (ninth wave), 8.5x7 cm tiles,
+        # percent data labels
         gen, _, _, _, _ = generated
         for chart in gen._wb["Bin Chart"]._charts:
-            assert chart.style == 7
-            assert chart.width == 7
-            assert chart.height == 6
+            assert chart.style == 1
+            assert chart.width == 8.5
+            assert chart.height == 7
             assert chart.dataLabels.showPercent is True
 
     def test_bin_charts_use_builtin_palette(self, generated):
@@ -536,65 +536,66 @@ class TestChartSheets:
     # -- structured tables after the fixed charts band (eighth wave) ---------
 
     def test_bin_structured_tables_written(self, generated):
-        # eighth-wave layout per block: title 1, blank 2, KPIs 3-5, blank 6,
-        # charts band 7-18 (12 rows = BIN_CHART_ROW_SPAN at 6 cm), blank 19,
-        # HB title 20 + header 21 + 2 data rows 22-23 + Total 24, blank 25,
-        # SB title 26 + header 27 + data 28-29 + Total 30; tables sit in
-        # columns B:E (column A belongs to the page grid)
+        # ninth-wave geometry per block (no headlines yet — Task 6 adds
+        # them): title 1, blank 2, KPIs 3-5, blank 6, charts band 7-20
+        # (14 rows = BIN_CHART_ROW_SPAN at 7 cm), blank 21, HB title 22 +
+        # header 23 + 2 data rows 24-25 + Total 26, blank 27, SB title 28
+        # + header 29 + data 30-31 + Total 32; tables sit in columns B:E
+        # (column A belongs to the page grid)
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
         # HB section: Output-styled title band, blue header, two data rows,
         # bold Total
-        assert ws["B20"].value == "Hardware Bins — Head1 / All Sites"
-        assert ws["B20"].style == "Output"
-        assert [ws.cell(row=21, column=c).value for c in range(2, 6)] == [
+        assert ws["B22"].value == "Hardware Bins — Head1 / All Sites"
+        assert ws["B22"].style == "Output"
+        assert [ws.cell(row=23, column=c).value for c in range(2, 6)] == [
             "Bin",
             "Value",
             "Count",
             "Distribution",
         ]
-        assert [ws[cell].value for cell in ("B22", "C22", "D22")] == [
+        assert [ws[cell].value for cell in ("B24", "C24", "D24")] == [
             "PASS_BIN",
             1,
             9,
         ]
-        assert ws["E22"].value == pytest.approx(0.9)
-        assert ws["E22"].number_format == "0.00%"
-        assert ws["E23"].value == pytest.approx(0.1)
-        assert ws["B24"].value == "Total"
-        assert ws["D24"].value == 10
-        assert isinstance(ws["D24"].value, int)
-        assert ws["E24"].value == 1.0
+        assert ws["E24"].value == pytest.approx(0.9)
         assert ws["E24"].number_format == "0.00%"
-        # SB section after ONE blank row (25): title 26, header 27,
-        # data 28-29, Total 30
-        assert ws["B26"].value == "Software Bins — Head1 / All Sites"
-        assert ws["B26"].style == "Output"
-        assert [ws.cell(row=27, column=c).value for c in range(2, 6)] == [
+        assert ws["E25"].value == pytest.approx(0.1)
+        assert ws["B26"].value == "Total"
+        assert ws["D26"].value == 10
+        assert isinstance(ws["D26"].value, int)
+        assert ws["E26"].value == 1.0
+        assert ws["E26"].number_format == "0.00%"
+        # SB section after ONE blank row (27): title 28, header 29,
+        # data 30-31, Total 32
+        assert ws["B28"].value == "Software Bins — Head1 / All Sites"
+        assert ws["B28"].style == "Output"
+        assert [ws.cell(row=29, column=c).value for c in range(2, 6)] == [
             "Bin",
             "Value",
             "Count",
             "Distribution",
         ]
-        assert ws["B30"].value == "Total"
-        assert ws["D30"].value == 10
+        assert ws["B32"].value == "Total"
+        assert ws["D32"].value == 10
 
     def test_bin_charts_band_geometry_single_blank_separators(self, generated):
-        # the fixed band rows 7..18 hold ONLY the two donuts (no cell values
+        # the fixed band rows 7..20 hold ONLY the two donuts (no cell values
         # in A:F — helper data lives in BJ/BK); the single blank rows 2, 6,
-        # 19, 25 are the ONLY separators between the bands
+        # 21, 27 are the ONLY separators between the bands
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        for row in (2, 6, 19, 25):
+        for row in (2, 6, 21, 27):
             assert all(ws.cell(row=row, column=c).value is None for c in range(1, 7)), (
                 row
             )
-        for row in range(7, 19):
+        for row in range(7, 21):
             assert all(ws.cell(row=row, column=c).value is None for c in range(1, 7)), (
                 row
             )
         # content rows sandwich the separators
-        for row in (1, 3, 4, 5, 20, 21, 22, 23, 24, 26, 27, 28, 29, 30):
+        for row in (1, 3, 4, 5, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32):
             assert any(
                 ws.cell(row=row, column=c).value is not None for c in range(1, 7)
             ), row
@@ -604,8 +605,8 @@ class TestChartSheets:
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
         ranges = {str(r) for r in ws.merged_cells.ranges}
-        assert "B20:E20" in ranges
-        assert "B26:E26" in ranges
+        assert "B22:E22" in ranges
+        assert "B28:E28" in ranges
 
     def test_bin_tables_autofilter_on_both(self, generated):
         # ruled: filter arrows on BOTH tables (mockup shows the SB arrows;
@@ -615,9 +616,9 @@ class TestChartSheets:
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
         assert sorted(ws.tables) == ["HB_Head1_AllSites", "SB_Head1_AllSites"]
-        # header..last-data rows at B:E; Total rows (24 / 30) outside
-        assert ws.tables["HB_Head1_AllSites"].ref == "B21:E23"
-        assert ws.tables["SB_Head1_AllSites"].ref == "B27:E29"
+        # header..last-data rows at B:E; Total rows (26 / 32) outside
+        assert ws.tables["HB_Head1_AllSites"].ref == "B23:E25"
+        assert ws.tables["SB_Head1_AllSites"].ref == "B29:E31"
         for name in ("HB_Head1_AllSites", "SB_Head1_AllSites"):
             table = ws.tables[name]
             assert table.autoFilter is not None
@@ -634,7 +635,7 @@ class TestChartSheets:
         # rows only
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        for data_range in ("E22:E23", "E28:E29"):
+        for data_range in ("E24:E25", "E30:E31"):
             (rule,) = [
                 r
                 for cf in ws.conditional_formatting
@@ -674,15 +675,16 @@ class TestChartSheets:
         assert "TREND-ROW" in trend
 
     def test_bin_sheet_uniform_page_widths(self, generated):
-        # eighth wave (R2): the Bin sheet is a fixed A:F page — all six
-        # columns share width 12 (KPI grid + two tiled 7 cm donuts = 3
-        # columns each); G+ keep their defaults (no column-dimension entry
-        # in the file — openpyxl would answer 13, its default width, on
-        # access), the autofit keeps sizing the hidden helper columns
+        # ninth wave: the Bin sheet is a fixed A:F page — all six columns
+        # share width 20.4 (KPI grid + two tiled 8.5 cm donuts = 3 columns
+        # each at MDW=5 for TNR 8); G+ keep their defaults (no
+        # column-dimension entry in the file — openpyxl would answer 13,
+        # its default width, on access), the autofit keeps sizing the
+        # hidden helper columns
         gen, wb, _, _, _ = generated
         dims = wb["Bin Chart"].column_dimensions
         for letter in ("A", "B", "C", "D", "E", "F"):
-            assert dims[letter].width == 12, letter
+            assert dims[letter].width == 20.4, letter
         assert "G" not in wb["Bin Chart"].column_dimensions  # beyond the page
         assert "G" not in gen._wb["Bin Chart"].column_dimensions
         assert dims["BJ"].hidden is True
