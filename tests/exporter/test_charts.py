@@ -634,8 +634,21 @@ class TestBuildBinDonut:
         assert isinstance(chart, DoughnutChart)
         assert chart.anchor == "A6"
         assert chart.title is not None
-        assert chart.style == 1  # ninth wave: built-in color palette 1
+        # ninth-wave print fix: style 1 is Excel's MONOCHROME GRAY scheme
+        # (the donuts rendered as flat gray rings); style 2 is the colorful
+        # palette-1 scheme the design meant (verified via an Excel render)
+        assert chart.style == 2
         assert chart.dataLabels.showPercent is True
+        # ninth-wave print fix: Excel renders MISSING dLbls show* flags as
+        # TRUE (labels stacked "Count; Bin N - name; count; pct" over the
+        # slices) — every flag is pinned explicitly
+        assert chart.dataLabels.showVal is False
+        assert chart.dataLabels.showCatName is False
+        assert chart.dataLabels.showSerName is False
+        assert chart.dataLabels.showLegendKey is False
+        assert chart.dataLabels.showBubbleSize is False
+        # white bold label font — readable on the saturated slice colors
+        assert chart.dataLabels.txPr is not None
         assert chart.width == 8.5  # ninth wave: tiles 3 width-20.4 columns
         assert chart.height == 7  # 14 default rows = BIN_CHART_ROW_SPAN
         # mockup: donut hole (openpyxl 3.1.5 DoughnutChart.holeSize,

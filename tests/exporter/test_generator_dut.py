@@ -525,17 +525,24 @@ class TestChartSheets:
         # hidden helper columns must still be plotted (survives the
         # round-trip: plotVisOnly val="0")
         assert all(c.visible_cells_only is False for c in charts)
+        # ninth-wave print fix: the pinned show* flags survive the reload
+        # (Excel renders MISSING flags as TRUE — label garbage over slices)
+        assert all(c.dataLabels.showVal is False for c in charts)
+        assert all(c.dataLabels.showCatName is False for c in charts)
+        assert all(c.dataLabels.showSerName is False for c in charts)
+        assert all(c.dataLabels.showLegendKey is False for c in charts)
+        assert all(c.dataLabels.showBubbleSize is False for c in charts)
         # mockup: donut hole in the 50-60 band, right-hand legend
         assert all(c.holeSize == 55 for c in charts)
         assert all(c.legend is not None and c.legend.position == "r" for c in charts)
 
     def test_bin_chart_construction_in_memory(self, generated):
         # in-memory-only attributes (style / size are defaults after a
-        # reload): built-in palette 1 (ninth wave), 8.5x7 cm tiles,
-        # percent data labels
+        # reload): colorful palette 1 (ninth-wave fix — style id 2; id 1 is
+        # Excel's gray monochrome scheme), 8.5x7 cm tiles, percent labels
         gen, _, _, _, _ = generated
         for chart in gen._wb["Bin Chart"]._charts:
-            assert chart.style == 1
+            assert chart.style == 2
             assert chart.width == 8.5
             assert chart.height == 7
             assert chart.dataLabels.showPercent is True
@@ -644,7 +651,23 @@ class TestChartSheets:
             )
         # content rows sandwich the separators
         for row in (
-            1, 3, 5, 6, 7, 9, 25, 26, 27, 28, 29, 30, 32, 33, 34, 35, 36,
+            1,
+            3,
+            5,
+            6,
+            7,
+            9,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            32,
+            33,
+            34,
+            35,
+            36,
         ):
             assert any(
                 ws.cell(row=row, column=c).value is not None for c in range(1, 7)

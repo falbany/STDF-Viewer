@@ -109,6 +109,14 @@ Roman 8 workbook default), the KPI card borders switch to dark accent
 tokens, and the sheet gains a Title-banner / Headline 1 headline
 hierarchy (banner, "Charts", "Detailed Bin Contribution") with the
 per-table bands on built-in ``Headline 2``.
+
+Ninth-wave print fix (same day, from the user's Excel print preview):
+``BIN_CHART_STYLE`` 1 → 2 (id 1 is Excel's MONOCHROME GRAY scheme — the
+donuts rendered as flat gray rings; id 2 is the colorful palette the
+design meant) and the donut data labels pin EVERY ``show*`` flag —
+Excel renders missing flags as TRUE, stacking
+"Count; Bin N - name; count; pct" over the slices — in a white bold
+theme font for contrast on the saturated slices.
 """
 
 import re
@@ -116,6 +124,13 @@ from math import ceil
 
 from openpyxl.chart import DoughnutChart, Reference
 from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.text import RichText
+from openpyxl.drawing.text import (
+    CharacterProperties,
+    Font as DrawingFont,
+    Paragraph,
+    ParagraphProperties,
+)
 from openpyxl.formatting.rule import DataBarRule
 from openpyxl.styles import Border, Font, Side
 from openpyxl.utils import get_column_letter
@@ -152,10 +167,30 @@ BIN_CHART_ROW_SPAN = ceil((BIN_CHART_HEIGHT_CM / 2.54) / ROW_HEIGHT_IN)
 # user mockup: 50-60 band; openpyxl clamps to NestedMinMax 1..90).
 BIN_DONUT_HOLE_SIZE = 55
 
-# Built-in chart style (ninth wave: built-in color palette 1 — was 7):
-# the OOXML legacy style id selects a gallery color scheme; slices are NOT
-# overridden per-slice (ruled in the seventh wave, unchanged).
-BIN_CHART_STYLE = 1
+# Built-in chart style (ninth-wave print fix: style id 2 — the id the
+# design's "colorful palette 1" meant. Id 1 is Excel's MONOCHROME GRAY
+# scheme and rendered the donuts as flat gray rings; id 2 is the blue/red
+# colorful palette, verified through an Excel render of both. Was 7, then
+# 1): the OOXML legacy style id selects a gallery color scheme; slices are
+# NOT overridden per-slice (ruled in the seventh wave, unchanged).
+BIN_CHART_STYLE = 2
+
+# Donut data-label text: white bold Times New Roman 9 — readable on the
+# saturated palette slices (ninth-wave print fix; default dark grey all
+# but vanished on the ring).
+BIN_LABEL_FONT_SIZE = 900  # CharacterProperties sz unit: hundredths of a pt
+
+
+def _donut_label_txpr():
+    """RichText for the donut percent labels: white bold theme font."""
+    run = CharacterProperties(
+        latin=DrawingFont(typeface=FONT_NAME),
+        sz=BIN_LABEL_FONT_SIZE,
+        b=True,
+        solidFill="FFFFFF",
+    )
+    return RichText(p=[Paragraph(pPr=ParagraphProperties(defRPr=run), endParaRPr=run)])
+
 
 # Helper block headers: labels column helper_col, counts column
 # helper_col + 1, one header row + one row per bin.
@@ -465,13 +500,16 @@ def build_bin_donut(
       "Bin" / "Count" + one row per bin) starting at ``helper_row`` — by
       default the row of ``anchor_cell``; pass an explicit row when two
       charts share the anchor row (the generator offsets the second one);
-    - the chart: title, built-in style ``BIN_CHART_STYLE`` (7 — builtin
-      disposition 7, eighth wave), percent data labels, counts column as
+    - the chart: title, built-in style ``BIN_CHART_STYLE`` (2 — the
+      colorful palette-1 scheme; id 1 is Excel's gray monochrome,
+      ninth-wave print fix), percent data labels with EVERY ``show*``
+      flag pinned (Excel renders missing flags as TRUE — label garbage;
+      ninth-wave print fix) in a white bold label font, counts column as
       data (``titles_from_data=True`` — the "Count" header cell becomes
       the series name), labels column as categories, donut hole
       ``BIN_DONUT_HOLE_SIZE``, legend on the right, ``visible_cells_only
-      = False`` so the hidden helper columns still plot, 7 x 6 cm (eighth
-      wave: tiles 3 columns of the uniform width 12);
+      = False`` so the hidden helper columns still plot, 8.5 x 7 cm
+      (ninth wave: tiles 3 columns of the uniform width 20.4);
     - NO per-slice ``DataPoint`` fills since the seventh wave (ruled):
       the slices follow the built-in style palette and bins are
       distinguished by labels/legend only — the settings bin-color dicts
@@ -495,7 +533,19 @@ def build_bin_donut(
     chart = DoughnutChart(holeSize=BIN_DONUT_HOLE_SIZE)
     chart.title = title
     chart.style = BIN_CHART_STYLE
-    chart.dataLabels = DataLabelList(showPercent=True)
+    # percent-only labels with EVERY show* flag pinned: Excel renders
+    # MISSING flags as TRUE, which stacked "Count; Bin N - name; count;
+    # pct" text over the slices (ninth-wave print fix) — and the white
+    # bold txPr keeps the percents readable on the saturated slices
+    chart.dataLabels = DataLabelList(
+        showPercent=True,
+        showVal=False,
+        showCatName=False,
+        showSerName=False,
+        showLegendKey=False,
+        showBubbleSize=False,
+        txPr=_donut_label_txpr(),
+    )
     chart.legend.position = "r"  # mockup: right-hand legend
     data = Reference(
         ws, min_col=helper_col + 1, min_row=helper_row, max_row=helper_row + len(bins)
