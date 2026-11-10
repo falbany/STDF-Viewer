@@ -166,10 +166,11 @@ BIN_TABLE_HEADERS = ("Bin", "Value", "Count", "Distribution")
 BIN_DATA_BAR_HEX = "5B9BD5"  # data-bar blue inside the fraction cells
 BIN_PCT_FORMAT = "0.00%"  # "Distribution" display format
 BIN_TOTAL_LABEL = "Total"
-# Excel's BUILT-IN cell style for the section-title band (seventh wave):
-# openpyxl 3.1.5 knows it with builtinId=21 (styles/builtins.py), so
-# Excel's style gallery shows the band as the built-in Output style.
-BIN_SECTION_STYLE = "Output"
+# Excel's BUILT-IN cell style for the section-title band (ninth wave —
+# user's "Title 3"; openpyxl 3.1.5 registers ``Headline 2`` with
+# builtinId=17, so Excel's style gallery shows the built-in style; was
+# "Output" through the eighth wave).
+BIN_SECTION_STYLE = "Headline 2"
 # Bold dark font for the Total row (theme has no reusable bold body font).
 BIN_TOTAL_FONT = Font(name=FONT_NAME, size=FONT_SIZE, bold=True)
 # Structured tables live in columns B:E (eighth wave: column A belongs to
@@ -416,6 +417,28 @@ def write_kpi_cards(
     return sub_row + 1
 
 
+def write_merged_headline(
+    ws: Worksheet,
+    row: int,
+    text: str,
+    style_name: str,
+    first_col: int = 1,
+    last_col: int = 6,
+) -> int:
+    """One merged headline band (ninth wave): merge
+    ``{first_col}{row}:{last_col}{row}``, then set the BUILT-IN cell style
+    ``style_name`` on EVERY cell of the range (post-merge styling rule —
+    ``merge_cells`` wipes styles set before it), then the ``text`` on the
+    anchor. Returns the next row."""
+    ws.merge_cells(
+        start_row=row, start_column=first_col, end_row=row, end_column=last_col
+    )
+    for column in range(first_col, last_col + 1):
+        ws.cell(row=row, column=column).style = style_name
+    ws.cell(row=row, column=first_col, value=text)
+    return row + 1
+
+
 def bin_label(bin_num: int, name: str) -> str:
     """Slice label for the donut legend: ``"Bin {num} - {name}"``."""
     return f"Bin {bin_num} - {name}"
@@ -499,10 +522,10 @@ def write_bin_table(
     """Write one structured bin table (sixth wave, user mockup) starting at
     1-based ``start_row`` and return the next free row.
 
-    Layout: a section-title band row carrying Excel's BUILT-IN "Output"
-    cell style (seventh wave, R4 — ``cell.style = "Output"``; openpyxl
-    3.1.5 registers it with ``builtinId=21`` so Excel's gallery shows the
-    built-in style), merged across the table width B:E (eighth wave —
+    Layout: a section-title band row carrying Excel's BUILT-IN "Headline 2"
+    cell style (ninth wave — user's "Title 3"; ``cell.style = "Headline 2"``,
+    builtinId=17; was "Output" through the eighth wave), merged across the
+    table width B:E (eighth wave —
     column A belongs to the page grid) and styled on EVERY cell of the
     band AFTER the merge (openpyxl's ``merge_cells`` wipes styles set
     before it), a blue header row ``Bin | Value | Count | Distribution``

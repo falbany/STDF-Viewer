@@ -49,6 +49,7 @@ from deps.exporter.charts import (
     parse_kpi_row,
     write_bin_table,
     write_kpi_cards,
+    write_merged_headline,
 )
 from deps.exporter.sheets import ROW_HEIGHT_IN
 from deps.exporter.theme import ModernTheme
@@ -700,6 +701,39 @@ class TestBuildBinDonut:
 
 
 # --------------------------------------------------------------------------
+# write_merged_headline (ninth wave: merged built-in-style headline bands)
+# --------------------------------------------------------------------------
+
+
+class TestWriteMergedHeadline:
+    @pytest.fixture
+    def ws(self):
+        return Workbook().active
+
+    def test_merge_style_value_return(self, ws):
+        assert write_merged_headline(ws, 1, "Charts", "Headline 1") == 2
+        assert "A1:F1" in {str(r) for r in ws.merged_cells.ranges}
+        assert ws["A1"].value == "Charts"
+        for column in range(1, 7):
+            assert ws.cell(row=1, column=column).style == "Headline 1"
+
+    def test_custom_span(self, ws):
+        write_merged_headline(ws, 4, "t", "Title", first_col=2, last_col=5)
+        assert "B4:E4" in {str(r) for r in ws.merged_cells.ranges}
+        for column in range(2, 6):
+            assert ws.cell(row=4, column=column).style == "Title"
+
+    def test_style_survives_save_reload(self, ws, tmp_path):
+        write_merged_headline(ws, 1, "t", "Headline 2")
+        path = tmp_path / "headline.xlsx"
+        ws.parent.save(path)
+        reloaded = load_workbook(path)["Sheet"]
+        assert reloaded["A1"].style == "Headline 2"
+        named = {s.name: s for s in reloaded.parent._named_styles}
+        assert named["Headline 2"].builtinId == 17
+
+
+# --------------------------------------------------------------------------
 # write_bin_table (sixth wave: structured tables replace the classic rows)
 # --------------------------------------------------------------------------
 
@@ -733,40 +767,38 @@ class TestWriteBinTable:
         # title 15 + header 16 + 2 data rows (17, 18) + total 19 -> 20
         assert self.written(ws, theme) == 20
 
-    def test_section_title_uses_builtin_output_style(self, ws, theme):
-        # seventh wave (R4): the section title band carries Excel's BUILT-IN
-        # "Output" cell style (openpyxl 3.1.5 registers it with
-        # builtinId=21, so Excel's gallery shows it as the built-in style
-        # in the Data and Model group); the band spans the table width
-        # B:E (eighth wave — column A belongs to the donut/KPI page grid)
+    def test_section_title_uses_builtin_headline_2_style(self, ws, theme):
+        # ninth wave: the section title band carries Excel's BUILT-IN
+        # "Headline 2" cell style (user's "Title 3"; openpyxl 3.1.5
+        # registers it with builtinId=17, so Excel's gallery shows it as
+        # the built-in style); the band spans the table width B:E (eighth
+        # wave — column A belongs to the donut/KPI page grid)
         self.written(ws, theme)
-        assert ws["B15"].style == "Output"
+        assert ws["B15"].style == "Headline 2"
         assert ws["B15"].value == TABLE_TITLE
-        # resolved look of the builtin style (openpyxl's builtins.py
-        # definition): bold dark font on the light grey band
+        # resolved look of the builtin style: bold dark font
         assert ws["B15"].font.b is True
-        assert ws["B15"].fill.fgColor.rgb == "FFF2F2F2"
 
     def test_section_title_band_merged_and_styled_across_table(self, ws, theme):
-        # merge B15:E15 and style EVERY cell of the band (fills apply
-        # per-cell; styles must be applied AFTER merging — openpyxl's
-        # merge_cells wipes styles set before it)
+        # merge B15:E15 and style EVERY cell of the band (styles must be
+        # applied AFTER merging — openpyxl's merge_cells wipes styles set
+        # before it)
         self.written(ws, theme)
         ranges = {str(r) for r in ws.merged_cells.ranges}
         assert "B15:E15" in ranges
         for column in range(2, 6):
-            assert ws.cell(row=15, column=column).style == "Output"
+            assert ws.cell(row=15, column=column).style == "Headline 2"
 
-    def test_section_title_output_style_round_trip(self, ws, theme, tmp_path):
-        # the named style carries builtinId=21 into styles.xml and the
+    def test_section_title_headline_2_style_round_trip(self, ws, theme, tmp_path):
+        # the named style carries builtinId=17 into styles.xml and the
         # assignment survives a save/reload
         self.written(ws, theme)
         path = tmp_path / "out.xlsx"
         ws.parent.save(path)
         reloaded = load_workbook(path)["Sheet"]
-        assert reloaded["B15"].style == "Output"
+        assert reloaded["B15"].style == "Headline 2"
         named = {s.name: s for s in reloaded.parent._named_styles}
-        assert named["Output"].builtinId == 21
+        assert named["Headline 2"].builtinId == 17
 
     def test_header_row_blue_with_white_bold_centered(self, ws, theme):
         self.written(ws, theme)

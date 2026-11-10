@@ -548,7 +548,7 @@ class TestChartSheets:
         # HB section: Output-styled title band, blue header, two data rows,
         # bold Total
         assert ws["B22"].value == "Hardware Bins — Head1 / All Sites"
-        assert ws["B22"].style == "Output"
+        assert ws["B22"].style == "Headline 2"
         assert [ws.cell(row=23, column=c).value for c in range(2, 6)] == [
             "Bin",
             "Value",
@@ -571,7 +571,7 @@ class TestChartSheets:
         # SB section after ONE blank row (27): title 28, header 29,
         # data 30-31, Total 32
         assert ws["B28"].value == "Software Bins — Head1 / All Sites"
-        assert ws["B28"].style == "Output"
+        assert ws["B28"].style == "Headline 2"
         assert [ws.cell(row=29, column=c).value for c in range(2, 6)] == [
             "Bin",
             "Value",
