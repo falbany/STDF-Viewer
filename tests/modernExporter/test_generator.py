@@ -621,7 +621,7 @@ class TestApplyFtrPseudoLimits:
         row = transform_stat_row(["12 / Head1 / All Sites", "2_F/scan",
                                   "P/F", "N/A", "N/A", "0", "∞"], info)
         apply_ftr_pseudo_limits(row, info)
-        assert row[7] == 0.0
+        assert row[7] == -0.999999
         assert row[8] == 0.999999
         assert isinstance(row[7], float)
         assert isinstance(row[8], float)
@@ -741,11 +741,11 @@ class TestStatOnlyFtrFallback:
         ws = wb["Test Statistics"]
         # transformed FTR-shifted header: SpecMin=I, SpecMax=J (column H
         # holds Unit). FTR row 3 gets the DUT-Summary synthetic floats,
-        # PTR row 2 keeps its numeric limits. (The SpecMin 0.0 round-trips
-        # to int 0 through the xlsx — numeric either way.)
+        # PTR row 2 keeps its numeric limits. (-0.999999 survives the xlsx
+        # round-trip as a float — non-integral.)
         assert ws["H3"].value == "P/F"
-        assert ws["I3"].value == 0.0
-        assert isinstance(ws["I3"].value, (int, float))
+        assert ws["I3"].value == -0.999999
+        assert isinstance(ws["I3"].value, float)
         assert ws["J3"].value == 0.999999
         assert isinstance(ws["J3"].value, float)
         assert ws["I2"].value == 0.5

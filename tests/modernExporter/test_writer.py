@@ -60,9 +60,9 @@ def make_rows():
         [11, "1_RX", "Margin", "dB", "", "",
          "=MIN(M17:O17)", "=MAX(M17:O17)", "=AVERAGE(M17:O17)", "=STDEV(M17:O17)",
          CPK_17, FAILS_FLAGS_17, 2.0, 0.1, 3.0, "", 0, 1, 0],
-        # FTR row (row 18): Unit "P/F", synthetic real limits 0/0.999999
+        # FTR row (row 18): Unit "P/F", synthetic real limits ±0.999999
         # (third wave), die cells carry 0/1 flags
-        [12, "2_Func", "PAT_TOP", "P/F", 0.0, 0.999999,
+        [12, "2_Func", "PAT_TOP", "P/F", -0.999999, 0.999999,
          "=MIN(M18:O18)", "=MAX(M18:O18)", "=AVERAGE(M18:O18)", "=STDEV(M18:O18)",
          CPK_18, FAILS_LIMITS_18, 0, 1, 0, "", 0, 1, 0],
     ]
@@ -319,8 +319,8 @@ class TestMatrixConditionalFormatting:
 
     def test_die_range_rules_exact_order_and_stop(self):
         # third wave: the P/F visible-flag rule is GONE — FTR rows now carry
-        # real limits (0 / 0.999999), so the limit rules fire naturally on
-        # them. Remaining set: blank-neutral, fail-low, fail-high,
+        # real limits (-0.999999 / 0.999999), so the limit rules fire naturally
+        # on them. Remaining set: blank-neutral, fail-low, fail-high,
         # flag-mirror, pass.
         ws = self.wb()["DUT Summary"]
         rules = cf_block(ws, "M16:O18")

@@ -380,10 +380,10 @@ class TestStatFtrCacheDetection:
         ws = wb["Test Statistics"]
         # FTR-shifted transformed header: SpecMin=I, SpecMax=J. FTR row 3
         # carries the synthetic floats; the PTR row keeps its real limits.
-        # (The SpecMin 0.0 round-trips to int 0 through the xlsx — numeric
-        # either way; 0.999999 survives as a float.)
-        assert ws["I3"].value == 0.0
-        assert isinstance(ws["I3"].value, (int, float))
+        # (-0.999999 survives the xlsx round-trip as a float — non-integral;
+        # 0.999999 likewise.)
+        assert ws["I3"].value == -0.999999
+        assert isinstance(ws["I3"].value, float)
         assert not isinstance(ws["I3"].value, str)
         assert ws["J3"].value == 0.999999
         assert isinstance(ws["J3"].value, float)

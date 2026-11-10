@@ -78,9 +78,12 @@ METADATA_TEST_NUM_BASE = 10000
 # FTR rows carry synthetic real limits (third wave) so the limit CF rules
 # and the limit-variant FAILS formula fire like on parametric rows: a die
 # cell of 1 fails the high comparison, 0 passes, blank stays neutral.
-# NOTE: 0.999999 DISPLAYS AS "1.00E+00" under the scientific 0.00E+00
+# The symmetric ±0.999999 window centers the pass/fail scale on 0.5 so the
+# Cpk formula yields a meaningful value for FTR rows (SpecMin 0 would pin
+# (mean-LSL)/(3*STD) to 0 for all-pass lots).
+# NOTE: ±0.999999 DISPLAY AS "±1.00E+00" under the scientific 0.00E+00
 # format (2-decimal rounding) — accepted, see design addendum §13.
-FTR_SPEC_MIN = 0.0
+FTR_SPEC_MIN = -0.999999
 FTR_SPEC_MAX = 0.999999
 
 # Scientific format of the numeric data cells (2026-11-10: E..J stat columns
@@ -426,7 +429,7 @@ def _test_rows(summaryTable, tests, chunk_cells, first_die, last_die,
                 die_cells.append(_die_cell(value))
         if test["is_ftr"]:
             # third wave: FTR rows always take the limits path with the
-            # synthetic 0/0.999999 cells — the limit CF rules and the
+            # synthetic ±0.999999 cells — the limit CF rules and the
             # limit-variant FAILS formula fire like on parametric rows
             # (die cell 1 fails high, 0 passes, blank neutral)
             spec_min, spec_max = FTR_SPEC_MIN, FTR_SPEC_MAX

@@ -362,12 +362,13 @@ class TestRows:
                        2.0, 0.1, 3.0, "", 0, 1, 0]
 
     def test_ftr_row_real_limits_and_limits_fails(self):
-        # third wave: FTR rows carry synthetic real limits (0 / 0.999999 as
+        # third wave: FTR rows carry synthetic real limits (±0.999999 as
         # floats) so the limit CF rules and the limit-variant FAILS formula
         # fire exactly like on parametric rows (die cell 1 fails high, 0
-        # passes); the FTR-specific FAILS variant is gone
+        # passes); the FTR-specific FAILS variant is gone. Fifth wave: the
+        # window is symmetric so Cpk is meaningful for FTR rows.
         row = self.spec()["rows"][2]
-        assert row == [12, "2_Func", "PAT_TOP", "P/F", 0.0, 0.999999,
+        assert row == [12, "2_Func", "PAT_TOP", "P/F", -0.999999, 0.999999,
                        "=MIN(M18:O18)", "=MAX(M18:O18)", "=AVERAGE(M18:O18)", "=STDEV(M18:O18)",
                        CPK_18, FAILS_LIMITS_18,
                        0, 1, 0, "", 0, 1, 0]
@@ -376,13 +377,13 @@ class TestRows:
 
     def test_ftr_row_limits_path_even_with_testinfo_limits(self):
         # FTR rows ALWAYS take the limits path — a TestInfo-carrying FTR
-        # still gets the synthetic 0/0.999999 cells, not its raw limits
+        # still gets the synthetic ±0.999999 cells, not its raw limits
         tests = [dict(name="3_F/scan", num=13, unit="", llimit=0.1,
                       hlimit=9.9, rec=REC.FTR,
                       data={1: ([0.0], [0])})]
         row = build(tests, [(1, 0, make_dut_info(part_id="D0"))])[0]["rows"][0]
         assert row[3] == "P/F"
-        assert row[4] == 0.0
+        assert row[4] == -0.999999
         assert row[5] == 0.999999
         # single-die range: the limits-variant FAILS over M16:M16
         assert row[11] == ('=SUMPRODUCT((M16:M16<>"")*((E16<>"")*(M16:M16<E16)'

@@ -251,9 +251,9 @@ def _add_die_rules(ws, die_rules, theme):
     """Five rules over the die range, priority order, all stopIfTrue.
 
     Third wave: the P/F visible-flag rule (LEFT($D...,3)="P/F") is gone —
-    FTR rows now carry real limits (0 / 0.999999), so the limit rules fire
-    naturally on them (die cell 1 -> fail-high, 0 -> pass, blank ->
-    neutral). Remaining set: blank-neutral, fail-low, fail-high,
+    FTR rows now carry real limits (-0.999999 / 0.999999), so the limit
+    rules fire naturally on them (die cell 1 -> fail-high, 0 -> pass,
+    blank -> neutral). Remaining set: blank-neutral, fail-low, fail-high,
     flag-mirror (no-limit parametric rows), pass. Formulas are written
     relative to the range's top-left cell; openpyxl shifts them across the
     range like Excel does.

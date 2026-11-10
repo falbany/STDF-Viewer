@@ -306,7 +306,7 @@ def stat_row_is_ftr(transformed_row, header_info, ftr_tests) -> bool:
 
 def apply_ftr_pseudo_limits(stat_row, header_info) -> None:
     """Overwrite the row's SpecMin/SpecMax cells in place with the DUT
-    Summary's synthetic FTR floats (0.0 / 0.999999, matrix.FTR_SPEC_MIN/
+    Summary's synthetic FTR floats (-0.999999 / 0.999999, matrix.FTR_SPEC_MIN/
     FTR_SPEC_MAX). No-op when the limit anchors are missing (translated UI)
     or a degraded row is shorter than the spec columns."""
     spec_cols = header_info.get("spec_cols")
