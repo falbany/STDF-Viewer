@@ -98,9 +98,10 @@ def png_bytes(width=96, height=48):
 PNG_BYTES = png_bytes()
 
 
-def build_generated(tmp_path, qapp):
-    """Run report_core() once for {DUT, Trend, Bin, Wafer} and return
-    (generator, reloaded workbook, report path, close/error capture)."""
+def build_generated(tmp_path, qapp, with_stat=False):
+    """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus Stat when
+    `with_stat`) and return (generator, reloaded workbook, report path,
+    close/error capture)."""
     testTuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
     selectedFiles = [1]
     selectedHeads = [1]
@@ -110,8 +111,13 @@ def build_generated(tmp_path, qapp):
     # classic totalLoopCnt formula (stdfExporter.start): Trend 2*1*1
     # + Bin 1*1 + DUT (1 + 2) + Wafer len(waferTuples)
     totalLoopCnt = 2 + 1 + 3 + 1
-    reportInfo = ([ReportSelection.DUT, ReportSelection.Trend,
-                   ReportSelection.Bin, ReportSelection.Wafer],
+    selection = [ReportSelection.DUT, ReportSelection.Trend,
+                 ReportSelection.Bin, ReportSelection.Wafer]
+    if with_stat:
+        # classic sheet-creation order: DUT < Stat < Trend
+        selection.insert(1, ReportSelection.Stat)
+        totalLoopCnt += 2   # Stat: +1 per data row
+    reportInfo = (selection,
                   testTuples, selectedFiles, selectedHeads, selectedSites,
                   reportPath, waferTuples, totalLoopCnt)
 
@@ -128,7 +134,23 @@ def build_generated(tmp_path, qapp):
         return io.BytesIO(PNG_BYTES)
     gen.waitForImage = fake_wait_for_image
 
+    # classic DataInterface.getStatistics shape (containsFTR=True: the
+    # "Pattern Name" column follows "Test Name"; VECT_NAM only on the FTR row)
+    stat_table = [
+        ["", "Test Name", "Pattern Name", "Unit", "Low Limit", "High Limit",
+         "Fail Num", "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"],
+        ["10 / Head1 / All Sites", "0_TXCC/VCCC_ASIC", "", "V", "0.500",
+         "1.500", "1", "1.23", "1.000", "1.000", "0.010", "0.980", "1.020"],
+        ["12 / Head1 / All Sites", "2_Func/scanchain", "PAT_TOP", "P/F",
+         "N/A", "N/A", "0", "∞", "1.000", "1.000", "0.000", "0.000", "1.000"],
+    ]
+
     def fake_wait_for_data_list(heads, sites, fids, chartType, kargs):
+        if (chartType == tab.Trend
+                and kargs.get("testTuples") == testTuples):
+            # writeStatistic passes the FULL testTuples list (per-test trend
+            # rows pass a single-tuple list — never equal here, two tests)
+            return stat_table
         if chartType == tab.Bin:
             return ([["BIN-HB-ROW", "count", 3]] if kargs.get("isHBIN")
                     else [["BIN-SB-ROW", "count", 3]])
@@ -199,9 +221,13 @@ class TestDutSummarySheet:
         assert ws["C13"].value == "Test Time"
         assert ws["D13"].value == "ms"
         assert ws["G13"].value == "=MIN(M13:O13)"
-        # always-fold rows stay hidden (Head-Site 11, Test Time 13, DUT Flag 14)
-        for row in (11, 13, 14):
+        # always-fold rows stay hidden (Head-Site 11, Test Time 13); the DUT
+        # Flag row (14) is VISIBLE since the fourth wave (status CF)
+        for row in (11, 13):
             assert ws.row_dimensions[row].hidden is True
+        assert ws.row_dimensions[14].hidden is not True
+        assert ws["C14"].value == "DUT Flag"
+        assert ws["M14"].value == "Passed"
 
     def test_first_test_formulas_at_row_sixteen(self, generated):
         _, wb, _, _, _ = generated
@@ -314,3 +340,75 @@ class TestDieCellNumberFormat:
         assert number_format_from_settings(3, "F") == "0.000"  # utility intact
         assert ws["M16"].number_format == "0.00E+00"  # hardcode wins
         assert ws["N16"].number_format == "0.00E+00"
+
+
+# --------------------------------------------------------------------------
+# fourth wave: DUT-Summary FTR cache -> Test Statistics pseudo-limits
+# --------------------------------------------------------------------------
+
+def cf_block(ws, ref):
+    """Rules attached to one conditional-formatting range."""
+    for cf in ws.conditional_formatting:
+        if str(cf.sqref) == ref:
+            return list(cf.rules)
+    raise AssertionError(f"no conditional formatting on {ref}")
+
+
+class TestStatFtrCacheDetection:
+    """DUT + Stat selection: writeDUT_Summary runs FIRST and caches the FTR
+    test keys (PRIMARY detection signal); the Test Statistics FTR row gets
+    the 0 / 0.999999 pseudo-limits, and the Fail Num / Cpk CF letters shift
+    right of the Pattern Name column."""
+
+    @pytest.fixture
+    def generated(self, tmp_path, qapp):
+        return build_generated(tmp_path, qapp, with_stat=True)
+
+    def test_sheet_inventory_with_stat(self, generated):
+        _, wb, _, _, _ = generated
+        assert wb.sheetnames == ["DUT Summary", "Test Statistics",
+                                 "Trend Chart", "Bin Chart", "Wafer Map"]
+
+    def test_ftr_cache_built_from_dut_summary(self, generated):
+        gen, _, _, _, _ = generated
+        # (test_num, full test name) of every SUB_CODE==FTR testTuple; the
+        # PTR test (10, "0_TXCC/VCCC_ASIC") is not cached
+        assert gen._ftr_tests == {(12, "2_Func/scanchain")}
+
+    def test_ftr_row_pseudo_limits_via_cache(self, generated):
+        _, wb, _, _, _ = generated
+        ws = wb["Test Statistics"]
+        # FTR-shifted transformed header: SpecMin=I, SpecMax=J. FTR row 3
+        # carries the synthetic floats; the PTR row keeps its real limits.
+        # (The SpecMin 0.0 round-trips to int 0 through the xlsx — numeric
+        # either way; 0.999999 survives as a float.)
+        assert ws["I3"].value == 0.0
+        assert isinstance(ws["I3"].value, (int, float))
+        assert not isinstance(ws["I3"].value, str)
+        assert ws["J3"].value == 0.999999
+        assert isinstance(ws["J3"].value, float)
+        assert ws["I2"].value == 0.5
+        assert ws["J2"].value == 1.5
+
+    def test_fail_num_cpk_cf_shifted_letters(self, generated):
+        _, wb, _, _, _ = generated
+        ws = wb["Test Statistics"]
+        # Fail Num index 10 -> K, Cpk index 11 -> L (Pattern Name shift);
+        # data rows only (header row 1 excluded)
+        fail_rules = cf_block(ws, "K2:K3")
+        assert [r.formula for r in fail_rules] == [
+            ["AND(ISNUMBER(K2),K2>0)"], ["AND(ISNUMBER(K2),K2=0)"]]
+        cpk_rules = cf_block(ws, "L2:L3")
+        assert [r.formula[0] for r in cpk_rules] == [
+            "AND(ISNUMBER(L2),L2>=1.67)", "AND(ISNUMBER(L2),L2>=1.33)",
+            "AND(ISNUMBER(L2),L2>=1)", "AND(ISNUMBER(L2),L2<1)"]
+
+    def test_loop_count_includes_stat_rows(self, generated):
+        gen, _, _, _, _ = generated
+        # DUT 3 + Stat 2 + Trend 2 + Bin 1 + Wafer 1
+        assert gen.loopCount == gen.totalLoopCnt == 9
+
+    def test_close_signal_emitted_no_error(self, generated):
+        _, _, _, closed, errors = generated
+        assert closed == [True]
+        assert errors == []

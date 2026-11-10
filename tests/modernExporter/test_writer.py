@@ -6,6 +6,7 @@ assert on the reloaded sheet so every check proves the artifact really survives.
 
 import io
 
+import pytest
 from openpyxl import Workbook, load_workbook
 
 from deps.modernExporter.theme import ModernTheme
@@ -92,6 +93,7 @@ def make_matrix_spec(**overrides):
             "cpk_range": "K16:K18",
             "fails_range": "L16:L18",
             "fails_max": 0.6,
+            "dut_flag_range": "M14:O14",
         },
         "auto_filter": {"ref": "A15:O18"},
     }
@@ -369,6 +371,58 @@ class TestMatrixConditionalFormatting:
         assert rgbs[0].endswith("CCFFCC")
         assert rgbs[1].endswith("FFCCCC")
 
+    def test_dut_flag_status_rules_on_die_cells_only(self):
+        # fourth wave: the DUT Flag metadata row (Excel row 14) carries three
+        # status rules on its DIE cells only — the base cells (A..L14) are
+        # never in the range. Superseded (neutral yellow) first, then Fail
+        # (red; upstream values are "Failed - 0xNN"), then Pass (green),
+        # all stopIfTrue with case-insensitive SEARCH.
+        ws = self.wb()["DUT Summary"]
+        rules = cf_block(ws, "M14:O14")
+        assert [r.formula for r in rules] == [
+            ['ISNUMBER(SEARCH("Superseded",M14))'],
+            ['ISNUMBER(SEARCH("Fail",M14))'],
+            ['ISNUMBER(SEARCH("Pass",M14))'],
+        ]
+        assert all(r.stopIfTrue for r in rules)
+        fills = [r.dxf.fill.fgColor.rgb for r in rules]
+        assert fills == ["FFFFF3CD", "FFFFCCCC", "FFCCFFCC"]
+        # no other range touches the metadata row's base cells
+        refs = [str(cf.sqref) for cf in ws.conditional_formatting]
+        assert all(ref.split(":")[0][0] not in "ABCDEFGHIJKL"
+                   for ref in refs if "14" in ref.split(":")[0])
+
+    def test_dut_flag_row_visible_and_unstyled_without_key(self):
+        # the CF key is optional in the spec contract: without it the row
+        # renders normally (visible, no rules on its die cells)
+        spec = make_matrix_spec()
+        del spec["conditional_formatting"]["dut_flag_range"]
+        ws = roundtrip(render(spec))["DUT Summary"]
+        with pytest.raises(AssertionError):
+            cf_block(ws, "M14:O14")
+        assert ws.row_dimensions[14].hidden is not True
+
+    def test_dut_flag_rules_shift_with_die_columns(self):
+        # single-die chunk: the spec range is M14:M14 (openpyxl stores the
+        # single cell as "M14") and the formulas anchor on M14
+        spec = make_matrix_spec(
+            die_columns=["M"],
+            conditional_formatting={
+                "die_rules": {"range": "M16:M18", "first_die": "M",
+                              "flag_col_offset": 2},
+                "cpk_range": "K16:K18",
+                "fails_range": "L16:L18",
+                "fails_max": 0.2,
+                "dut_flag_range": "M14:M14",
+            })
+        ws = roundtrip(render(spec))["DUT Summary"]
+        rules = cf_block(ws, "M14")
+        assert [r.formula[0] for r in rules] == [
+            'ISNUMBER(SEARCH("Superseded",M14))',
+            'ISNUMBER(SEARCH("Fail",M14))',
+            'ISNUMBER(SEARCH("Pass",M14))',
+        ]
+
 
 # --------------------------------------------------------------------------
 # Matrix sheet: row groups
@@ -600,6 +654,92 @@ class TestPlainTable:
 
 
 # --------------------------------------------------------------------------
+# Plain tables: conditional formatting (fourth wave, Test Statistics)
+# --------------------------------------------------------------------------
+
+class TestPlainTableConditionalFormatting:
+    """Optional spec["conditional_formatting"] contract: {"fail_num_range",
+    "cpk_range"} strings over DATA rows only (header row excluded)."""
+
+    def spec(self):
+        return {
+            "name": "Test Statistics",
+            "headers": ["Test#", "Head", "Sites", "File ID", "Test Name",
+                        "Param", "Unit", "SpecMin", "SpecMax", "Fail Num",
+                        "Cpk", "Average"],
+            "rows": [
+                [10000, 1, "All Sites", "", "T/vcc", "vcc", "V",
+                 0.5, 1.5, 1, 1.23, 1.0],
+                [10001, 1, "All Sites", "", "2_F/scan", "scan", "P/F",
+                 "N/A", "N/A", 0, "∞", 1.0],
+            ],
+            "conditional_formatting": {
+                "fail_num_range": "J2:J3",
+                "cpk_range": "K2:K3",
+            },
+        }
+
+    def render_and_reload(self, spec=None):
+        wb = Workbook()
+        ws = wb.active
+        render_plain_table(ws, spec if spec is not None else self.spec(),
+                           ModernTheme())
+        return roundtrip(wb)["Sheet"]
+
+    def test_fail_num_binary_rules(self):
+        # controller ruling: binary rules, NOT a color scale — no per-row
+        # DUT total exists to scale against. Numeric >0 -> fail red,
+        # numeric =0 -> pass green.
+        ws = self.render_and_reload()
+        rules = cf_block(ws, "J2:J3")
+        assert [r.formula for r in rules] == [
+            ["AND(ISNUMBER(J2),J2>0)"],
+            ["AND(ISNUMBER(J2),J2=0)"],
+        ]
+        assert all(r.stopIfTrue for r in rules)
+        fills = [r.dxf.fill.fgColor.rgb for r in rules]
+        assert fills == ["FFFFCCCC", "FFCCFFCC"]
+
+    def test_cpk_band_rules_match_matrix_contract(self):
+        # the SAME four ISNUMBER-guarded bands as the DUT Summary (shared
+        # builder): first three stopIfTrue, worst band open
+        ws = self.render_and_reload()
+        rules = cf_block(ws, "K2:K3")
+        assert [r.formula for r in rules] == [
+            ["AND(ISNUMBER(K2),K2>=1.67)"],
+            ["AND(ISNUMBER(K2),K2>=1.33)"],
+            ["AND(ISNUMBER(K2),K2>=1)"],
+            ["AND(ISNUMBER(K2),K2<1)"],
+        ]
+        assert [r.stopIfTrue for r in rules] == [True, True, True, False]
+        fills = [r.dxf.fill.fgColor.rgb for r in rules]
+        assert fills == ["FFA7F3D0", "FFD1FAE5", "FFFEF3C7", "FFFECACA"]
+
+    def test_sentinel_cells_guarded_by_isnumber(self):
+        # "N/A" limits and "∞" Cpk stay strings; every CF rule is
+        # ISNUMBER-guarded so text/blank cells can never match (unstyled)
+        ws = self.render_and_reload()
+        assert ws["K3"].value == "∞"
+        assert ws["H3"].value == "N/A"
+        for ref in ("J2:J3", "K2:K3"):
+            for rule in cf_block(ws, ref):
+                for formula in rule.formula:
+                    assert "ISNUMBER(" in formula
+
+    def test_header_row_outside_cf_ranges(self):
+        # ranges start at row 2: the blue header carries no rules
+        ws = self.render_and_reload()
+        refs = [str(cf.sqref) for cf in ws.conditional_formatting]
+        assert all(not ref.startswith(("J1", "K1")) for ref in refs)
+
+    def test_no_cf_without_spec_key(self):
+        spec = self.spec()
+        del spec["conditional_formatting"]
+        ws = self.render_and_reload(spec)
+        assert list(ws.conditional_formatting) == []
+
+
+# --------------------------------------------------------------------------
 # Integration: render a spec built by the real matrix.py builder
 # --------------------------------------------------------------------------
 
@@ -609,9 +749,10 @@ class TestRealSpecIntegration:
         spec = build(base_tests(), base_duts())[0]
         wb = render(spec)
         # masked rows of the real fixture: File ID 2, Wafer 8, X 9, Y 10,
-        # Head-Site 11, Test Time 13, DUT Flag 14
-        for row in (2, 8, 9, 10, 11, 13, 14):
+        # Head-Site 11, Test Time 13 (fourth wave: DUT Flag 14 stays visible)
+        for row in (2, 8, 9, 10, 11, 13):
             assert wb["DUT Summary"].row_dimensions[row].hidden is True
+        assert wb["DUT Summary"].row_dimensions[14].hidden is not True
         ws = roundtrip(wb)["DUT Summary"]
         assert ws["A16"].value == 10
         assert ws["B16"].value == "0_TXCC"

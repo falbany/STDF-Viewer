@@ -217,16 +217,20 @@ def fails_formula_flags(row: int, first: str, last: str) -> str:
 
 
 def metadata_stat_formulas(row: int, first: str, last: str,
-                           mean: bool = True) -> tuple[str, ...]:
-    """(MIN, MAX[, AVERAGE]) formula set for a numeric metadata block row.
+                           mean: bool = True, std: bool = False) -> tuple[str, ...]:
+    """(MIN, MAX[, AVERAGE][, STDEV]) formula set for a numeric metadata row.
 
-    ``mean=False`` drops the AVERAGE formula and returns the 2-tuple
-    ``(MIN, MAX)`` — since the 2026-11-10 third wave only the Temperature
-    row keeps a live Mean cell; the caller pads the Mean column with a
-    dash for every other row.
+    ``mean=False`` drops the AVERAGE formula; ``std=True`` appends the
+    STDEV formula (sample stdev — the same ``STDEV`` semantic the data
+    rows' St. Dev. column uses). Fourth wave 2026-11-10: only Temperature
+    keeps ``mean=True`` alone; the Test Time row takes ``mean=True`` with
+    ``std=True``; every other numeric row takes ``(False, False)``. The
+    caller pads the Mean/St. Dev. cells with dashes for the dropped ones.
     """
     formulas = [stat_formula("MIN", row, first, last),
                 stat_formula("MAX", row, first, last)]
     if mean:
         formulas.append(stat_formula("AVERAGE", row, first, last))
+    if std:
+        formulas.append(stat_formula("STDEV", row, first, last))
     return tuple(formulas)

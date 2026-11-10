@@ -51,7 +51,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from PyQt5 import QtCore
 
-from deps.SharedSrc import tab
+from deps.SharedSrc import REC, tab
 from deps.uic_stdExporter import (
     ReportSelection,
     dataChannel,
@@ -59,7 +59,11 @@ from deps.uic_stdExporter import (
     signals,
 )
 from deps.modernExporter.helpers import split_test_name
-from deps.modernExporter.matrix import build_dut_summary_spec
+from deps.modernExporter.matrix import (
+    FTR_SPEC_MAX,
+    FTR_SPEC_MIN,
+    build_dut_summary_spec,
+)
 from deps.modernExporter.sheets import insert_report_image, plain_table_spec
 from deps.modernExporter.theme import ModernTheme
 from deps.modernExporter.writer import (
@@ -116,6 +120,9 @@ STAT_SPEC_FILL_HEX = "FFF3CD"
 # English-only header anchors (whitespace-normalized matching).
 _STAT_RENAMES = {"Low Limit": "SpecMin", "High Limit": "SpecMax"}
 _STAT_TEST_NAME = "Test Name"
+_STAT_FAIL_NUM = "Fail Num"
+_STAT_CPK = "Cpk"
+_STAT_PATTERN_NAME = "Pattern Name"
 
 
 def _norm_header_text(cell) -> str:
@@ -228,6 +235,88 @@ def transform_stat_row(row, header_info: dict) -> list:
         out.append(rest[0])
     out.extend(numericize_value(value) for value in rest[1:])
     return out
+
+
+def stat_cf_ranges(header_info: dict, data_row_count: int) -> dict:
+    """Conditional-formatting ranges for the Test Statistics sheet.
+
+    Computes the Fail Num / Cpk column letters from the TRANSFORMED header
+    (normalized English anchors — positions shift right of the inserted
+    FTR "Pattern Name" / MPR mix columns, never hard-coded) and spans the
+    DATA rows only: ``{"fail_num_range": "J2:Jn", "cpk_range": "K2:Kn"}``.
+    An empty dict when either anchor is missing (translated-UI degradation),
+    when the transform is disabled, or when there are no data rows.
+    """
+    header = header_info.get("header") or []
+    normalized = [_norm_header_text(cell) for cell in header]
+    if (_STAT_FAIL_NUM not in normalized or _STAT_CPK not in normalized
+            or data_row_count <= 0):
+        return {}
+    last_row = 1 + data_row_count
+    fail_letter = get_column_letter(normalized.index(_STAT_FAIL_NUM) + 1)
+    cpk_letter = get_column_letter(normalized.index(_STAT_CPK) + 1)
+    return {
+        "fail_num_range": f"{fail_letter}2:{fail_letter}{last_row}",
+        "cpk_range": f"{cpk_letter}2:{cpk_letter}{last_row}",
+    }
+
+
+def _stat_full_test_name(transformed_row, header_info) -> str:
+    """Full upstream test name from a transformed row: prefix + "/" + leaf
+    when the Param column exists and the leaf is non-empty — the exact
+    inverse of ``split_test_name``; the untransformed cell otherwise."""
+    cells = transformed_row
+    if header_info.get("param_inserted"):
+        prefix = cells[4] if len(cells) > 4 else ""
+        leaf = cells[5] if len(cells) > 5 else ""
+        return f"{prefix}/{leaf}" if leaf else prefix
+    return cells[4] if len(cells) > 4 else ""
+
+
+def stat_row_is_ftr(transformed_row, header_info, ftr_tests) -> bool:
+    """FTR detection for one transformed Test Statistics row (fourth wave).
+
+    PRIMARY: ``(test_num, full test name)`` sits in the cache that
+    ``writeDUT_Summary`` builds from the summaryTable's SUB_CODE — needs a
+    parsed VHeader (the row's leading int). FALLBACK (covers Stat-selected-
+    without-DUT runs, where the cache stays empty): the transformed header
+    carries a "Pattern Name" column (normalized match) and the row's cell
+    there is a non-empty string — upstream sets VECT_NAM only for FTR rows
+    and "" otherwise (DataInterface.py:540), so PTR/MPR never misfire.
+    Disabled transforms are never FTR.
+    """
+    if not header_info.get("enabled"):
+        return False
+    cells = transformed_row
+    test_num = cells[0] if cells else None
+    if isinstance(test_num, int):
+        full_name = _stat_full_test_name(cells, header_info)
+        if (test_num, full_name) in ftr_tests:
+            return True
+    header = header_info.get("header") or []
+    for index, cell in enumerate(header):
+        if _norm_header_text(cell) == _STAT_PATTERN_NAME:
+            if len(cells) > index:
+                value = cells[index]
+                if isinstance(value, str) and value != "":
+                    return True
+            break
+    return False
+
+
+def apply_ftr_pseudo_limits(stat_row, header_info) -> None:
+    """Overwrite the row's SpecMin/SpecMax cells in place with the DUT
+    Summary's synthetic FTR floats (0.0 / 0.999999, matrix.FTR_SPEC_MIN/
+    FTR_SPEC_MAX). No-op when the limit anchors are missing (translated UI)
+    or a degraded row is shorter than the spec columns."""
+    spec_cols = header_info.get("spec_cols")
+    if spec_cols is None:
+        return
+    min_index, max_index = spec_cols
+    if min_index < len(stat_row):
+        stat_row[min_index] = FTR_SPEC_MIN
+    if max_index < len(stat_row):
+        stat_row[max_index] = FTR_SPEC_MAX
 
 
 def _numeric_file_info_cell(value):
@@ -395,11 +484,18 @@ class ModernReportGenerator(reportGenerator):
                 number_formats[letter] = STAT_SPEC_FORMAT
                 column_fills[letter] = STAT_SPEC_FILL_HEX
 
+        # Fail Num / Cpk conditional formatting (fourth wave): letters from
+        # the transformed header, data rows only — render_plain_table adds
+        # the rules from the spec
+        cf_ranges = stat_cf_ranges(header_info, len(dataRows))
+
         # header only (identity tr: no re-translation of the GUI header)
         spec = plain_table_spec(self.tr("Test Statistics"),
                                 header_info["header"], [], tr=lambda s: s)
         spec["number_formats"] = number_formats
         spec["column_fills"] = column_fills
+        if cf_ranges:
+            spec["conditional_formatting"] = cf_ranges
         render_plain_table(StatSheet, spec, self._theme)
 
         # data rows keep the classic cadence: forceQuit check, one loopCount
@@ -410,6 +506,8 @@ class ModernReportGenerator(reportGenerator):
             if self.forceQuit:
                 return
             stat_row = transform_stat_row(dataRow, header_info)
+            if stat_row_is_ftr(stat_row, header_info, self._ftr_tests):
+                apply_ftr_pseudo_limits(stat_row, header_info)
             written_rows.append(stat_row)
             write_plain_row(
                 StatSheet, 2 + offset, stat_row, self._theme,
@@ -447,6 +545,18 @@ class ModernReportGenerator(reportGenerator):
                                               self.testTuples)
         if self.forceQuit:
             return
+
+        # FTR cache (fourth wave): (test_num, full test name) of every test
+        # tuple whose record SUB_CODE is FTR (any fid) — the PRIMARY FTR
+        # detection signal for writeStatistic's pseudo-limits. Runs before
+        # the sheet rendering; a Stat-only selection never reaches here and
+        # keeps the report_core-initialized empty set (fallback signal).
+        self._ftr_tests = set()
+        for test_tuple in self.testTuples:
+            fid_data = summaryTable.get("Data", {}).get(test_tuple) or {}
+            if any((fid_data.get(fid) or {}).get("SUB_CODE") == REC.FTR
+                   for fid in fid_data):
+                self._ftr_tests.add((test_tuple[0], test_tuple[2]))
 
         # use a list to determine the dut order (classic order-building)
         order = []
@@ -603,6 +713,11 @@ class ModernReportGenerator(reportGenerator):
         self.sheetDict = {}
         self.loopCount = 0
         self._row = {}
+        # FTR cache (fourth wave) initialized BEFORE any writer runs:
+        # writeDUT_Summary fills it when the DUT sheet is selected; a
+        # Stat-only selection leaves it empty (the Pattern-Name fallback
+        # covers detection there)
+        self._ftr_tests: set = set()
         defaultSheet = self._wb.active
 
         # the try/finally mirrors the classic `with Workbook(...)` block:

@@ -285,3 +285,16 @@ class TestMetadataStatFormulas:
         # metadata rows take the (MIN, MAX) pair and pad Mean with a dash
         assert metadata_stat_formulas(20, "M", "O", mean=False) == (
             "=MIN(M20:O20)", "=MAX(M20:O20)")
+
+    def test_std_true_appends_stdev_after_mean(self):
+        # fourth wave: the Test Time row keeps Mean AND St. Dev. (sample
+        # stdev, same STDEV semantic as the data rows' St. Dev. column)
+        assert metadata_stat_formulas(21, "M", "O", mean=True, std=True) == (
+            "=MIN(M21:O21)", "=MAX(M21:O21)", "=AVERAGE(M21:O21)",
+            "=STDEV(M21:O21)")
+
+    def test_std_true_without_mean(self):
+        # the helper stays general: STDEV without AVERAGE is legal even
+        # though no metadata row uses that combination today
+        assert metadata_stat_formulas(22, "M", "O", mean=False, std=True) == (
+            "=MIN(M22:O22)", "=MAX(M22:O22)", "=STDEV(M22:O22)")

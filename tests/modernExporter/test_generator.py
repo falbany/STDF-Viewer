@@ -13,8 +13,11 @@ from PyQt5 import QtCore
 
 from deps.modernExporter.generator import (
     ModernReportGenerator,
+    apply_ftr_pseudo_limits,
     numericize_value,
     parse_vheader,
+    stat_cf_ranges,
+    stat_row_is_ftr,
     transform_stat_header,
     transform_stat_row,
 )
@@ -136,6 +139,60 @@ def generated_multi(tmp_path, qapp):
     ]
     gen.waitForTableData = lambda isFileInfo: (file_info_table
                                                if isFileInfo else gdr_dtr_table)
+    gen.waitForDataList = (lambda heads, sites, fids, chartType, kargs:
+                           stat_table)
+
+    closed, errors = [], []
+    sig.closeSignal.connect(closed.append)
+    sig.msgSignal.connect(errors.append)
+
+    gen.report_core()
+
+    from pathlib import Path
+    assert Path(reportPath).exists(), "report file was not written"
+    wb = load_workbook(reportPath)
+    return gen, wb, reportPath, closed, errors
+
+
+def cf_block(ws, ref):
+    """Rules attached to one conditional-formatting range (test_writer.py
+    helper, duplicated here to keep the integration modules standalone)."""
+    for cf in ws.conditional_formatting:
+        if str(cf.sqref) == ref:
+            return list(cf.rules)
+    raise AssertionError(f"no conditional formatting on {ref}")
+
+
+@pytest.fixture
+def generated_stat_ftr(tmp_path, qapp):
+    """Stat-ONLY selection (no DUT sheet): the FTR cache stays empty, so the
+    Pattern-Name fallback must drive the pseudo-limit override. The received
+    header carries the FTR "Pattern Name" column, shifting Fail Num / Cpk
+    one column right (K / L)."""
+    testTuples = [(10000, 0, "VCCC_ASIC/vcc"), (10001, 0, "2_Func/scanchain")]
+    selectedFiles = [0]
+    selectedHeads = [1]
+    selectedSites = [-1]
+    reportPath = str(tmp_path / "report.xlsx")
+    totalLoopCnt = 2   # Stat: +1 per data row
+    reportInfo = ([ReportSelection.Stat], testTuples, selectedFiles,
+                  selectedHeads, selectedSites, reportPath, [], totalLoopCnt)
+
+    sig = signals()
+    channel = dataChannel()
+    gen = ModernReportGenerator(sig, QtCore.QMutex(),
+                                QtCore.QWaitCondition(), reportInfo, channel)
+
+    # classic DataInterface.getStatistics shape with containsFTR=True:
+    # "Pattern Name" inserted after "Test Name"; VECT_NAM only on the FTR row
+    stat_table = [
+        ["", "Test Name", "Pattern Name", "Unit", "Low Limit", "High Limit",
+         "Fail Num", "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"],
+        ["10000 / Head1 / All Sites", "VCCC_ASIC/vcc", "", "V", "0.500",
+         "1.500", "1", "1.23", "1.000", "1.000", "0.010", "0.980", "1.020"],
+        ["10001 / Head1 / All Sites", "2_Func/scanchain", "PAT_TOP", "P/F",
+         "N/A", "N/A", "0", "∞", "1.000", "1.000", "0.000", "0.000", "1.000"],
+    ]
     gen.waitForDataList = (lambda heads, sites, fids, chartType, kargs:
                            stat_table)
 
@@ -431,6 +488,165 @@ class TestTransformStatRow:
 
 
 # --------------------------------------------------------------------------
+# Fourth wave: CF range letters + FTR detection (pure helpers)
+# --------------------------------------------------------------------------
+
+class TestStatCfRanges:
+    def test_standard_header_letters(self):
+        # standard English header: Fail Num index 9 -> J, Cpk index 10 -> K
+        info = transform_stat_header([""] + STAT_HHEADER)
+        assert stat_cf_ranges(info, 1) == {
+            "fail_num_range": "J2:J2", "cpk_range": "K2:K2"}
+
+    def test_ftr_shifted_header(self):
+        # the FTR "Pattern Name" column shifts Fail Num / Cpk one column
+        # right (K / L) — letters computed from the TRANSFORMED header
+        header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
+        info = transform_stat_header(header)
+        assert stat_cf_ranges(info, 5) == {
+            "fail_num_range": "K2:K6", "cpk_range": "L2:L6"}
+
+    def test_mpr_shifted_header(self):
+        # the four MPR mix columns shift Fail Num / Cpk to N / O
+        header = ([""] + STAT_HHEADER[:1]
+                  + ["PMR Index", "Logical Name", "Physical Name", "Channel Name"]
+                  + STAT_HHEADER[1:])
+        info = transform_stat_header(header)
+        assert stat_cf_ranges(info, 2) == {
+            "fail_num_range": "N2:N3", "cpk_range": "O2:O3"}
+
+    def test_normalized_spacing_matched(self):
+        # whitespace-normalized anchors, same ruling as the renames
+        info = transform_stat_header(["", "Unit", "Low Limit", "High Limit",
+                                      "Fail  Num", "Cpk"])
+        assert stat_cf_ranges(info, 4) == {
+            "fail_num_range": "H2:H5", "cpk_range": "I2:I5"}
+
+    def test_missing_anchor_degrades_empty(self):
+        info = transform_stat_header(["", "Tests", "Mean", "Cpk"])
+        assert stat_cf_ranges(info, 3) == {}
+
+    def test_zero_data_rows_empty(self):
+        info = transform_stat_header([""] + STAT_HHEADER)
+        assert stat_cf_ranges(info, 0) == {}
+
+    def test_disabled_transform_empty(self):
+        info = transform_stat_header(["VHeader", "Fail Num"])
+        assert stat_cf_ranges(info, 2) == {}
+
+
+class TestStatRowIsFtr:
+    def info(self, header=None):
+        return transform_stat_header(header if header is not None
+                                     else [""] + STAT_HHEADER)
+
+    def ftr_row(self, info):
+        return transform_stat_row(
+            ["12 / Head1 / All Sites", "2_F/scanchain", "P/F",
+             "N/A", "N/A", "0"], info)
+
+    def test_cache_hit_primary(self):
+        info = self.info()
+        row = self.ftr_row(info)
+        assert stat_row_is_ftr(row, info, {(12, "2_F/scanchain")}) is True
+
+    def test_cache_key_is_test_num_plus_full_name(self):
+        # the leaf rejoins the prefix (exact inverse of split_test_name);
+        # a partial / prefix-only name must NOT match
+        info = self.info()
+        row = self.ftr_row(info)
+        assert stat_row_is_ftr(row, info, {(12, "2_F")}) is False
+        assert stat_row_is_ftr(row, info, {(12, "scanchain")}) is False
+        assert stat_row_is_ftr(row, info, {(12, "2_F/scanchain")}) is True
+
+    def test_cache_miss_for_other_test(self):
+        info = self.info()
+        row = transform_stat_row(["10 / Head1 / All Sites", "T/vcc", "V",
+                                  "0.5", "1.5", "1"], info)
+        assert stat_row_is_ftr(row, info, {(12, "2_F/scanchain")}) is False
+
+    def test_cache_hit_no_slash_name(self):
+        info = self.info()
+        row = transform_stat_row(["7 / Head0 / Site2", "CONTINUITY", "V",
+                                  "0", "1", "0"], info)
+        assert stat_row_is_ftr(row, info, {(7, "CONTINUITY")}) is True
+
+    def test_unparsed_vheader_skips_cache_signal(self):
+        info = self.info()
+        row = transform_stat_row(["garbage", "2_F/scan", "", "V"], info)
+        assert stat_row_is_ftr(row, info, {(12, "2_F/scan")}) is False
+
+    def test_fallback_pattern_name_non_empty(self):
+        # Stat-selected-without-DUT run: empty cache, the non-empty Pattern
+        # Name cell fires (upstream sets VECT_NAM only for FTR rows,
+        # DataInterface.py:540)
+        header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
+        info = self.info(header)
+        row = transform_stat_row(
+            ["12 / Head1 / All Sites", "2_F/scanchain", "PAT_TOP", "P/F",
+             "N/A", "N/A", "0"], info)
+        assert stat_row_is_ftr(row, info, set()) is True
+
+    def test_fallback_blank_pattern_name_not_ftr(self):
+        # PTR/MPR rows carry "" in the Pattern Name column — never misfires
+        header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
+        info = self.info(header)
+        row = transform_stat_row(
+            ["10 / Head1 / All Sites", "T/vcc", "", "V", "0.5", "1.5", "1"],
+            info)
+        assert stat_row_is_ftr(row, info, set()) is False
+
+    def test_fallback_ignores_non_string_sentinels(self):
+        # only a genuinely non-empty cell fires; "0"/blank-ish stays out
+        header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
+        info = self.info(header)
+        row = transform_stat_row(
+            ["10 / Head1 / All Sites", "T/vcc", 0, "V", "0.5", "1.5", "1"],
+            info)
+        assert stat_row_is_ftr(row, info, set()) is False
+
+    def test_disabled_transform_never_ftr(self):
+        info = transform_stat_header(["VHeader", "Test Name", "Pattern Name"])
+        row = ["raw", "name", "PAT"]
+        assert stat_row_is_ftr(row, info, {(12, "name")}) is False
+
+    def test_empty_row_safe(self):
+        info = self.info()
+        assert stat_row_is_ftr([], info, set()) is False
+
+
+class TestApplyFtrPseudoLimits:
+    def test_replaces_spec_cells_with_dut_summary_floats(self):
+        info = transform_stat_header([""] + STAT_HHEADER)
+        row = transform_stat_row(["12 / Head1 / All Sites", "2_F/scan",
+                                  "P/F", "N/A", "N/A", "0", "∞"], info)
+        apply_ftr_pseudo_limits(row, info)
+        assert row[7] == 0.0
+        assert row[8] == 0.999999
+        assert isinstance(row[7], float)
+        assert isinstance(row[8], float)
+        # sibling cells untouched ("N/A" sentinels gone, rest preserved)
+        assert row[6] == "P/F"
+        assert row[9] == 0
+        assert row[10] == "∞"
+
+    def test_missing_spec_cols_noop(self):
+        # translated UI (no limit anchors): nothing to override
+        info = transform_stat_header(["", "Tests", "Mean"])
+        row = [1, 2, 3]
+        apply_ftr_pseudo_limits(row, info)
+        assert row == [1, 2, 3]
+
+    def test_short_degraded_row_noop(self):
+        # unparseable VHeader degrades the row; indices may fall off — no
+        # IndexError, no phantom cells
+        info = transform_stat_header([""] + STAT_HHEADER)
+        row = transform_stat_row([], info)
+        apply_ftr_pseudo_limits(row, info)
+        assert len(row) == 6
+
+
+# --------------------------------------------------------------------------
 # Test Statistics sheet (third wave): transformed columns in the workbook
 # --------------------------------------------------------------------------
 
@@ -491,11 +707,82 @@ class TestStatisticsSheet:
         ws = wb["Test Statistics"]
         assert ws.auto_filter.ref == "A1:P2"
 
+    def test_fail_num_cpk_conditional_formatting(self, generated):
+        # fourth wave: binary Fail Num rules + the four Cpk bands over DATA
+        # rows only (header excluded); standard header -> J / K. The single
+        # data row collapses the stored range to "J2"/"K2".
+        _, wb, _, _, _ = generated
+        ws = wb["Test Statistics"]
+        fail_rules = cf_block(ws, "J2")
+        assert [r.formula for r in fail_rules] == [
+            ["AND(ISNUMBER(J2),J2>0)"], ["AND(ISNUMBER(J2),J2=0)"]]
+        cpk_rules = cf_block(ws, "K2")
+        assert [r.formula for r in cpk_rules] == [
+            ["AND(ISNUMBER(K2),K2>=1.67)"], ["AND(ISNUMBER(K2),K2>=1.33)"],
+            ["AND(ISNUMBER(K2),K2>=1)"], ["AND(ISNUMBER(K2),K2<1)"]]
+
     def test_loop_count_still_one_tick_per_row(self, generated):
         gen, _, _, _, _ = generated
         # FileInfo +1, GDR_DTR +1, Stat +1 per data row -> 3 (unchanged
         # cadence: the transforms do not alter progress semantics)
         assert gen.loopCount == gen.totalLoopCnt == 3
+
+
+class TestStatOnlyFtrFallback:
+    """Stat-only run (no DUT sheet): empty FTR cache, Pattern-Name fallback
+    drives the pseudo-limits; CF letters shift with the Pattern Name column."""
+
+    def test_cache_stays_empty_for_stat_only(self, generated_stat_ftr):
+        gen, _, _, _, _ = generated_stat_ftr
+        assert gen._ftr_tests == set()
+
+    def test_fallback_override_on_pattern_name_row(self, generated_stat_ftr):
+        _, wb, _, _, _ = generated_stat_ftr
+        ws = wb["Test Statistics"]
+        # transformed FTR-shifted header: SpecMin=I, SpecMax=J (column H
+        # holds Unit). FTR row 3 gets the DUT-Summary synthetic floats,
+        # PTR row 2 keeps its numeric limits. (The SpecMin 0.0 round-trips
+        # to int 0 through the xlsx — numeric either way.)
+        assert ws["H3"].value == "P/F"
+        assert ws["I3"].value == 0.0
+        assert isinstance(ws["I3"].value, (int, float))
+        assert ws["J3"].value == 0.999999
+        assert isinstance(ws["J3"].value, float)
+        assert ws["I2"].value == 0.5
+        assert ws["J2"].value == 1.5
+
+    def test_fail_num_cpk_cf_shifted_letters(self, generated_stat_ftr):
+        _, wb, _, _, _ = generated_stat_ftr
+        ws = wb["Test Statistics"]
+        # Pattern Name shifts Fail Num -> K and Cpk -> L; data rows only
+        fail_rules = cf_block(ws, "K2:K3")
+        assert [r.formula for r in fail_rules] == [
+            ["AND(ISNUMBER(K2),K2>0)"], ["AND(ISNUMBER(K2),K2=0)"]]
+        fills = [r.dxf.fill.fgColor.rgb for r in fail_rules]
+        assert fills == ["FFFFCCCC", "FFCCFFCC"]
+        cpk_rules = cf_block(ws, "L2:L3")
+        assert [r.formula for r in cpk_rules] == [
+            ["AND(ISNUMBER(L2),L2>=1.67)"], ["AND(ISNUMBER(L2),L2>=1.33)"],
+            ["AND(ISNUMBER(L2),L2>=1)"], ["AND(ISNUMBER(L2),L2<1)"]]
+
+    def test_infinity_cpk_cell_guarded_and_string(self, generated_stat_ftr):
+        _, wb, _, _, _ = generated_stat_ftr
+        ws = wb["Test Statistics"]
+        # the "∞" sentinel stays a string; the ISNUMBER guard is what keeps
+        # it unstyled in Excel (openpyxl only persists the rule formulas)
+        assert ws["L3"].value == "∞"
+        for rule in cf_block(ws, "L2:L3"):
+            for formula in rule.formula:
+                assert formula.startswith("AND(ISNUMBER(")
+
+    def test_close_signal_no_error(self, generated_stat_ftr):
+        _, _, _, closed, errors = generated_stat_ftr
+        assert closed == [True]
+        assert errors == []
+
+    def test_loop_count_matches_two_rows(self, generated_stat_ftr):
+        gen, _, _, _, _ = generated_stat_ftr
+        assert gen.loopCount == gen.totalLoopCnt == 2
 
 
 class TestFileInfoMultiFile:

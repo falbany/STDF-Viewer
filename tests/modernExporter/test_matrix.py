@@ -164,17 +164,21 @@ class TestMetadataRowsConstant:
     def test_entry_keys(self):
         for entry in METADATA_ROWS:
             assert set(entry) == {"name", "unit_type", "numeric", "mask",
-                                  "dutinfo_index", "mean"}
+                                  "dutinfo_index", "mean", "std"}
 
-    def test_mean_flag_only_temperature(self):
-        # third wave: only the Temperature row keeps a live Mean cell; every
-        # other numeric metadata row drops it (Mean cell back to "-")
-        means = {m["name"]: m["mean"] for m in METADATA_ROWS}
-        assert means == {
-            "File ID": False, "Part ID": False, "Part TXT": False,
-            "Temperature": True, "HW Bin": False, "SW Bin": False,
-            "Wafer": False, "X": False, "Y": False, "Head-Site": False,
-            "Tests Executed": False, "Test Time": False, "DUT Flag": False,
+    def test_mean_std_flags(self):
+        # third wave: only Temperature keeps a live Mean cell; fourth wave:
+        # the Test Time row keeps Mean AND St. Dev. (formulas live on the
+        # hidden row for when the user unhides it); every other numeric row
+        # carries MIN/MAX only
+        flags = {m["name"]: (m["mean"], m["std"]) for m in METADATA_ROWS}
+        assert flags == {
+            "File ID": (False, False), "Part ID": (False, False),
+            "Part TXT": (False, False), "Temperature": (True, False),
+            "HW Bin": (False, False), "SW Bin": (False, False),
+            "Wafer": (False, False), "X": (False, False), "Y": (False, False),
+            "Head-Site": (False, False), "Tests Executed": (False, False),
+            "Test Time": (True, True), "DUT Flag": (False, False),
         }
 
     def test_pinned_units(self):
@@ -195,13 +199,16 @@ class TestMetadataRowsConstant:
                            "Wafer", "X", "Y", "Tests Executed", "Test Time"}
 
     def test_mask_rules_distribution(self):
+        # fourth wave: DUT Flag un-hidden ("always" -> "never") so its status
+        # conditional formatting is meaningful; Head-Site / Test Time keep
+        # the unconditional fold
         masks = {m["name"]: m["mask"] for m in METADATA_ROWS}
         assert masks == {
             "File ID": "constant", "Part ID": "never", "Part TXT": "never",
             "Temperature": "constant", "HW Bin": "never", "SW Bin": "never",
             "Wafer": "blank", "X": "constant", "Y": "constant",
             "Head-Site": "always", "Tests Executed": "never",
-            "Test Time": "always", "DUT Flag": "always",
+            "Test Time": "always", "DUT Flag": "never",
         }
 
     def test_dutinfo_indices(self):
@@ -255,10 +262,13 @@ class TestMetadataBlock:
         assert self.spec()["metadata_rows"][5][12:] == [2, 2, 2]  # SW Bin
 
     def test_test_time_parsed_to_milliseconds(self):
-        # "123 ms" strings parse to bare ints so Min/Max compute; Mean is a
-        # dash (third wave: only Temperature keeps it)
+        # "123 ms" strings parse to bare ints so the stats compute; fourth
+        # wave: the Test Time row keeps the full MIN/MAX/MEAN/STDEV set (the
+        # row stays hidden — the formulas serve a user who unhides it)
         row = self.spec()["metadata_rows"][11]
-        assert row[6:9] == ["=MIN(M13:O13)", "=MAX(M13:O13)", "-"]
+        assert row[6:10] == ["=MIN(M13:O13)", "=MAX(M13:O13)",
+                             "=AVERAGE(M13:O13)", "=STDEV(M13:O13)"]
+        assert row[10:12] == ["-", "-"]
         assert row[12:] == [123, 123, 123]
 
     def test_text_rows_carry_dash_placeholders(self):
@@ -268,19 +278,28 @@ class TestMetadataBlock:
 
     def test_numeric_rows_carry_dash_tails(self):
         rows = self.spec()["metadata_rows"]
-        # non-Temperature numeric rows: MIN/MAX live, Mean a dash
-        for pos in (0, 4, 5, 6, 7, 8, 10, 11):
+        # numeric rows outside Temperature / Test Time: MIN/MAX live, the
+        # Mean and St. Dev. cells are dashes (Test Time pos 11 is pinned in
+        # test_test_time_parsed_to_milliseconds — fourth wave mean+std)
+        for pos in (0, 4, 5, 6, 7, 8, 10):
             assert rows[pos][6:8] == [f"=MIN(M{2 + pos}:O{2 + pos})",
                                       f"=MAX(M{2 + pos}:O{2 + pos})"]
             assert rows[pos][8:12] == ["-", "-", "-", "-"]
-        # Temperature (pos 3) keeps the full MIN/MAX/MEAN triple
+        # Temperature (pos 3) keeps MIN/MAX/MEAN, St. Dev. a dash
         assert rows[3][6:9] == ["=MIN(M5:O5)", "=MAX(M5:O5)", "=AVERAGE(M5:O5)"]
         assert rows[3][9:12] == ["-", "-", "-"]
 
     def test_masked_rows_absolute_positions(self):
         # File ID constant (2), Wafer all blank (8), X/Y constant (9, 10),
-        # always-fold: Head-Site (11), Test Time (13), DUT Flag (14).
-        assert self.spec()["masked_rows"] == [2, 8, 9, 10, 11, 13, 14]
+        # always-fold: Head-Site (11), Test Time (13). Fourth wave: DUT Flag
+        # (14) is VISIBLE — its status CF would be meaningless hidden.
+        assert self.spec()["masked_rows"] == [2, 8, 9, 10, 11, 13]
+
+    def test_dut_flag_row_visible_with_identical_flags(self):
+        # fourth wave ruling: the DUT Flag row never folds, even when every
+        # DUT carries the same flag string
+        assert 14 not in self.spec()["masked_rows"]
+        assert self.spec()["metadata_rows"][12][12:] == ["Passed"] * 3
 
     def test_temperature_constant_folds(self):
         # new "constant" mask: identical temperatures fold the row
@@ -301,7 +320,8 @@ class TestMetadataBlock:
         assert 5 in build([], duts)[0]["masked_rows"]
 
     def test_always_mask_folds_distinct_values(self):
-        # Head-Site / Test Time / DUT Flag fold even when values differ
+        # Head-Site / Test Time fold even when values differ; the DUT Flag
+        # row stays visible (fourth wave) for its status CF
         duts = [
             (1, 0, make_dut_info(part_id="D0", head_site="1-0",
                                  test_time="100 ms", dut_flag="Passed")),
@@ -313,8 +333,9 @@ class TestMetadataBlock:
         assert rows[9][12:] == ["1-0", "1-1"]      # distinct Head-Sites
         assert rows[11][12:] == [100, 200]         # distinct test times
         assert rows[12][12:] == ["Passed", "Failed"]
-        for row in (11, 13, 14):
+        for row in (11, 13):
             assert row in spec["masked_rows"]
+        assert 14 not in spec["masked_rows"]
 
 
 # --------------------------------------------------------------------------
@@ -449,6 +470,10 @@ class TestStructure:
         assert cf["cpk_range"] == "K16:K18"
         assert cf["fails_range"] == "L16:L18"
         assert cf["fails_max"] == 0.2 * 3
+        # fourth wave: status CF range over the DUT Flag metadata row's DIE
+        # CELLS ONLY (row 14 = METADATA_START + the DUT Flag position in
+        # METADATA_ROWS — computed, not hard-coded; base cells never styled)
+        assert cf["dut_flag_range"] == "M14:O14"
 
     def test_tr_translates_base_labels_only(self):
         spec = build(base_tests(), base_duts(), tr=str.upper)[0]
@@ -495,6 +520,8 @@ class TestChunking:
         assert spec["auto_filter"]["ref"] == "A15:M18"
         assert spec["conditional_formatting"]["die_rules"]["flag_col_offset"] == 2
         assert spec["conditional_formatting"]["fails_max"] == 0.2 * 1
+        # DUT Flag CF range follows the chunk's own die span
+        assert spec["conditional_formatting"]["dut_flag_range"] == "M14:M14"
 
 
 # --------------------------------------------------------------------------
@@ -636,8 +663,8 @@ class TestEdgeCases:
         spec = build([], duts)[0]
         assert spec["metadata_rows"][7][12:] == ["", ""]
         # File ID + Temperature (no _T tag) + X + Y constant-of-nothing,
-        # Wafer all blank + always rows
-        assert spec["masked_rows"] == [2, 5, 8, 9, 10, 11, 13, 14]
+        # Wafer all blank + always rows (Head-Site, Test Time)
+        assert spec["masked_rows"] == [2, 5, 8, 9, 10, 11, 13]
 
     def test_wafer_with_values_not_masked(self):
         duts = [

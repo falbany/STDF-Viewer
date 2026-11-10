@@ -282,7 +282,12 @@ def _add_cpk_rules(ws, cell_range, theme):
     Every band is ISNUMBER-guarded: the Cpk formula yields "" on error
     (zero STD), and in Excel text compares above any number, so an
     unguarded "">=1.33 would color blank Cpk cells (design §7: blank
-    stays unstyled).
+    stays unstyled). Text sentinels ("∞", "N/A") are equally excluded.
+
+    SHARED builder (fourth wave): called from BOTH the matrix CF path
+    (``render_matrix_sheet``) and the plain-table CF path
+    (``render_plain_table``) — the Test Statistics Cpk column gets the
+    identical rule set.
     """
     min_col, min_row, _, _ = range_boundaries(cell_range)
     cell = f"{get_column_letter(min_col)}{min_row}"
@@ -296,6 +301,20 @@ def _add_cpk_rules(ws, cell_range, theme):
         _add_rule(ws, cell_range, formula, _solid_fill(hex6), stop=stop)
 
 
+def _add_fail_num_rules(ws, cell_range, theme):
+    """Binary Fail Num rules over a plain-table data range (fourth wave,
+    controller ruling — NOT a color scale, because no per-row DUT total
+    exists to scale against): numeric >0 -> fail red, numeric =0 -> pass
+    green. ISNUMBER-guarded so the upstream sentinels ("N/A", "∞") and
+    blank cells stay unstyled; both rules stop the chain."""
+    min_col, min_row, _, _ = range_boundaries(cell_range)
+    cell = f"{get_column_letter(min_col)}{min_row}"
+    _add_rule(ws, cell_range, f"AND(ISNUMBER({cell}),{cell}>0)",
+              theme.fail_fill)
+    _add_rule(ws, cell_range, f"AND(ISNUMBER({cell}),{cell}=0)",
+              theme.pass_fill)
+
+
 def _add_fails_scale(ws, cf):
     """FAILS heat: 0 -> green end of the scale, fails_max -> red end."""
     ws.conditional_formatting.add(
@@ -304,6 +323,22 @@ def _add_fails_scale(ws, cf):
                        end_type="num", end_value=cf["fails_max"],
                        end_color="FFCCCC"),
     )
+
+
+def _add_dut_flag_status_rules(ws, cell_range, theme):
+    """Three status rules on the DUT Flag metadata row's DIE cells (fourth
+    wave). Case-insensitive SEARCH substring matches — upstream values are
+    "Passed - 0xNN" / "Failed - 0xNN" / "Superseded - 0xNN" / "Unknown -
+    0xNN", so "Fail" hits the fail variants and blanks / "Unknown" stay
+    unstyled (SEARCH on a blank errors, ISNUMBER swallows it). All rules
+    stopIfTrue; colors reuse the theme's neutral/pass/fail fills."""
+    min_col, min_row, _, _ = range_boundaries(cell_range)
+    cell = f"{get_column_letter(min_col)}{min_row}"
+    for needle, fill in (("Superseded", theme.neutral_fill),
+                         ("Fail", theme.fail_fill),
+                         ("Pass", theme.pass_fill)):
+        _add_rule(ws, cell_range,
+                  f'ISNUMBER(SEARCH("{needle}",{cell}))', fill)
 
 
 # --------------------------------------------------------------------------
@@ -369,6 +404,9 @@ def render_matrix_sheet(ws: Worksheet, spec: dict, theme) -> None:
     _add_die_rules(ws, cf["die_rules"], theme)
     _add_cpk_rules(ws, cf["cpk_range"], theme)
     _add_fails_scale(ws, cf)
+    dut_flag_range = cf.get("dut_flag_range")
+    if dut_flag_range:
+        _add_dut_flag_status_rules(ws, dut_flag_range, theme)
 
     _hide_mirror_columns(ws, spec, theme)
     _set_auto_filter(ws, spec)
@@ -404,14 +442,19 @@ def write_plain_row(ws: Worksheet, row: int, values: list, theme,
 
 def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
     """Render a plain table spec ``{"name","headers","rows",
-    "number_formats"?,"cell_number_formats"?,"column_fills"?}``: styled
-    header row, thin borders, alternating banding, auto-filter, frozen
-    header, gridlines off. ``number_formats`` keys are column letters;
-    ``cell_number_formats`` (fix wave 2) maps ``(row_index, col_index)`` —
-    0-based over the data grid EXCLUDING the header row — to a per-cell
-    number format applied after writing; ``column_fills`` (third wave)
-    maps a column letter to a static data-cell fill hex that wins over
-    the banding (headers untouched)."""
+    "number_formats"?,"cell_number_formats"?,"column_fills"?,
+    "conditional_formatting"?}``: styled header row, thin borders,
+    alternating banding, auto-filter, frozen header, gridlines off.
+    ``number_formats`` keys are column letters; ``cell_number_formats``
+    (fix wave 2) maps ``(row_index, col_index)`` — 0-based over the data
+    grid EXCLUDING the header row — to a per-cell number format applied
+    after writing; ``column_fills`` (third wave) maps a column letter to a
+    static data-cell fill hex that wins over the banding (headers
+    untouched); ``conditional_formatting`` (fourth wave) carries the
+    optional ``"cpk_range"`` / ``"fail_num_range"`` strings spanning the
+    DATA rows only (header excluded) — the Cpk bands reuse the matrix
+    sheet's shared builder, the Fail Num rules are binary (>0 red, =0
+    green)."""
     headers = spec["headers"]
     rows = spec.get("rows") or []
     formats = spec.get("number_formats") or {}
@@ -438,6 +481,14 @@ def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
     for (row_index, col_index), fmt in (
             spec.get("cell_number_formats") or {}).items():
         ws.cell(row=2 + row_index, column=1 + col_index).number_format = fmt
+
+    # conditional formatting (fourth wave): optional ranges over the data
+    # rows — the shared Cpk band builder + the binary Fail Num rules
+    cf = spec.get("conditional_formatting") or {}
+    if cf.get("cpk_range"):
+        _add_cpk_rules(ws, cf["cpk_range"], theme)
+    if cf.get("fail_num_range"):
+        _add_fail_num_rules(ws, cf["fail_num_range"], theme)
 
     width = max([len(headers)] + [len(values) for values in rows])
     ws.auto_filter.ref = f"A1:{get_column_letter(width)}{1 + len(rows)}"

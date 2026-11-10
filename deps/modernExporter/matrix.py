@@ -102,23 +102,34 @@ MASK_ALWAYS = "always"
 # Test Time, HW Bin, SW Bin, Wafer ID, (X, Y), DUT Flag]; None marks the
 # derived row (Temperature = parsed from the raw Part ID). Test Time and
 # HW/SW Bin arrive as DB-shaped strings ("123 ms" / "Bin 1") and parse to
-# bare numerics. `mean` (third wave) keeps the live AVERAGE formula —
-# True only for Temperature; other numeric rows show MIN/MAX and a dash.
+# bare numerics. `mean`/`std` keep live AVERAGE/STDEV formulas: third wave
+# mean=True only for Temperature; fourth wave the Test Time row takes
+# mean=True + std=True; every other numeric row shows MIN/MAX and dashes.
+# Fourth wave: DUT Flag folds "always" -> "never" (row visible — its
+# status conditional formatting would be meaningless on a hidden row);
+# Head-Site and Test Time keep the unconditional fold.
 METADATA_ROWS = (
-    {"name": "File ID", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 0, "mean": False},
-    {"name": "Part ID", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 1, "mean": False},
-    {"name": "Part TXT", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 2, "mean": False},
-    {"name": "Temperature", "unit_type": "CELSIUS", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": None, "mean": True},
-    {"name": "HW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 6, "mean": False},
-    {"name": "SW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 7, "mean": False},
-    {"name": "Wafer", "unit_type": "INT", "numeric": True, "mask": MASK_BLANK, "dutinfo_index": 8, "mean": False},
-    {"name": "X", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9, "mean": False},
-    {"name": "Y", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9, "mean": False},
-    {"name": "Head-Site", "unit_type": "TEXT", "numeric": False, "mask": MASK_ALWAYS, "dutinfo_index": 3, "mean": False},
-    {"name": "Tests Executed", "unit_type": "INT", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 4, "mean": False},
-    {"name": "Test Time", "unit_type": "ms", "numeric": True, "mask": MASK_ALWAYS, "dutinfo_index": 5, "mean": False},
-    {"name": "DUT Flag", "unit_type": "TEXT", "numeric": False, "mask": MASK_ALWAYS, "dutinfo_index": 10, "mean": False},
+    {"name": "File ID", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 0, "mean": False, "std": False},
+    {"name": "Part ID", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 1, "mean": False, "std": False},
+    {"name": "Part TXT", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 2, "mean": False, "std": False},
+    {"name": "Temperature", "unit_type": "CELSIUS", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": None, "mean": True, "std": False},
+    {"name": "HW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 6, "mean": False, "std": False},
+    {"name": "SW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 7, "mean": False, "std": False},
+    {"name": "Wafer", "unit_type": "INT", "numeric": True, "mask": MASK_BLANK, "dutinfo_index": 8, "mean": False, "std": False},
+    {"name": "X", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9, "mean": False, "std": False},
+    {"name": "Y", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9, "mean": False, "std": False},
+    {"name": "Head-Site", "unit_type": "TEXT", "numeric": False, "mask": MASK_ALWAYS, "dutinfo_index": 3, "mean": False, "std": False},
+    {"name": "Tests Executed", "unit_type": "INT", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 4, "mean": False, "std": False},
+    {"name": "Test Time", "unit_type": "ms", "numeric": True, "mask": MASK_ALWAYS, "dutinfo_index": 5, "mean": True, "std": True},
+    {"name": "DUT Flag", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 10, "mean": False, "std": False},
 )
+
+# Absolute Excel row of the DUT Flag metadata row (fourth wave): computed
+# from its METADATA_ROWS position, never hard-coded — the status CF range
+# in the spec and the writer's rules both derive from it.
+DUT_FLAG_ROW = METADATA_START + next(
+    index for index, meta in enumerate(METADATA_ROWS)
+    if meta["name"] == "DUT Flag")
 
 # First two integers inside a preformatted "(X, Y)" string.
 _XY_INT_RE = re.compile(r"-?\d+")
@@ -356,11 +367,14 @@ def _is_masked(meta, values):
 def _metadata_block(summaryTable, chunk_cells, first_die, last_die):
     """The 13 metadata row-lists plus the absolute Excel rows to hide.
 
-    Numeric rows carry live MIN/MAX over their die range; only the
-    Temperature row still keeps a live MEAN (third wave 2026-11-10 — every
-    other numeric row pads the Mean cell with a dash); text rows are all
-    dashes. The row shape puts Test# first:
-    [test#, "METADATA", name, unit, "-", "-", MIN, MAX, MEAN?, "-", "-", "-"].
+    Numeric rows carry live MIN/MAX over their die range; Temperature
+    keeps a live MEAN (third wave) and Test Time keeps MEAN + STDEV
+    (fourth wave — the row stays hidden; the formulas serve a user who
+    unhides it); every other numeric row pads the Mean/St. Dev. cells
+    with dashes and text rows are all dashes. The row shape puts Test#
+    first:
+    [test#, "METADATA", name, unit, "-", "-", MIN, MAX, MEAN-or-"-",
+     STD-or-"-", "-", "-"].
     """
     rows = []
     masked_rows = []
@@ -374,9 +388,10 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die):
                   meta["unit_type"], "-", "-"]
         if meta["numeric"]:
             prefix.extend(metadata_stat_formulas(excel_row, first_die,
-                                                 last_die, mean=meta["mean"]))
-            prefix.extend(["-", "-", "-"] if meta["mean"]
-                          else ["-", "-", "-", "-"])
+                                                 last_die, mean=meta["mean"],
+                                                 std=meta["std"]))
+            dashes = 4 - int(meta["mean"]) - int(meta["std"])
+            prefix.extend(["-"] * dashes)
         else:
             prefix.extend(["-"] * 6)
         rows.append(prefix + values)
@@ -522,6 +537,10 @@ def _build_chunk(summaryTable, tests, order, chunk_start, chunk_ids, display_ids
             "cpk_range": f"K{DATA_START}:K{last_data_row}",
             "fails_range": f"L{DATA_START}:L{last_data_row}",
             "fails_max": 0.2 * die_count,
+            # fourth wave: status CF over the DUT Flag row's DIE CELLS ONLY
+            # (never the base cells; the writer adds Superseded/Fail/Pass
+            # SEARCH rules on this range)
+            "dut_flag_range": f"{first_die}{DUT_FLAG_ROW}:{last_die}{DUT_FLAG_ROW}",
         },
     }
     if rows:
