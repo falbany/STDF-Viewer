@@ -23,13 +23,24 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-Pure parsing / formula / chunking helpers for the modern openpyxl exporter."""
+Pure parsing / formula / chunking helpers for the modern xlsxwriter
+exporter: the pure spec/letter utilities are engine-neutral, and the
+cached-value engine below mirrors the sheet formulas for previews."""
 
+import math
 import re
+import statistics
 
-from openpyxl.utils import get_column_letter
+from xlsxwriter.utility import xl_col_to_name
 
 from deps.SharedSrc import isPass
+
+
+def get_column_letter(col: int) -> str:
+    """1-based column letter ("A" for 1), wrapping xlsxwriter's 0-based
+    ``xl_col_to_name`` — every spec/formula letter in the package stays
+    1-based Excel notation regardless of engine index conventions."""
+    return xl_col_to_name(col - 1)
 
 # Part-ID temperature tag, e.g. the "_T25C" in "SN541_T25C"; case-insensitive,
 # optional decimal, and signed so cold temperatures ("_T-5.5C") match.
@@ -394,3 +405,125 @@ def apply_cp_formula(stat_row: list, header_info: dict, row_number: int) -> None
         get_column_letter(std_col + 1),
         row_number,
     )
+
+
+# --------------------------------------------------------------------------
+# cached-value engine (xlsxwriter migration, spec §7.5 upgrade 1)
+#
+# xlsxwriter stores no computed result for a formula unless one is supplied;
+# previews (QuickLook/Numbers/Google Sheets) show that cache. These helpers
+# recompute in Python exactly what the sheet formulas compute, so every
+# write_formula can pass an explicit value=. Uncomputable results are None
+# at this layer (the spec builder maps None -> "" so the cache stays blank
+# instead of a stray 0).
+# --------------------------------------------------------------------------
+
+
+def _is_number(value) -> bool:
+    """True for real int/float cells (bools and NaN excluded — a bool would
+    silently average as 0/1 and a NaN would poison every statistic)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return not math.isnan(value)
+
+
+def numeric_values(cells) -> list:
+    """The numeric cells of ``cells``: int/float kept, bools/None/NaN
+    dropped, strings kept only when float-parseable ("2.5" -> 2.5)."""
+    out = []
+    for cell in cells:
+        if _is_number(cell):
+            out.append(cell)
+        elif isinstance(cell, str):
+            try:
+                out.append(float(cell.strip()))
+            except ValueError:
+                continue
+    return out
+
+
+def stat_cached(name: str, values) -> "float | None":
+    """MIN/MAX/AVERAGE/STDEV over the numeric cells (sample STDEV, the
+    same semantic the sheet's STDEV() uses); None when uncomputable —
+    no values, or fewer than 2 for STDEV; unknown names are None too."""
+    nums = numeric_values(values)
+    if name == "MIN":
+        return min(nums) if nums else None
+    if name == "MAX":
+        return max(nums) if nums else None
+    if name == "AVERAGE":
+        return statistics.fmean(nums) if nums else None
+    if name == "STDEV":
+        return statistics.stdev(nums) if len(nums) >= 2 else None
+    return None
+
+
+def _ratio_cached(spec_min, spec_max, values, mode) -> "float | None":
+    """Shared Cp/Cpk computation over the row's numeric die values.
+
+    Mirrors the sheet formulas: sigma = STDEV(range), mu = AVERAGE(range),
+    Cp = (max-min)/(6*sigma), Cpk = min((max-mu)/(3*sigma), (mu-min)/(3*sigma)).
+    None on missing/one-sided limits, sigma == 0, or fewer than 2 values —
+    the exact cases the IFERROR wrappers blank on the sheet."""
+    if spec_min is None or spec_max is None:
+        return None
+    nums = numeric_values(values)
+    if len(nums) < 2:
+        return None
+    sigma = statistics.stdev(nums)
+    if sigma == 0:
+        return None
+    mu = statistics.fmean(nums)
+    spread = spec_max - spec_min
+    if mode == "cp":
+        return spread / (6 * sigma)
+    return min((spec_max - mu) / (3 * sigma), (mu - spec_min) / (3 * sigma))
+
+
+def cp_cached(spec_min, spec_max, values) -> "float | None":
+    """Cached Cp over a die-value row (see ``_ratio_cached``)."""
+    return _ratio_cached(spec_min, spec_max, values, "cp")
+
+
+def cpk_cached(spec_min, spec_max, values) -> "float | None":
+    """Cached Cpk over a die-value row (see ``_ratio_cached``)."""
+    return _ratio_cached(spec_min, spec_max, values, "cpk")
+
+
+def fails_cached_limits(values, lo, hi) -> int:
+    """Count of numeric values strictly outside (lo, hi) — the same
+    exclusive comparison the SUMPRODUCT fail formulas encode
+    (rng<lo or rng>hi); blank/non-numeric cells never count."""
+    return sum(1 for v in numeric_values(values) if v < lo or v > hi)
+
+
+def fails_cached_flags(flags) -> int:
+    """Count of recorded fail flags (1s) — the flag-mirror SUMPRODUCT."""
+    return sum(1 for f in numeric_values(flags) if f == 1)
+
+
+def stat_cp_value(spec_min, spec_max, std) -> "float | None":
+    """Cached Cp for one Test Statistics row: sigma comes from the row's
+    St. Dev. COLUMN (not a die range), so only the limits and sigma gate:
+    None on missing/one-sided limits or sigma <= 0/None."""
+    if spec_min is None or spec_max is None:
+        return None
+    if not _is_number(std) or std <= 0:
+        return None
+    return (spec_max - spec_min) / (6 * std)
+
+
+def stat_cpk_value(spec_min, spec_max, avg, std) -> "float | None":
+    """Cached Cpk for one Test Statistics row (sigma from the St. Dev.
+    column); None on missing/one-sided limits or sigma <= 0/None."""
+    if spec_min is None or spec_max is None:
+        return None
+    if not _is_number(std) or std <= 0:
+        return None
+    return min((spec_max - avg) / (3 * std), (avg - spec_min) / (3 * std))
+
+
+def has_numeric(values) -> bool:
+    """True when ``values`` carries at least one numeric cell — the
+    sparkline gate (rows without numeric die values get no sparkline)."""
+    return bool(numeric_values(values))

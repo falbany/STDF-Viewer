@@ -8,6 +8,16 @@ from deps.exporter.helpers import (
     DEFAULT_PARAM_PATTERN,
     DUT_CHUNK_CAP,
     TEMPERATURE_RE,
+    cp_cached,
+    cpk_cached,
+    fails_cached_flags,
+    fails_cached_limits,
+    get_column_letter,
+    has_numeric,
+    numeric_values,
+    stat_cached,
+    stat_cp_value,
+    stat_cpk_value,
     apply_cp_formula,
     apply_cpk_formula,
     build_stat_cp_formula,
@@ -546,3 +556,118 @@ class TestApplyCpFormula:
         row = [0] * 5
         apply_cp_formula(row, self.INFO, 2)
         assert row == [0] * 5
+
+
+class TestGetColumnLetterXlsxwriter:
+    """1-based wrapper over xlsxwriter's 0-based xl_col_to_name."""
+
+    def test_single_columns(self):
+        assert get_column_letter(1) == "A"
+        assert get_column_letter(12) == "L"
+        assert get_column_letter(13) == "M"
+
+    def test_double_columns(self):
+        assert get_column_letter(26) == "Z"
+        assert get_column_letter(27) == "AA"
+        assert get_column_letter(52) == "AZ"
+
+    def test_matches_xlsxwriter_zero_based(self):
+        from xlsxwriter.utility import xl_col_to_name
+
+        assert get_column_letter(28) == xl_col_to_name(27)
+
+
+class TestNumericValues:
+    def test_keeps_numbers_and_numeric_strings_drops_rest(self):
+        assert numeric_values([1, "2.5", None, "", "abc", 3.25]) == [1, 2.5, 3.25]
+
+    def test_drops_bools_and_nan(self):
+        assert numeric_values([True, False, float("nan"), 5.0]) == [5.0]
+
+    def test_empty(self):
+        assert numeric_values([None, ""]) == []
+
+
+class TestStatCached:
+    def test_min_max_average(self):
+        assert stat_cached("MIN", [3.0, 1.0, 2.0]) == 1.0
+        assert stat_cached("MAX", [3.0, 1.0, 2.0]) == 3.0
+        assert stat_cached("AVERAGE", [1, 2, 3]) == 2.0
+
+    def test_stdev_sample_semantics(self):
+        assert stat_cached("STDEV", [1.0, 3.0]) == pytest.approx(2.0 ** 0.5)
+
+    def test_stdev_needs_two_values(self):
+        assert stat_cached("STDEV", [2.0]) is None
+
+    def test_empty_values(self):
+        assert stat_cached("MIN", []) is None
+        assert stat_cached("AVERAGE", [None, ""]) is None
+
+    def test_unknown_name(self):
+        assert stat_cached("MEDIAN", [1.0, 2.0]) is None
+
+
+class TestCpCpkCached:
+    def test_cp_symmetric_limits(self):
+        # limits (0, 1) over [0.25, 0.75]: mu=0.5, sigma=sqrt(0.125)
+        values = [0.25, 0.75]
+        sigma = 0.125 ** 0.5
+        assert cp_cached(0.0, 1.0, values) == pytest.approx(1.0 / (6 * sigma))
+
+    def test_cpk_symmetric_limits_both_ratios_equal(self):
+        # limits (-1, 1) over [-1, 1]: mu=0, sigma=sqrt(2); both ratios equal
+        sigma = 2.0 ** 0.5
+        expected = 1.0 / (3 * sigma)
+        assert cpk_cached(-1.0, 1.0, [-1.0, 1.0]) == pytest.approx(expected)
+        # and equals cp for the symmetric case
+        assert cp_cached(-1.0, 1.0, [-1.0, 1.0]) == pytest.approx(expected)
+
+    def test_cpk_takes_worse_side(self):
+        # limits (0, 2) over [1.9, 2.1]: mu=2.0, sigma=sqrt(0.02)/... worse at max
+        values = [1.9, 2.1]
+        sigma = 0.02 ** 0.5
+        mu = 2.0
+        expected = min((2.0 - mu) / (3 * sigma), (mu - 0.0) / (3 * sigma))
+        assert cpk_cached(0.0, 2.0, values) == pytest.approx(expected)
+
+    def test_none_cases(self):
+        assert cp_cached(None, 1.0, [0.5, 0.6]) is None  # one-sided
+        assert cp_cached(0.0, None, [0.5, 0.6]) is None
+        assert cp_cached(0.0, 0.999999, [0.0, 0.0]) is None  # sigma == 0
+        assert cp_cached(0.0, 1.0, [0.5]) is None  # n < 2
+        assert cpk_cached(0.0, 1.0, []) is None
+
+
+class TestFailsCached:
+    def test_limits_exclusive_compare(self):
+        assert fails_cached_limits([0.5, 1.2, ""], 0.0, 0.999999) == 1
+
+    def test_limits_both_sides_counted(self):
+        assert fails_cached_limits([-0.5, 0.5, 1.5], 0.0, 1.0) == 2
+
+    def test_flags_count_ones(self):
+        assert fails_cached_flags([0, 1, "", None, 1]) == 2
+
+
+class TestStatColumnVariants:
+    def test_stat_cp_value(self):
+        assert stat_cp_value(0.0, 1.0, 0.5) == pytest.approx(1.0 / 3.0)
+
+    def test_stat_cpk_value(self):
+        assert stat_cpk_value(0.0, 1.0, 0.5, 0.5) == pytest.approx(1.0 / 3.0)
+
+    def test_none_rules(self):
+        assert stat_cp_value(None, 1.0, 0.5) is None
+        assert stat_cp_value(0.0, None, 0.5) is None
+        assert stat_cp_value(0.0, 1.0, 0.0) is None
+        assert stat_cp_value(0.0, 1.0, None) is None
+        assert stat_cpk_value(0.0, 1.0, 0.5, None) is None
+        assert stat_cpk_value(0.0, 1.0, 0.5, 0.0) is None
+        assert stat_cpk_value(0.0, None, 0.5, 0.5) is None
+
+
+class TestHasNumeric:
+    def test_true_and_false(self):
+        assert has_numeric([None, "", 5]) is True
+        assert has_numeric(["", None]) is False

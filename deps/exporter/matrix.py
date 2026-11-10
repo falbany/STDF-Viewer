@@ -25,14 +25,13 @@
 
 DUT Summary spec builder: metadata block, live formulas, hybrid fail logic.
 
-Pure spec construction (strings/dicts/numbers only) — the openpyxl renderer
-(Task 5) consumes the spec dicts produced here.
+Pure spec construction (strings/dicts/numbers only) — the xlsxwriter renderer
+consumes the spec dicts produced here.
 """
 
 import re
 
 import numpy as np
-from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 
 from deps.SharedSrc import REC
 from deps.exporter.helpers import (
@@ -256,6 +255,11 @@ DUT_FLAG_ROW = METADATA_START + next(
 
 # First two integers inside a preformatted "(X, Y)" string.
 _XY_INT_RE = re.compile(r"-?\d+")
+
+# Control characters Excel forbids inside sheet XML strings (copied out of
+# openpyxl when the package left that dependency behind — tab \011 and
+# newline \012 stay legal).
+ILLEGAL_CHARACTERS_RE = re.compile(r"[\000-\010]|[\013-\014]|[\016-\037]")
 
 
 def sanitize_cell(value):
