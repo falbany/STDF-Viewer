@@ -22,9 +22,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-"""
 
-"""Plain-table spec builders and scaled image embedding.
+Plain-table spec builders and scaled image embedding.
 
 ``plain_table_spec`` is pure spec construction for the Task 5 renderer's
 ``render_plain_table`` (headers translated, every cell sanitized, generator
@@ -45,9 +44,13 @@ PX_PER_INCH = 96
 ROW_HEIGHT_IN = 0.21  # one default Excel row ≈ 0.21 inch (classic spacing math)
 
 
-def plain_table_spec(sheet_name: str, headers: list[str], rows: list[list],
-                     tr=lambda s: s,
-                     cell_number_formats: dict | None = None) -> dict:
+def plain_table_spec(
+    sheet_name: str,
+    headers: list[str],
+    rows: list[list],
+    tr=lambda s: s,
+    cell_number_formats: dict | None = None,
+) -> dict:
     """Build a plain-table spec ``{"name","headers","rows",
     "cell_number_formats"}`` for ``render_plain_table``.
 
@@ -69,8 +72,9 @@ def plain_table_spec(sheet_name: str, headers: list[str], rows: list[list],
     }
 
 
-def insert_report_image(ws: Worksheet, image_io: BytesIO, row: int,
-                        target_width_in: float = 12.0) -> int:
+def insert_report_image(
+    ws: Worksheet, image_io: BytesIO, row: int, target_width_in: float = 12.0
+) -> int:
     """Embed ``image_io`` (PNG) at column A of 0-based ``row``, scaled to
     ``target_width_in`` inches wide with the aspect ratio preserved.
 

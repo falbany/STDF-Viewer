@@ -22,9 +22,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-"""
 
-"""Pure parsing / formula / chunking helpers for the modern openpyxl exporter."""
+Pure parsing / formula / chunking helpers for the modern openpyxl exporter."""
 
 import re
 
@@ -173,7 +172,9 @@ def flag_value(flag) -> int | None:
     return 0 if isPass(flag) else 1
 
 
-def split_dut_chunks(dut_ids: list[str], cap: int = DUT_CHUNK_CAP) -> tuple[tuple[str, ...], ...]:
+def split_dut_chunks(
+    dut_ids: list[str], cap: int = DUT_CHUNK_CAP
+) -> tuple[tuple[str, ...], ...]:
     """Split DUT IDs into consecutive chunks of at most ``cap`` per sheet.
 
     An empty list still yields one (empty) chunk so the caller renders one
@@ -216,8 +217,9 @@ def fails_formula_flags(row: int, first: str, last: str) -> str:
     return f'=SUMPRODUCT(({mrng}<>"")*({mrng}=1))'
 
 
-def metadata_stat_formulas(row: int, first: str, last: str,
-                           mean: bool = True, std: bool = False) -> tuple[str, ...]:
+def metadata_stat_formulas(
+    row: int, first: str, last: str, mean: bool = True, std: bool = False
+) -> tuple[str, ...]:
     """(MIN, MAX[, AVERAGE][, STDEV]) formula set for a numeric metadata row.
 
     ``mean=False`` drops the AVERAGE formula; ``std=True`` appends the
@@ -227,8 +229,10 @@ def metadata_stat_formulas(row: int, first: str, last: str,
     ``std=True``; every other numeric row takes ``(False, False)``. The
     caller pads the Mean/St. Dev. cells with dashes for the dropped ones.
     """
-    formulas = [stat_formula("MIN", row, first, last),
-                stat_formula("MAX", row, first, last)]
+    formulas = [
+        stat_formula("MIN", row, first, last),
+        stat_formula("MAX", row, first, last),
+    ]
     if mean:
         formulas.append(stat_formula("AVERAGE", row, first, last))
     if std:
@@ -240,8 +244,10 @@ def metadata_stat_formulas(row: int, first: str, last: str,
 # Fifth user-feedback wave (2026-11-10): live Test Statistics Cpk formula
 # --------------------------------------------------------------------------
 
-def build_stat_cpk_formula(spec_min_l: str, spec_max_l: str, avg_l: str,
-                           std_l: str, row_number: int) -> str:
+
+def build_stat_cpk_formula(
+    spec_min_l: str, spec_max_l: str, avg_l: str, std_l: str, row_number: int
+) -> str:
     """Live Cpk formula for one Test Statistics row, DUT-Summary shaped.
 
     ``=IFERROR(MIN((<max>-<avg>)/(3*<std>),(<avg>-<min>)/(3*<std>)),"")``
@@ -251,9 +257,11 @@ def build_stat_cpk_formula(spec_min_l: str, spec_max_l: str, avg_l: str,
     The IFERROR blank covers σ=0 and missing/one-sided limits, so the
     "∞" / "N/A" string sentinels disappear from the column.
     """
-    return (f'=IFERROR(MIN(({spec_max_l}{row_number}-{avg_l}{row_number})'
-            f'/(3*{std_l}{row_number}),({avg_l}{row_number}-{spec_min_l}'
-            f'{row_number})/(3*{std_l}{row_number})),"")')
+    return (
+        f"=IFERROR(MIN(({spec_max_l}{row_number}-{avg_l}{row_number})"
+        f"/(3*{std_l}{row_number}),({avg_l}{row_number}-{spec_min_l}"
+        f'{row_number})/(3*{std_l}{row_number})),"")'
+    )
 
 
 def apply_cpk_formula(stat_row: list, header_info: dict, row_number: int) -> None:
@@ -274,12 +282,14 @@ def apply_cpk_formula(stat_row: list, header_info: dict, row_number: int) -> Non
     avg_col = header_info.get("avg_col")
     std_col = header_info.get("std_col")
     cpk_col = header_info.get("cpk_col")
-    if (spec_cols is None or avg_col is None or std_col is None
-            or cpk_col is None):
+    if spec_cols is None or avg_col is None or std_col is None or cpk_col is None:
         return
     if not cpk_col < len(stat_row):
         return
     stat_row[cpk_col] = build_stat_cpk_formula(
-        get_column_letter(spec_cols[0] + 1), get_column_letter(spec_cols[1] + 1),
-        get_column_letter(avg_col + 1), get_column_letter(std_col + 1),
-        row_number)
+        get_column_letter(spec_cols[0] + 1),
+        get_column_letter(spec_cols[1] + 1),
+        get_column_letter(avg_col + 1),
+        get_column_letter(std_col + 1),
+        row_number,
+    )

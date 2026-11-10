@@ -28,8 +28,7 @@ from deps.uic_stdExporter import ReportSelection, dataChannel, signals
 
 def chart_title_text(chart) -> str:
     """Concatenated rich-text runs of a chart title (reload-safe)."""
-    return "".join(run.t for p in chart.title.tx.rich.p
-                   for run in (p.r or []) if run.t)
+    return "".join(run.t for p in chart.title.tx.rich.p for run in (p.r or []) if run.t)
 
 
 def bin_table(bin_type: str) -> list[list]:
@@ -38,9 +37,19 @@ def bin_table(bin_type: str) -> list[list]:
     bin (DataInterface.py:596-608 flattened by STDF-Viewer.py:1600-1604;
     all strings)."""
     label = "Hardware Bin" if bin_type == "HB" else "Software Bin"
-    return [[f"{label} / Head1 / All Sites", "Yield: 90.00%", "Total: 10",
-             "Pass: 9", "Failed: 1", "Unknown: 0", "Superseded: 0",
-             '"PASS_BIN"\nBin 1: 90.0%', '"FAIL_BIN"\nBin 3: 10.0%']]
+    return [
+        [
+            f"{label} / Head1 / All Sites",
+            "Yield: 90.00%",
+            "Total: 10",
+            "Pass: 9",
+            "Failed: 1",
+            "Unknown: 0",
+            "Superseded: 0",
+            '"PASS_BIN"\nBin 1: 90.0%',
+            '"FAIL_BIN"\nBin 3: 10.0%',
+        ]
+    ]
 
 
 @pytest.fixture(scope="module")
@@ -56,35 +65,75 @@ def qapp():
 # synthetic GUI data (classic protocol shapes)
 # --------------------------------------------------------------------------
 
-def make_dut_info(fid=1, part_id="", part_txt="", head_site="1--1",
-                  tests_executed=42, test_time="123 ms", hw_bin="Bin 1",
-                  sw_bin="Bin 2", wafer="", xy=(3, -5), dut_flag="Passed"):
+
+def make_dut_info(
+    fid=1,
+    part_id="",
+    part_txt="",
+    head_site="1--1",
+    tests_executed=42,
+    test_time="123 ms",
+    hw_bin="Bin 1",
+    sw_bin="Bin 2",
+    wafer="",
+    xy=(3, -5),
+    dut_flag="Passed",
+):
     """dutInfo tuple: [File ID, Part ID, Part Text, Head-Site, Tests Executed,
     Test Time, HW Bin, SW Bin, Wafer ID, (X, Y), DUT Flag] (indices 0..10).
 
     Test Time / HW Bin / SW Bin use the raw DB shapes ("123 ms", "Bin 1",
     "Bin 2" — see schema.rs FETCH_SELECT_DUT_SUMMARY)."""
-    return (fid, part_id, part_txt, head_site, tests_executed, test_time,
-            hw_bin, sw_bin, wafer, xy, dut_flag)
+    return (
+        fid,
+        part_id,
+        part_txt,
+        head_site,
+        tests_executed,
+        test_time,
+        hw_bin,
+        sw_bin,
+        wafer,
+        xy,
+        dut_flag,
+    )
 
 
 def make_summary():
     """Classic waitForDutSummary dict: 2 tests x 3 DUTs in file 1."""
     duts = [
         (1, 0, make_dut_info(part_id="SN541_T25C")),
-        (1, 1, make_dut_info(part_id="SN542_T25C", sw_bin="Bin 3", xy=(4, -6),
-                             dut_flag="Failed")),
+        (
+            1,
+            1,
+            make_dut_info(
+                part_id="SN542_T25C", sw_bin="Bin 3", xy=(4, -6), dut_flag="Failed"
+            ),
+        ),
         (1, 2, make_dut_info(part_id="SN543_T85C")),
     ]
     tests = [
         # parametric with limits (data row 16)
-        dict(name="0_TXCC/VCCC_ASIC", num=10, unit="V", llimit=0.5,
-             hlimit=1.5, rec=REC.PTR,
-             data={1: ([1.0, 1.2, np.nan], [0, 0, -1])}),
+        dict(
+            name="0_TXCC/VCCC_ASIC",
+            num=10,
+            unit="V",
+            llimit=0.5,
+            hlimit=1.5,
+            rec=REC.PTR,
+            data={1: ([1.0, 1.2, np.nan], [0, 0, -1])},
+        ),
         # FTR (data row 17): die cells from the flag list
-        dict(name="2_Func/scanchain", num=12, unit="", llimit=np.nan,
-             hlimit=np.nan, rec=REC.FTR, vect_nam="PAT_TOP",
-             data={1: ([0.0, 1.0, 0.0], [0, 0x80, 0])}),
+        dict(
+            name="2_Func/scanchain",
+            num=12,
+            unit="",
+            llimit=np.nan,
+            hlimit=np.nan,
+            rec=REC.FTR,
+            vect_nam="PAT_TOP",
+            data={1: ([0.0, 1.0, 0.0], [0, 0x80, 0])},
+        ),
     ]
     data, test_info, dut2ind, dut_info = {}, {}, {}, {}
     dut2ind[1] = {0: 0, 1: 1, 2: 2}
@@ -92,24 +141,34 @@ def make_summary():
     for t in tests:
         test_tuple = (t["num"], 0, t["name"])
         # TestInfo order: [TEST_NAME, TEST_NUM, HLimit, LLimit, Unit]
-        test_info[test_tuple] = [t["name"], t["num"], t["hlimit"],
-                                 t["llimit"], t["unit"]]
+        test_info[test_tuple] = [
+            t["name"],
+            t["num"],
+            t["hlimit"],
+            t["llimit"],
+            t["unit"],
+        ]
         values, flags = t["data"][1]
-        entry = {"SUB_CODE": t["rec"],
-                 "dataList": np.asarray(values, dtype=float),
-                 "flagList": np.asarray(flags, dtype=int)}
+        entry = {
+            "SUB_CODE": t["rec"],
+            "dataList": np.asarray(values, dtype=float),
+            "flagList": np.asarray(flags, dtype=int),
+        }
         if t.get("vect_nam") is not None:
             entry["VECT_NAM"] = t["vect_nam"]
         data[test_tuple] = {1: entry}
-    return {"Data": data, "TestInfo": test_info, "dut2ind": dut2ind,
-            "dutInfo": dut_info}
+    return {
+        "Data": data,
+        "TestInfo": test_info,
+        "dut2ind": dut2ind,
+        "dutInfo": dut_info,
+    }
 
 
 def png_bytes(width=96, height=48):
     """A small real PNG (96x48 scales to 1152x576 px at 12 in width)."""
     buf = io.BytesIO()
-    PILImage.new("RGB", (width, height), color=(0, 0, 0)).save(buf,
-                                                              format="PNG")
+    PILImage.new("RGB", (width, height), color=(0, 0, 0)).save(buf, format="PNG")
     return buf.getvalue()
 
 
@@ -124,57 +183,107 @@ def build_generated(tmp_path, qapp, with_stat=False):
     selectedFiles = [1]
     selectedHeads = [1]
     selectedSites = [-1]
-    waferTuples = [(0, 1, "W01")]     # (wafer index, file id, wafer name)
+    waferTuples = [(0, 1, "W01")]  # (wafer index, file id, wafer name)
     reportPath = str(tmp_path / "report.xlsx")
     # classic totalLoopCnt formula (stdfExporter.start): Trend 2*1*1
     # + Bin 1*1 + DUT (1 + 2) + Wafer len(waferTuples)
     totalLoopCnt = 2 + 1 + 3 + 1
-    selection = [ReportSelection.DUT, ReportSelection.Trend,
-                 ReportSelection.Bin, ReportSelection.Wafer]
+    selection = [
+        ReportSelection.DUT,
+        ReportSelection.Trend,
+        ReportSelection.Bin,
+        ReportSelection.Wafer,
+    ]
     if with_stat:
         # classic sheet-creation order: DUT < Stat < Trend
         selection.insert(1, ReportSelection.Stat)
-        totalLoopCnt += 2   # Stat: +1 per data row
-    reportInfo = (selection,
-                  testTuples, selectedFiles, selectedHeads, selectedSites,
-                  reportPath, waferTuples, totalLoopCnt)
+        totalLoopCnt += 2  # Stat: +1 per data row
+    reportInfo = (
+        selection,
+        testTuples,
+        selectedFiles,
+        selectedHeads,
+        selectedSites,
+        reportPath,
+        waferTuples,
+        totalLoopCnt,
+    )
 
     sig = signals()
     channel = dataChannel()
-    gen = ModernReportGenerator(sig, QtCore.QMutex(),
-                                QtCore.QWaitCondition(), reportInfo, channel)
+    gen = ModernReportGenerator(
+        sig, QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, channel
+    )
 
     # GUI side: classic-protocol summary table, chart PNGs, stat rows
-    gen.waitForDutSummary = (lambda heads, sites, fids, testTuples:
-                             make_summary())
+    gen.waitForDutSummary = lambda heads, sites, fids, testTuples: make_summary()
 
     def fake_wait_for_image(testTuple, head, sites, fids, chartType):
         return io.BytesIO(PNG_BYTES)
+
     gen.waitForImage = fake_wait_for_image
 
     # classic DataInterface.getStatistics shape (containsFTR=True: the
     # "Pattern Name" column follows "Test Name"; VECT_NAM only on the FTR row)
     stat_table = [
-        ["", "Test Name", "Pattern Name", "Unit", "Low Limit", "High Limit",
-         "Fail Num", "Cpk", "Average", "Median", "St. Dev.", "Min", "Max"],
-        ["10 / Head1 / All Sites", "0_TXCC/VCCC_ASIC", "", "V", "0.500",
-         "1.500", "1", "1.23", "1.000", "1.000", "0.010", "0.980", "1.020"],
-        ["12 / Head1 / All Sites", "2_Func/scanchain", "PAT_TOP", "P/F",
-         "N/A", "N/A", "0", "∞", "1.000", "1.000", "0.000", "0.000", "1.000"],
+        [
+            "",
+            "Test Name",
+            "Pattern Name",
+            "Unit",
+            "Low Limit",
+            "High Limit",
+            "Fail Num",
+            "Cpk",
+            "Average",
+            "Median",
+            "St. Dev.",
+            "Min",
+            "Max",
+        ],
+        [
+            "10 / Head1 / All Sites",
+            "0_TXCC/VCCC_ASIC",
+            "",
+            "V",
+            "0.500",
+            "1.500",
+            "1",
+            "1.23",
+            "1.000",
+            "1.000",
+            "0.010",
+            "0.980",
+            "1.020",
+        ],
+        [
+            "12 / Head1 / All Sites",
+            "2_Func/scanchain",
+            "PAT_TOP",
+            "P/F",
+            "N/A",
+            "N/A",
+            "0",
+            "∞",
+            "1.000",
+            "1.000",
+            "0.000",
+            "0.000",
+            "1.000",
+        ],
     ]
 
     def fake_wait_for_data_list(heads, sites, fids, chartType, kargs):
-        if (chartType == tab.Trend
-                and kargs.get("testTuples") == testTuples):
+        if chartType == tab.Trend and kargs.get("testTuples") == testTuples:
             # writeStatistic passes the FULL testTuples list (per-test trend
             # rows pass a single-tuple list — never equal here, two tests)
             return stat_table
         if chartType == tab.Bin:
-            return (bin_table("HB") if kargs.get("isHBIN")
-                    else bin_table("SB"))
+            return bin_table("HB") if kargs.get("isHBIN") else bin_table("SB")
         if chartType == tab.Wafer:
             return [["WAFER-W01-ROW", "Total DUTs", 3]]
         return [["TREND-ROW", "mean", 1.1]]
+
     gen.waitForDataList = fake_wait_for_data_list
 
     closed, errors = [], []
@@ -197,15 +306,15 @@ def generated(tmp_path, qapp):
 # sheet inventory
 # --------------------------------------------------------------------------
 
+
 class TestSheetInventory:
     def test_sheets_classic_order_without_histogram(self, generated):
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["DUT Summary", "Trend Chart",
-                                 "Bin Chart", "Wafer Map"]
+        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer Map"]
 
     def test_unselected_and_overflow_sheets_absent(self, generated):
         _, wb, _, _, _ = generated
-        assert "Histogram" not in wb.sheetnames      # not selected
+        assert "Histogram" not in wb.sheetnames  # not selected
         assert "DUT Summary (2)" not in wb.sheetnames  # 3 DUTs, single chunk
 
 
@@ -213,12 +322,13 @@ class TestSheetInventory:
 # DUT Summary matrix sheet
 # --------------------------------------------------------------------------
 
+
 class TestDutSummarySheet:
     def test_banner_row_one(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        assert ws["A1"].value == "Test#"              # Test# leads the base labels
-        assert ws["M1"].value == 1                    # banner labels are plain ints
+        assert ws["A1"].value == "Test#"  # Test# leads the base labels
+        assert ws["M1"].value == 1  # banner labels are plain ints
         assert ws["A1"].fill.fgColor.rgb == "FFCBD5E1"
 
     def test_repeated_header_row_fifteen(self, generated):
@@ -226,7 +336,7 @@ class TestDutSummarySheet:
         ws = wb["DUT Summary"]
         assert ws["A15"].value == "Test#"
         assert ws["A15"].fill.fgColor.rgb == "FF1E40AF"
-        assert ws["M15"].value == "SN541"             # part ID base
+        assert ws["M15"].value == "SN541"  # part ID base
 
     def test_metadata_block_layout(self, generated):
         _, wb, _, _, _ = generated
@@ -269,7 +379,7 @@ class TestDutSummarySheet:
     def test_mirror_columns_hidden_after_spacer(self, generated):
         _, wb, _, _, _ = generated
         dims = wb["DUT Summary"].column_dimensions
-        assert not dims["P"].hidden                   # spacer stays visible
+        assert not dims["P"].hidden  # spacer stays visible
         for letter in ("Q", "R", "S"):
             assert dims[letter].hidden is True
 
@@ -277,15 +387,16 @@ class TestDutSummarySheet:
         # 2026-11-10 R9: DUT-sheet widths are fixed by the renderer
         _, wb, _, _, _ = generated
         dims = wb["DUT Summary"].column_dimensions
-        assert dims["A"].width == 8                   # Test#
-        assert dims["B"].width == 30                  # Test name
-        assert dims["C"].width == 8                   # Param
-        assert dims["M"].width == 8                   # die columns pinned
+        assert dims["A"].width == 8  # Test#
+        assert dims["B"].width == 30  # Test name
+        assert dims["C"].width == 8  # Param
+        assert dims["M"].width == 8  # die columns pinned
 
 
 # --------------------------------------------------------------------------
 # chart sheets
 # --------------------------------------------------------------------------
+
 
 class TestChartSheets:
     def test_images_embedded(self, generated):
@@ -309,7 +420,7 @@ class TestChartSheets:
         assert cell.font.size == 14
         assert cell.font.bold is True
         assert cell.font.color.rgb.endswith("1E40AF")
-        assert wb["Bin Chart"]["A2"].value is None          # row 2 blank
+        assert wb["Bin Chart"]["A2"].value is None  # row 2 blank
 
     def test_bin_kpi_cards_written(self, generated):
         # R2: three cards on rows 3-5 (label/value/subtitle in A, C, E),
@@ -317,7 +428,7 @@ class TestChartSheets:
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
         assert ws["A3"].value == "Yield"
-        assert ws["A4"].value == pytest.approx(0.9)         # float, wave-3
+        assert ws["A4"].value == pytest.approx(0.9)  # float, wave-3
         assert isinstance(ws["A4"].value, float)
         assert ws["A4"].number_format == "0.00%"
         assert ws["A5"].value == "9 pass / 10 total parts"
@@ -327,7 +438,7 @@ class TestChartSheets:
         assert ws["E3"].value == "Total Parts"
         assert ws["E4"].value == 10
         assert ws["E5"].value == "across 1 file(s)"
-        assert ws["B6"].value is None                       # row 6 blank
+        assert ws["B6"].value is None  # row 6 blank
 
     def test_bin_kpi_card_fills_and_merges(self, generated):
         # card fills on the anchor cells (openpyxl's READER recreates
@@ -335,13 +446,20 @@ class TestChartSheets:
         # the saved XML); every card row merged across its 2 columns
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        for anchor, hex6 in (("A3", "FFF3CD"), ("C3", "FFCCCC"),
-                             ("E3", "E9EEF6")):
+        for anchor, hex6 in (("A3", "FFF3CD"), ("C3", "FFCCCC"), ("E3", "E9EEF6")):
             assert ws[anchor].fill.fgColor.rgb.endswith(hex6), anchor
         ranges = {str(r) for r in ws.merged_cells.ranges}
-        for span in ("A3:B3", "A4:B4", "A5:B5",
-                     "C3:D3", "C4:D4", "C5:D5",
-                     "E3:F3", "E4:F4", "E5:F5"):
+        for span in (
+            "A3:B3",
+            "A4:B4",
+            "A5:B5",
+            "C3:D3",
+            "C4:D4",
+            "C5:D5",
+            "E3:F3",
+            "E4:F4",
+            "E5:F5",
+        ):
             assert span in ranges, span
 
     # -- donuts right of their tables (R5/R6) --------------------------------
@@ -355,17 +473,20 @@ class TestChartSheets:
         assert len(charts) == 2
         assert all(isinstance(c, DoughnutChart) for c in charts)
         titles = [chart_title_text(c) for c in charts]
-        assert titles == ["Hardware Bin — Head1 / All Sites",
-                          "Software Bin — Head1 / All Sites"]
+        assert titles == [
+            "Hardware Bin — Head1 / All Sites",
+            "Software Bin — Head1 / All Sites",
+        ]
         assert [(c.anchor._from.row, c.anchor._from.col) for c in charts] == [
-            (7, 6), (23, 6)]
+            (7, 6),
+            (23, 6),
+        ]
         # hidden helper columns must still be plotted (survives the
         # round-trip: plotVisOnly val="0")
         assert all(c.visible_cells_only is False for c in charts)
         # mockup: donut hole in the 50-60 band, right-hand legend
         assert all(c.holeSize == 55 for c in charts)
-        assert all(c.legend is not None and c.legend.position == "r"
-                   for c in charts)
+        assert all(c.legend is not None and c.legend.position == "r" for c in charts)
 
     def test_bin_chart_construction_in_memory(self, generated):
         # in-memory-only attributes (style / size are defaults after a
@@ -418,9 +539,12 @@ class TestChartSheets:
         assert ws["A7"].value == "Hardware Bins — Head1 / All Sites"
         assert ws["A7"].style == "Output"
         assert [ws.cell(row=8, column=c).value for c in range(1, 5)] == [
-            "Bin", "Value", "Count", "Distribution"]
-        assert [ws[cell].value for cell in ("A9", "B9", "C9")] == [
-            "PASS_BIN", 1, 9]
+            "Bin",
+            "Value",
+            "Count",
+            "Distribution",
+        ]
+        assert [ws[cell].value for cell in ("A9", "B9", "C9")] == ["PASS_BIN", 1, 9]
         assert ws["D9"].value == pytest.approx(0.9)
         assert ws["D9"].number_format == "0.00%"
         assert ws["D10"].value == pytest.approx(0.1)
@@ -434,7 +558,11 @@ class TestChartSheets:
         assert ws["A23"].value == "Software Bins — Head1 / All Sites"
         assert ws["A23"].style == "Output"
         assert [ws.cell(row=24, column=c).value for c in range(1, 5)] == [
-            "Bin", "Value", "Count", "Distribution"]
+            "Bin",
+            "Value",
+            "Count",
+            "Distribution",
+        ]
         assert ws["A27"].value == "Total"
         assert ws["C27"].value == 10
 
@@ -462,20 +590,30 @@ class TestChartSheets:
             assert table.autoFilter is not None
             assert table.autoFilter.ref == table.ref
             assert [c.name for c in table.tableColumns] == [
-                "Bin", "Value", "Count", "Distribution"]
+                "Bin",
+                "Value",
+                "Count",
+                "Distribution",
+            ]
 
     def test_bin_tables_data_bars(self, generated):
         # one DataBarRule per table over the Distribution DATA rows only
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
         for data_range in ("D9:D10", "D25:D26"):
-            (rule,) = [r for cf in ws.conditional_formatting
-                       for r in cf.rules if str(cf.sqref) == data_range]
+            (rule,) = [
+                r
+                for cf in ws.conditional_formatting
+                for r in cf.rules
+                if str(cf.sqref) == data_range
+            ]
             assert rule.type == "dataBar"
             assert rule.dataBar.showValue is True
             assert rule.dataBar.color.rgb.endswith("5B9BD5")
             assert [(f.type, f.val) for f in rule.dataBar.cfvo] == [
-                ("num", 0), ("num", 1)]
+                ("num", 0),
+                ("num", 1),
+            ]
 
     def test_bin_sheet_gridlines_off(self, generated):
         # the brief lists gridlines-off as existing Bin-sheet behavior; the
@@ -486,10 +624,18 @@ class TestChartSheets:
 
     def test_wafer_and_trend_stat_rows_written(self, generated):
         _, wb, _, _, _ = generated
-        wafer = {c.value for row in wb["Wafer Map"].iter_rows()
-                 for c in row if c.value is not None}
-        trend = {c.value for row in wb["Trend Chart"].iter_rows()
-                 for c in row if c.value is not None}
+        wafer = {
+            c.value
+            for row in wb["Wafer Map"].iter_rows()
+            for c in row
+            if c.value is not None
+        }
+        trend = {
+            c.value
+            for row in wb["Trend Chart"].iter_rows()
+            for c in row
+            if c.value is not None
+        }
         assert "WAFER-W01-ROW" in wafer
         assert "TREND-ROW" in trend
 
@@ -508,6 +654,7 @@ class TestChartSheets:
 # progress / threading contract
 # --------------------------------------------------------------------------
 
+
 class TestProgressContract:
     def test_loop_count_matches_classic_total(self, generated):
         gen, _, _, _, _ = generated
@@ -525,6 +672,7 @@ class TestProgressContract:
 # die-cell number formats (final review critical 2 + 2026-11-10 R3)
 # --------------------------------------------------------------------------
 
+
 class TestDieCellNumberFormat:
     """Parametric die cells carry the hardcoded scientific format — decoupled
     from the exporter settings (which used to derive a float format via
@@ -536,9 +684,11 @@ class TestDieCellNumberFormat:
         ws = wb["DUT Summary"]
         assert ws["M16"].number_format == "0.00E+00"
         assert ws["N16"].number_format == "0.00E+00"
-        assert ws["M17"].number_format == "0"   # FTR die cells stay integer
+        assert ws["M17"].number_format == "0"  # FTR die cells stay integer
 
-    def test_settings_notation_no_longer_affects_die_cells(self, tmp_path, qapp, monkeypatch):
+    def test_settings_notation_no_longer_affects_die_cells(
+        self, tmp_path, qapp, monkeypatch
+    ):
         settings = getSetting()
         monkeypatch.setattr(settings.gen, "data_precision", 3)
         monkeypatch.setattr(settings.gen, "data_notation", "F")
@@ -552,6 +702,7 @@ class TestDieCellNumberFormat:
 # --------------------------------------------------------------------------
 # fourth wave: DUT-Summary FTR cache -> Test Statistics pseudo-limits
 # --------------------------------------------------------------------------
+
 
 def cf_block(ws, ref):
     """Rules attached to one conditional-formatting range."""
@@ -573,8 +724,13 @@ class TestStatFtrCacheDetection:
 
     def test_sheet_inventory_with_stat(self, generated):
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["DUT Summary", "Test Statistics",
-                                 "Trend Chart", "Bin Chart", "Wafer Map"]
+        assert wb.sheetnames == [
+            "DUT Summary",
+            "Test Statistics",
+            "Trend Chart",
+            "Bin Chart",
+            "Wafer Map",
+        ]
 
     def test_ftr_cache_built_from_dut_summary(self, generated):
         gen, _, _, _, _ = generated
@@ -604,11 +760,16 @@ class TestStatFtrCacheDetection:
         # data rows only (header row 1 excluded)
         fail_rules = cf_block(ws, "K2:K3")
         assert [r.formula for r in fail_rules] == [
-            ["AND(ISNUMBER(K2),K2>0)"], ["AND(ISNUMBER(K2),K2=0)"]]
+            ["AND(ISNUMBER(K2),K2>0)"],
+            ["AND(ISNUMBER(K2),K2=0)"],
+        ]
         cpk_rules = cf_block(ws, "L2:L3")
         assert [r.formula[0] for r in cpk_rules] == [
-            "AND(ISNUMBER(L2),L2>=1.67)", "AND(ISNUMBER(L2),L2>=1.33)",
-            "AND(ISNUMBER(L2),L2>=1)", "AND(ISNUMBER(L2),L2<1)"]
+            "AND(ISNUMBER(L2),L2>=1.67)",
+            "AND(ISNUMBER(L2),L2>=1.33)",
+            "AND(ISNUMBER(L2),L2>=1)",
+            "AND(ISNUMBER(L2),L2<1)",
+        ]
 
     def test_loop_count_includes_stat_rows(self, generated):
         gen, _, _, _, _ = generated

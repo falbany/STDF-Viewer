@@ -88,7 +88,7 @@ class TestModernTheme:
         value = theme.kpi_value_font
         assert value.size == 16
         assert value.bold is True
-        assert value.color.rgb.endswith("1F2937")   # banner dark
+        assert value.color.rgb.endswith("1F2937")  # banner dark
         sub = theme.kpi_sub_font
         assert sub.size == 9
         assert sub.italic is True

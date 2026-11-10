@@ -22,9 +22,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-"""
 
-"""Bin-distribution parsers, the native openpyxl donut-chart factory,
+Bin-distribution parsers, the native openpyxl donut-chart factory,
 the structured bin-table renderer and the dashboard KPI cards.
 
 Sixth user-feedback wave (2026-11-10): the fifth-wave PieCharts became
@@ -131,8 +130,8 @@ BIN_HELPER_HEADERS = ("Bin", "Count")
 
 # Structured bin tables (sixth wave, user mockup).
 BIN_TABLE_HEADERS = ("Bin", "Value", "Count", "Distribution")
-BIN_DATA_BAR_HEX = "5B9BD5"      # data-bar blue inside the fraction cells
-BIN_PCT_FORMAT = "0.00%"         # "Distribution" display format
+BIN_DATA_BAR_HEX = "5B9BD5"  # data-bar blue inside the fraction cells
+BIN_PCT_FORMAT = "0.00%"  # "Distribution" display format
 BIN_TOTAL_LABEL = "Total"
 # Excel's BUILT-IN cell style for the section-title band (seventh wave):
 # openpyxl 3.1.5 knows it with builtinId=21 (styles/builtins.py), so
@@ -159,8 +158,8 @@ BIN_CELL_RE = re.compile(r'^"(.*)"\nBin (\d+):\s*([0-9.]+)%$')
 # feed the dashboard KPI cards; unparseable cells are skipped.
 KPI_KEYS = ("total", "pass", "failed", "unknown", "superseded")
 KPI_ROW_RE = re.compile(r"^(Total|Pass|Failed|Unknown|Superseded):\s*(\d+)$")
-KPI_PCT_FORMAT = "0.00%"         # Yield card value display format
-KPI_YIELD_PLACEHOLDER = "-"      # Yield card value when total == 0
+KPI_PCT_FORMAT = "0.00%"  # Yield card value display format
+KPI_YIELD_PLACEHOLDER = "-"  # Yield card value when total == 0
 
 # The three KPI cards, each spanning two columns (seventh-wave mockup):
 # (start column, theme fill attribute).
@@ -188,8 +187,7 @@ def parse_bin_row(row) -> dict:
             continue
         match = BIN_CELL_RE.match(cell)
         if match is not None:
-            bins.append((int(match.group(2)), match.group(1),
-                         float(match.group(3))))
+            bins.append((int(match.group(2)), match.group(1), float(match.group(3))))
     return {"total": total, "bins": bins}
 
 
@@ -261,8 +259,9 @@ def aggregate_kpi(rows) -> dict:
     return sums
 
 
-def write_kpi_cards(ws: Worksheet, start_row: int, kpi: dict, n_files: int,
-                    theme) -> int:
+def write_kpi_cards(
+    ws: Worksheet, start_row: int, kpi: dict, n_files: int, theme
+) -> int:
     """Write the three dashboard KPI cards (seventh-wave mockup) starting
     at 1-based ``start_row`` (the label row) and return the next free row.
 
@@ -281,19 +280,22 @@ def write_kpi_cards(ws: Worksheet, start_row: int, kpi: dict, n_files: int,
     post-merge styles reach the saved XML on every cell of the range).
     """
     label_row, value_row, sub_row = start_row, start_row + 1, start_row + 2
-    alignment = theme.body_alignment      # centered, like every other face
+    alignment = theme.body_alignment  # centered, like every other face
     yield_value = kpi.get("yield")
     cards = (
-        ("Yield",
-         yield_value if yield_value is not None else KPI_YIELD_PLACEHOLDER,
-         f"{kpi.get('pass', 0)} pass / {kpi.get('total', 0)} total parts",
-         True),
-        ("Fails", int(kpi.get("failed", 0)),
-         f"{kpi.get('unknown', 0)} unknown · {kpi.get('superseded', 0)}"
-         " superseded",
-         False),
-        ("Total Parts", int(kpi.get("total", 0)),
-         f"across {n_files} file(s)", False),
+        (
+            "Yield",
+            yield_value if yield_value is not None else KPI_YIELD_PLACEHOLDER,
+            f"{kpi.get('pass', 0)} pass / {kpi.get('total', 0)} total parts",
+            True,
+        ),
+        (
+            "Fails",
+            int(kpi.get("failed", 0)),
+            f"{kpi.get('unknown', 0)} unknown · {kpi.get('superseded', 0)} superseded",
+            False,
+        ),
+        ("Total Parts", int(kpi.get("total", 0)), f"across {n_files} file(s)", False),
     )
 
     for index, (label, value, subtitle, is_percent) in enumerate(cards):
@@ -305,8 +307,7 @@ def write_kpi_cards(ws: Worksheet, start_row: int, kpi: dict, n_files: int,
         # merge the three card rows FIRST (styles applied before a merge
         # are wiped by merge_cells), then style + fill every cell
         for row in (label_row, value_row, sub_row):
-            ws.merge_cells(
-                f"{first_letter}{row}:{second_letter}{row}")
+            ws.merge_cells(f"{first_letter}{row}:{second_letter}{row}")
         for row in (label_row, value_row, sub_row):
             for column in (first_col, second_col):
                 ws.cell(row=row, column=column).fill = fill
@@ -330,9 +331,14 @@ def bin_label(bin_num: int, name: str) -> str:
     return f"Bin {bin_num} - {name}"
 
 
-def build_bin_donut(ws: Worksheet, title: str, bins,
-                    anchor_cell: str, helper_col: int,
-                    helper_row: int | None = None) -> None:
+def build_bin_donut(
+    ws: Worksheet,
+    title: str,
+    bins,
+    anchor_cell: str,
+    helper_col: int,
+    helper_row: int | None = None,
+) -> None:
     """Add one native DoughnutChart for ``bins = [(bin_num, label, count)]``.
 
     - the chart data lives in a two-column helper block (labels column
@@ -363,20 +369,20 @@ def build_bin_donut(ws: Worksheet, title: str, bins,
     for offset, header in enumerate(BIN_HELPER_HEADERS):
         ws.cell(row=helper_row, column=helper_col + offset, value=header)
     for index, (_bin_num, label, count) in enumerate(bins, start=1):
-        ws.cell(row=helper_row + index, column=helper_col,
-                value=sanitize_cell(label))
-        ws.cell(row=helper_row + index, column=helper_col + 1,
-                value=int(count))
+        ws.cell(row=helper_row + index, column=helper_col, value=sanitize_cell(label))
+        ws.cell(row=helper_row + index, column=helper_col + 1, value=int(count))
 
     chart = DoughnutChart(holeSize=BIN_DONUT_HOLE_SIZE)
     chart.title = title
     chart.style = BIN_CHART_STYLE
     chart.dataLabels = DataLabelList(showPercent=True)
-    chart.legend.position = "r"   # mockup: right-hand legend
-    data = Reference(ws, min_col=helper_col + 1, min_row=helper_row,
-                     max_row=helper_row + len(bins))
-    categories = Reference(ws, min_col=helper_col, min_row=helper_row + 1,
-                           max_row=helper_row + len(bins))
+    chart.legend.position = "r"  # mockup: right-hand legend
+    data = Reference(
+        ws, min_col=helper_col + 1, min_row=helper_row, max_row=helper_row + len(bins)
+    )
+    categories = Reference(
+        ws, min_col=helper_col, min_row=helper_row + 1, max_row=helper_row + len(bins)
+    )
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(categories)
 
@@ -396,8 +402,9 @@ def build_bin_donut(ws: Worksheet, title: str, bins,
     ws.column_dimensions[count_letter].hidden = True
 
 
-def write_bin_table(ws: Worksheet, start_row: int, bins, theme, title: str,
-                    table_name: str) -> int:
+def write_bin_table(
+    ws: Worksheet, start_row: int, bins, theme, title: str, table_name: str
+) -> int:
     """Write one structured bin table (sixth wave, user mockup) starting at
     1-based ``start_row`` and return the next free row.
 
@@ -433,8 +440,8 @@ def write_bin_table(ws: Worksheet, start_row: int, bins, theme, title: str,
     # the style band spans the table width
     last_col = len(BIN_TABLE_HEADERS)
     ws.merge_cells(
-        start_row=start_row, start_column=1,
-        end_row=start_row, end_column=last_col)
+        start_row=start_row, start_column=1, end_row=start_row, end_column=last_col
+    )
     for column in range(1, last_col + 1):
         ws.cell(row=start_row, column=column).style = BIN_SECTION_STYLE
     ws.cell(row=start_row, column=1, value=title)
@@ -450,8 +457,7 @@ def write_bin_table(ws: Worksheet, start_row: int, bins, theme, title: str,
     first_data_row = header_row + 1
     for offset, (bin_num, name, count) in enumerate(bins):
         row = first_data_row + offset
-        values = (name, int(bin_num), int(count),
-                  count / total if total else 0.0)
+        values = (name, int(bin_num), int(count), count / total if total else 0.0)
         for column, value in enumerate(values, start=1):
             cell = ws.cell(row=row, column=column, value=sanitize_cell(value))
             cell.font = theme.body_font
@@ -463,8 +469,15 @@ def write_bin_table(ws: Worksheet, start_row: int, bins, theme, title: str,
     # blue data bar in the Distribution cells — data rows only (Total outside)
     ws.conditional_formatting.add(
         f"D{first_data_row}:D{last_data_row}",
-        DataBarRule(start_type="num", start_value=0, end_type="num",
-                    end_value=1, color=BIN_DATA_BAR_HEX, showValue=True))
+        DataBarRule(
+            start_type="num",
+            start_value=0,
+            end_type="num",
+            end_value=1,
+            color=BIN_DATA_BAR_HEX,
+            showValue=True,
+        ),
+    )
 
     # bold Total row outside the table range (B stays empty)
     total_row = last_data_row + 1
@@ -479,8 +492,7 @@ def write_bin_table(ws: Worksheet, start_row: int, bins, theme, title: str,
     # gives the table filter arrows; column names MUST equal the header
     # cells (openpyxl 3.1.5: add_table does NOT initialize columns, and
     # _initialise_columns() also attaches the table AutoFilter)
-    table = Table(displayName=table_name,
-                  ref=f"A{header_row}:D{last_data_row}")
+    table = Table(displayName=table_name, ref=f"A{header_row}:D{last_data_row}")
     table._initialise_columns()
     for column, header in zip(table.tableColumns, BIN_TABLE_HEADERS):
         column.name = header

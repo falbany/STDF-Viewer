@@ -24,9 +24,8 @@
 #
 # Adapted from uic_stdExporter.py by noonchen (Copyright (c) 2020 noonchen)
 #
-"""
 
-"""Modern openpyxl report generator: plain, DUT Summary and chart sheets.
+Modern openpyxl report generator: plain, DUT Summary and chart sheets.
 
 ``ModernReportGenerator`` subclasses the classic ``reportGenerator`` from
 ``deps.uic_stdExporter`` and keeps its threading contract verbatim — the
@@ -97,10 +96,16 @@ AUTOFIT_CAP = 60
 # a trailing space after the colon; matching runs on the whitespace-
 # normalized label, so it fires in the English locale — under other locales
 # the values degrade to their classic string cells (harmless).
-FILE_INFO_NUMERIC_LABELS = frozenset({
-    "Yield:", "DUTs Tested:", "DUTs Passed:", "DUTs Failed:",
-    "DUTs Superseded:", "DUTs Unknown:",
-})
+FILE_INFO_NUMERIC_LABELS = frozenset(
+    {
+        "Yield:",
+        "DUTs Tested:",
+        "DUTs Passed:",
+        "DUTs Failed:",
+        "DUTs Superseded:",
+        "DUTs Unknown:",
+    }
+)
 YIELD_FORMAT = "0.00%"
 
 
@@ -123,7 +128,8 @@ STAT_VHEADER_LABELS = ("Test#", "Head", "Sites", "File ID")
 # VHeader shape (DataInterface.py:521-524):
 # "{test_num} / Head{head} / {All Sites|Site<site>}[ / File{fid}]"
 VHEADER_RE = re.compile(
-    r"^(\d+)\s*/\s*Head(\d+)\s*/\s*(All Sites|Site(-?\d+))(?:\s*/\s*File(\d+))?$")
+    r"^(\d+)\s*/\s*Head(\d+)\s*/\s*(All Sites|Site(-?\d+))(?:\s*/\s*File(\d+))?$"
+)
 
 # SpecMin/SpecMax stylization on the Test Statistics sheet (B4), mirroring
 # the DUT Summary E/F columns.
@@ -174,8 +180,7 @@ def parse_vheader(raw) -> tuple[int, int, "int | str", "int | str"] | None:
     match = VHEADER_RE.match(raw.strip())
     if match is None:
         return None
-    site = ("All Sites" if match.group(3) == "All Sites"
-            else int(match.group(4)))
+    site = "All Sites" if match.group(3) == "All Sites" else int(match.group(4))
     fid = int(match.group(5)) if match.group(5) is not None else ""
     return int(match.group(1)), int(match.group(2)), site, fid
 
@@ -223,13 +228,18 @@ def transform_stat_header(header_row) -> dict:
     """
     cells = [str(cell) if cell is not None else "" for cell in header_row]
     if not cells or _norm_header_text(cells[0]) != "":
-        return {"header": list(header_row), "enabled": False,
-                "param_inserted": False, "spec_cols": None,
-                "avg_col": None, "std_col": None, "cpk_col": None}
+        return {
+            "header": list(header_row),
+            "enabled": False,
+            "param_inserted": False,
+            "spec_cols": None,
+            "avg_col": None,
+            "std_col": None,
+            "cpk_col": None,
+        }
     body = [str(cell) for cell in cells[1:]]
     normalized = [_norm_header_text(cell) for cell in body]
-    renamed = [_STAT_RENAMES.get(norm, cell)
-               for norm, cell in zip(normalized, body)]
+    renamed = [_STAT_RENAMES.get(norm, cell) for norm, cell in zip(normalized, body)]
     header = list(STAT_VHEADER_LABELS) + renamed
     param_inserted = _STAT_TEST_NAME in normalized
     if param_inserted:
@@ -242,11 +252,15 @@ def transform_stat_header(header_row) -> dict:
     def _anchor(text):
         return norm_header.index(text) if text in norm_header else None
 
-    return {"header": header, "enabled": True,
-            "param_inserted": param_inserted, "spec_cols": spec_cols,
-            "avg_col": _anchor(_STAT_AVERAGE),
-            "std_col": _anchor(_STAT_STD),
-            "cpk_col": _anchor(_STAT_CPK)}
+    return {
+        "header": header,
+        "enabled": True,
+        "param_inserted": param_inserted,
+        "spec_cols": spec_cols,
+        "avg_col": _anchor(_STAT_AVERAGE),
+        "std_col": _anchor(_STAT_STD),
+        "cpk_col": _anchor(_STAT_CPK),
+    }
 
 
 def transform_stat_row(row, header_info: dict) -> list:
@@ -265,13 +279,11 @@ def transform_stat_row(row, header_info: dict) -> list:
     cells = list(row)
     raw_vheader = cells[0] if cells else ""
     parsed = parse_vheader(raw_vheader)
-    out = (list(parsed) if parsed is not None
-           else [raw_vheader, "", "", ""])
+    out = list(parsed) if parsed is not None else [raw_vheader, "", "", ""]
     rest = cells[1:]
     if header_info.get("param_inserted"):
         name = rest[0] if rest else ""
-        prefix, leaf = split_test_name(name if isinstance(name, str)
-                                       else str(name))
+        prefix, leaf = split_test_name(name if isinstance(name, str) else str(name))
         out.extend([prefix, leaf])
     elif rest:
         out.append(rest[0])
@@ -291,8 +303,11 @@ def stat_cf_ranges(header_info: dict, data_row_count: int) -> dict:
     """
     header = header_info.get("header") or []
     normalized = [_norm_header_text(cell) for cell in header]
-    if (_STAT_FAIL_NUM not in normalized or _STAT_CPK not in normalized
-            or data_row_count <= 0):
+    if (
+        _STAT_FAIL_NUM not in normalized
+        or _STAT_CPK not in normalized
+        or data_row_count <= 0
+    ):
         return {}
     last_row = 1 + data_row_count
     fail_letter = get_column_letter(normalized.index(_STAT_FAIL_NUM) + 1)
@@ -382,14 +397,19 @@ def _numeric_file_info_cell(value):
 
 
 class ModernReportGenerator(reportGenerator):
-    def __init__(self, signals: signals, mutex: QtCore.QMutex,
-                 conditionWait: QtCore.QWaitCondition, reportInfo: tuple,
-                 channel: dataChannel):
+    def __init__(
+        self,
+        signals: signals,
+        mutex: QtCore.QMutex,
+        conditionWait: QtCore.QWaitCondition,
+        reportInfo: tuple,
+        channel: dataChannel,
+    ):
         super().__init__(signals, mutex, conditionWait, reportInfo, channel)
         # instance state replacing the classic module-level sv statics
         self._wb: Workbook | None = None
         self._theme = ModernTheme()
-        self._row: dict[ReportSelection, int] = {}   # per-sheet row cursors
+        self._row: dict[ReportSelection, int] = {}  # per-sheet row cursors
 
     # ----------------------------------------------------------------------
     # helpers
@@ -409,11 +429,11 @@ class ModernReportGenerator(reportGenerator):
                 if length > widths.get(cell.column, 0):
                     widths[cell.column] = length
         for column, length in widths.items():
-            ws.column_dimensions[get_column_letter(column)].width = (
-                min(length * AUTOFIT_FACTOR, AUTOFIT_CAP))
+            ws.column_dimensions[get_column_letter(column)].width = min(
+                length * AUTOFIT_FACTOR, AUTOFIT_CAP
+            )
 
-    def _write_body_row(self, ws, row: int, values: list,
-                        fill=None) -> None:
+    def _write_body_row(self, ws, row: int, values: list, fill=None) -> None:
         """One themed body row at 1-based ``row``: body font/alignment and
         thin border via writer.write_body_cell, optional band fill."""
         for column, value in enumerate(values, start=1):
@@ -461,8 +481,10 @@ class ModernReportGenerator(reportGenerator):
             self.tr("File Info"),
             [self.tr("Property Name")]
             + [f"File #{fid + 1}" for fid in self.selectedFiles],
-            rows, self.tr,
-            cell_number_formats=cell_number_formats)
+            rows,
+            self.tr,
+            cell_number_formats=cell_number_formats,
+        )
         render_plain_table(InfoSheet, spec, self._theme)
         self._autofit_columns(InfoSheet)
 
@@ -478,30 +500,29 @@ class ModernReportGenerator(reportGenerator):
         if self.forceQuit:
             return
         # remove \n that added besides values
-        dataTable = [[ele.strip("\n") for ele in dataRow]
-                     for dataRow in dataTable]
+        dataTable = [[ele.strip("\n") for ele in dataRow] for dataRow in dataTable]
 
         spec = plain_table_spec(
             self.tr("GDR & DTR Summary"),
-            [self.tr("Record Type"), self.tr("Value"),
-             self.tr("Approx. Location")],
-            dataTable, self.tr)
+            [self.tr("Record Type"), self.tr("Value"), self.tr("Approx. Location")],
+            dataTable,
+            self.tr,
+        )
         render_plain_table(GDR_DTR_Sheet, spec, self._theme)
         self._autofit_columns(GDR_DTR_Sheet)
 
         self.loopCount += 1
         self.sendProgress()
 
-    def writeStatistic(self, testTuples: list, heads: list[int],
-                       sites: list[int]):
+    def writeStatistic(self, testTuples: list, heads: list[int], sites: list[int]):
         # Sheet for statistics of test items, e.g. cpk, mean, etc.
         StatSheet = self.sheetDict.get(ReportSelection.Stat, None)
         if StatSheet is None:
             return
 
-        dataTable = self.waitForDataList(heads, sites, self.selectedFiles,
-                                         tab.Trend,
-                                         {"testTuples": testTuples})
+        dataTable = self.waitForDataList(
+            heads, sites, self.selectedFiles, tab.Trend, {"testTuples": testTuples}
+        )
         if not dataTable:
             return
         # the GUI sends the (already translated) header row as the first
@@ -538,8 +559,9 @@ class ModernReportGenerator(reportGenerator):
         cf_ranges = stat_cf_ranges(header_info, len(dataRows))
 
         # header only (identity tr: no re-translation of the GUI header)
-        spec = plain_table_spec(self.tr("Test Statistics"),
-                                header_info["header"], [], tr=lambda s: s)
+        spec = plain_table_spec(
+            self.tr("Test Statistics"), header_info["header"], [], tr=lambda s: s
+        )
         spec["number_formats"] = number_formats
         spec["column_fills"] = column_fills
         if cf_ranges:
@@ -562,27 +584,34 @@ class ModernReportGenerator(reportGenerator):
             apply_cpk_formula(stat_row, header_info, 2 + offset)
             written_rows.append(stat_row)
             write_plain_row(
-                StatSheet, 2 + offset, stat_row, self._theme,
+                StatSheet,
+                2 + offset,
+                stat_row,
+                self._theme,
                 band=(self._theme.group_fill if offset % 2 == 0 else None),
-                number_formats=number_formats, column_fills=column_fills)
+                number_formats=number_formats,
+                column_fills=column_fills,
+            )
             self._row[ReportSelection.Stat] = 2 + offset
             self.loopCount += 1
             self.sendProgress()
 
         # extend the auto-filter over the written rows (render_plain_table
         # only knew about the header when it drew the sheet)
-        width = max([len(header_info["header"])]
-                    + [len(row) for row in written_rows])
+        width = max([len(header_info["header"])] + [len(row) for row in written_rows])
         StatSheet.auto_filter.ref = (
-            f"A1:{get_column_letter(width)}{1 + len(written_rows)}")
+            f"A1:{get_column_letter(width)}{1 + len(written_rows)}"
+        )
         self._autofit_columns(StatSheet)
         # sixth wave: value columns G..P get a compact fixed width (autofit
         # stays for A:F — the test-name column benefits)
-        for index in range(column_index_from_string(STAT_VALUE_WIDTH_RANGE[0]),
-                           column_index_from_string(STAT_VALUE_WIDTH_RANGE[1])
-                           + 1):
-            StatSheet.column_dimensions[get_column_letter(index)].width = (
-                STAT_VALUE_COLUMN_WIDTH)
+        for index in range(
+            column_index_from_string(STAT_VALUE_WIDTH_RANGE[0]),
+            column_index_from_string(STAT_VALUE_WIDTH_RANGE[1]) + 1,
+        ):
+            StatSheet.column_dimensions[
+                get_column_letter(index)
+            ].width = STAT_VALUE_COLUMN_WIDTH
 
     # ----------------------------------------------------------------------
     # DUT Summary matrix + chart sheets (Task 8)
@@ -598,10 +627,9 @@ class ModernReportGenerator(reportGenerator):
         # key: TestInfo, value: testTuple -> testInfoDict
         # key: dut2ind, value:  fid -> {dutIndex -> dataIndex}
         # key: dutInfo, value:  fid -> {dutIndex -> dutSummary}
-        summaryTable = self.waitForDutSummary(self.selectedHeads,
-                                              self.selectedSites,
-                                              self.selectedFiles,
-                                              self.testTuples)
+        summaryTable = self.waitForDutSummary(
+            self.selectedHeads, self.selectedSites, self.selectedFiles, self.testTuples
+        )
         if self.forceQuit:
             return
 
@@ -613,8 +641,9 @@ class ModernReportGenerator(reportGenerator):
         self._ftr_tests = set()
         for test_tuple in self.testTuples:
             fid_data = summaryTable.get("Data", {}).get(test_tuple) or {}
-            if any((fid_data.get(fid) or {}).get("SUB_CODE") == REC.FTR
-                   for fid in fid_data):
+            if any(
+                (fid_data.get(fid) or {}).get("SUB_CODE") == REC.FTR for fid in fid_data
+            ):
                 self._ftr_tests.add((test_tuple[0], test_tuple[2]))
 
         # use a list to determine the dut order (classic order-building)
@@ -632,19 +661,22 @@ class ModernReportGenerator(reportGenerator):
             dut_ids.append(part_id if part_id else f"DUT #{i + 1}")
 
         specs = build_dut_summary_spec(
-            summaryTable, self.testTuples, order, dut_ids,
+            summaryTable,
+            self.testTuples,
+            order,
+            dut_ids,
             sheet_name=self.tr("DUT Summary"),
             # numeric cell formats are hardcoded scientific in the spec
             # builder (2026-11-10) — no settings-derived float format anymore
-            tr=self.tr)
+            tr=self.tr,
+        )
 
         # chunk 0 renders on the existing DUT Summary sheet; chunks 1+
         # (die overflow beyond the Excel column cap) get their own sheets —
         # spec names already carry the " (n)" suffixes. Column widths are
         # pinned inside render_matrix_sheet (A=8, B=30, C..L=8, dies=8).
         for chunk_index, spec in enumerate(specs):
-            ws = (DutSheet if chunk_index == 0
-                  else self._wb.create_sheet(spec["name"]))
+            ws = DutSheet if chunk_index == 0 else self._wb.create_sheet(spec["name"])
             render_matrix_sheet(ws, spec, self._theme)
 
         # classic cadence: one tick after the DUT info part...
@@ -673,12 +705,13 @@ class ModernReportGenerator(reportGenerator):
             # donut chart and the structured table; the HB row list also
             # feeds the KPI cards (upstream writes the SAME summary cells
             # into the SB rows — aggregating one list avoids double-count)
-            tables = [self.waitForDataList([head], [site],
-                                           self.selectedFiles, tab.Bin,
-                                           {"isHBIN": isHBIN})
-                      for isHBIN in (True, False)]
-            aggregated = [aggregate_bin_counts(dataTable)
-                          for dataTable in tables]
+            tables = [
+                self.waitForDataList(
+                    [head], [site], self.selectedFiles, tab.Bin, {"isHBIN": isHBIN}
+                )
+                for isHBIN in (True, False)
+            ]
+            aggregated = [aggregate_bin_counts(dataTable) for dataTable in tables]
             kpi = aggregate_kpi(tables[0])
             n_files = len(tables[0])
             site_label = "All Sites" if site == -1 else f"Site{site}"
@@ -687,12 +720,11 @@ class ModernReportGenerator(reportGenerator):
             # dashboard header (seventh wave): block title row, blank row,
             # KPI cards (label/value/subtitle), blank separator row
             row += 1
-            title_cell = BinSheet.cell(row=row, column=1,
-                                       value=(f"Bin Chart — Head{head} / "
-                                              f"{site_label}"))
+            title_cell = BinSheet.cell(
+                row=row, column=1, value=(f"Bin Chart — Head{head} / {site_label}")
+            )
             title_cell.font = self._theme.block_title_font
-            row = write_kpi_cards(BinSheet, row + 2, kpi, n_files,
-                                  self._theme) + 1
+            row = write_kpi_cards(BinSheet, row + 2, kpi, n_files, self._theme) + 1
 
             # HB section then SB section (seventh wave): the table sits at
             # A:D with its section title above; the donut sits RIGHT of it
@@ -705,15 +737,26 @@ class ModernReportGenerator(reportGenerator):
                 kind = "Hardware" if isHBIN else "Software"
                 prefix = "HB" if isHBIN else "SB"
                 title_row = row
-                chart_bins = [(bin_num, bin_label(bin_num, name), count)
-                              for bin_num, name, count in bins]
-                write_bin_table(BinSheet, title_row, bins, self._theme,
-                                f"{kind} Bins — Head{head} / {site_label}",
-                                f"{prefix}_Head{head}_{site_tag}")
-                build_bin_donut(BinSheet,
-                                f"{kind} Bin — Head{head} / {site_label}",
-                                chart_bins, f"G{title_row + 1}",
-                                BIN_HELPER_COL, helper_row=helper_row)
+                chart_bins = [
+                    (bin_num, bin_label(bin_num, name), count)
+                    for bin_num, name, count in bins
+                ]
+                write_bin_table(
+                    BinSheet,
+                    title_row,
+                    bins,
+                    self._theme,
+                    f"{kind} Bins — Head{head} / {site_label}",
+                    f"{prefix}_Head{head}_{site_tag}",
+                )
+                build_bin_donut(
+                    BinSheet,
+                    f"{kind} Bin — Head{head} / {site_label}",
+                    chart_bins,
+                    f"G{title_row + 1}",
+                    BIN_HELPER_COL,
+                    helper_row=helper_row,
+                )
                 helper_row += 2 + len(chart_bins)  # header + data rows + gap
                 row += max(len(bins) + 3, BIN_CHART_ROW_SPAN) + 1
             # the stacking blank row after the SB donut separates the
@@ -742,13 +785,18 @@ class ModernReportGenerator(reportGenerator):
             if self.forceQuit:
                 return
             # wafer map is already associated with head
-            image_io = self.waitForImage(wafer, 0, self.selectedSites,
-                                         self.selectedFiles, tab.Wafer)
+            image_io = self.waitForImage(
+                wafer, 0, self.selectedSites, self.selectedFiles, tab.Wafer
+            )
             row += insert_report_image(WaferSheet, image_io, row) + 2
             # add wafer info
-            dataTable = self.waitForDataList([], self.selectedSites,
-                                             self.selectedFiles, tab.Wafer,
-                                             {"testTuples": [wafer]})
+            dataTable = self.waitForDataList(
+                [],
+                self.selectedSites,
+                self.selectedFiles,
+                tab.Wafer,
+                {"testTuples": [wafer]},
+            )
             for dataList in dataTable:
                 self._write_body_row(WaferSheet, row, dataList)
                 row += 1
@@ -765,11 +813,12 @@ class ModernReportGenerator(reportGenerator):
             return
 
         # get image and stat from main thread
-        image_io = self.waitForImage(testTuple, head, [site],
-                                     self.selectedFiles, tab.Trend)
-        dataTable = self.waitForDataList([head], [site], self.selectedFiles,
-                                         tab.Trend,
-                                         {"testTuples": [testTuple]})
+        image_io = self.waitForImage(
+            testTuple, head, [site], self.selectedFiles, tab.Trend
+        )
+        dataTable = self.waitForDataList(
+            [head], [site], self.selectedFiles, tab.Trend, {"testTuples": [testTuple]}
+        )
         # insert into the work sheet
         key = ReportSelection.Trend
         row = self._row.get(key, 0)
@@ -789,11 +838,12 @@ class ModernReportGenerator(reportGenerator):
         if HistoSheet is None:
             return
 
-        image_io = self.waitForImage(testTuple, head, [site],
-                                     self.selectedFiles, tab.Histo)
-        dataTable = self.waitForDataList([head], [site], self.selectedFiles,
-                                         tab.Histo,
-                                         {"testTuples": [testTuple]})
+        image_io = self.waitForImage(
+            testTuple, head, [site], self.selectedFiles, tab.Histo
+        )
+        dataTable = self.waitForDataList(
+            [head], [site], self.selectedFiles, tab.Histo, {"testTuples": [testTuple]}
+        )
         key = ReportSelection.Histo
         row = self._row.get(key, 0)
         row += insert_report_image(HistoSheet, image_io, row)
@@ -829,22 +879,39 @@ class ModernReportGenerator(reportGenerator):
         try:
             # 1. create sheets for each selected contents, in the fixed
             #    classic order; 2./3./4. below write them in classic order
-            for cont in [ReportSelection.FileInfo, ReportSelection.DUT,
-                         ReportSelection.GDR_DTR, ReportSelection.Stat,
-                         ReportSelection.Trend, ReportSelection.Histo,
-                         ReportSelection.Bin, ReportSelection.Wafer,
-                         ReportSelection.PPQQ, ReportSelection.Correlation]:
+            for cont in [
+                ReportSelection.FileInfo,
+                ReportSelection.DUT,
+                ReportSelection.GDR_DTR,
+                ReportSelection.Stat,
+                ReportSelection.Trend,
+                ReportSelection.Histo,
+                ReportSelection.Bin,
+                ReportSelection.Wafer,
+                ReportSelection.PPQQ,
+                ReportSelection.Correlation,
+            ]:
                 # sheet order in the xlsx is fixed
-                if   cont == ReportSelection.FileInfo:  sheetName = self.tr("File Info")
-                elif cont == ReportSelection.DUT:       sheetName = self.tr("DUT Summary")
-                elif cont == ReportSelection.GDR_DTR:   sheetName = self.tr("GDR & DTR Summary")
-                elif cont == ReportSelection.Stat:      sheetName = self.tr("Test Statistics")
-                elif cont == ReportSelection.Trend:     sheetName = self.tr("Trend Chart")
-                elif cont == ReportSelection.Histo:     sheetName = self.tr("Histogram")
-                elif cont == ReportSelection.Bin:       sheetName = self.tr("Bin Chart")
-                elif cont == ReportSelection.Wafer:     sheetName = self.tr("Wafer Map")
-                elif cont == ReportSelection.PPQQ:      sheetName = self.tr("Normal Validation")
-                else:                                   sheetName = self.tr("Correlation")
+                if cont == ReportSelection.FileInfo:
+                    sheetName = self.tr("File Info")
+                elif cont == ReportSelection.DUT:
+                    sheetName = self.tr("DUT Summary")
+                elif cont == ReportSelection.GDR_DTR:
+                    sheetName = self.tr("GDR & DTR Summary")
+                elif cont == ReportSelection.Stat:
+                    sheetName = self.tr("Test Statistics")
+                elif cont == ReportSelection.Trend:
+                    sheetName = self.tr("Trend Chart")
+                elif cont == ReportSelection.Histo:
+                    sheetName = self.tr("Histogram")
+                elif cont == ReportSelection.Bin:
+                    sheetName = self.tr("Bin Chart")
+                elif cont == ReportSelection.Wafer:
+                    sheetName = self.tr("Wafer Map")
+                elif cont == ReportSelection.PPQQ:
+                    sheetName = self.tr("Normal Validation")
+                else:
+                    sheetName = self.tr("Correlation")
                 if cont in self.selectedContents:
                     self.sheetDict[cont] = self._wb.create_sheet(sheetName)
 
@@ -857,30 +924,35 @@ class ModernReportGenerator(reportGenerator):
             # ** write contents independent of test numbers
             # file info
             self.writeFileInfo()
-            if self.forceQuit: return
+            if self.forceQuit:
+                return
             # GDR & DTR Summary
             self.writeGDR_DTR()
-            if self.forceQuit: return
+            if self.forceQuit:
+                return
             # dut summary
             self.writeDUT_Summary()
-            if self.forceQuit: return
+            if self.forceQuit:
+                return
 
             # bin sheet
             self.writeBinChart()
-            if self.forceQuit: return
+            if self.forceQuit:
+                return
             # wafer sheet
             self.writeWaferMap()
-            if self.forceQuit: return
+            if self.forceQuit:
+                return
 
             # ** write contents related to test numbers
-            self.writeStatistic(self.testTuples, self.selectedHeads,
-                                self.selectedSites)
-            if self.forceQuit: return
+            self.writeStatistic(self.testTuples, self.selectedHeads, self.selectedSites)
+            if self.forceQuit:
+                return
 
             for testTuple in self.testTuples:
-                for head, site in product(self.selectedHeads,
-                                          self.selectedSites):
-                    if self.forceQuit: return
+                for head, site in product(self.selectedHeads, self.selectedSites):
+                    if self.forceQuit:
+                        return
 
                     self.writeTrendPlot(testTuple, head, site)
                     self.writeHistogram(testTuple, head, site)

@@ -36,10 +36,10 @@ def png_bytes(width, height):
 # plain_table_spec
 # --------------------------------------------------------------------------
 
+
 class TestPlainTableSpec:
     def test_translates_headers_but_not_sheet_name(self):
-        spec = plain_table_spec("Info", ["File", "DUTs"], [["a.stdf", 3]],
-                                tr=str.upper)
+        spec = plain_table_spec("Info", ["File", "DUTs"], [["a.stdf", 3]], tr=str.upper)
         assert spec["name"] == "Info"  # name arrives pre-translated from caller
         assert spec["headers"] == ["FILE", "DUTS"]
 
@@ -50,8 +50,9 @@ class TestPlainTableSpec:
 
     def test_sanitizes_rows_illegal_chars_and_nan(self):
         nan = float("nan")
-        spec = plain_table_spec("S", ["A", "B", "C"],
-                                [["bad\x00name", nan, 1.5], [None, "ok", 2]])
+        spec = plain_table_spec(
+            "S", ["A", "B", "C"], [["bad\x00name", nan, 1.5], [None, "ok", 2]]
+        )
         assert spec["rows"] == [["badname", "", 1.5], ["", "ok", 2]]
 
     def test_materializes_row_generators_to_list(self):
@@ -63,8 +64,9 @@ class TestPlainTableSpec:
     def test_cell_number_formats_passthrough(self):
         # fix wave 2 contract: optional {(row_index, col_index): fmt} over
         # the data grid EXCLUDING the header row (0-based)
-        spec = plain_table_spec("S", ["A", "B"], [[0.985, "10"]],
-                                cell_number_formats={(0, 0): "0.00%"})
+        spec = plain_table_spec(
+            "S", ["A", "B"], [[0.985, "10"]], cell_number_formats={(0, 0): "0.00%"}
+        )
         assert spec["cell_number_formats"] == {(0, 0): "0.00%"}
 
     def test_cell_number_formats_default_empty(self):
@@ -73,14 +75,16 @@ class TestPlainTableSpec:
 
     def test_rows_still_sanitized_with_formats(self):
         nan = float("nan")
-        spec = plain_table_spec("S", ["A"], [[nan]],
-                                cell_number_formats={(0, 0): "0.00%"})
+        spec = plain_table_spec(
+            "S", ["A"], [[nan]], cell_number_formats={(0, 0): "0.00%"}
+        )
         assert spec["rows"] == [[""]]
 
 
 # --------------------------------------------------------------------------
 # insert_report_image
 # --------------------------------------------------------------------------
+
 
 class TestInsertReportImage:
     def ws(self):
@@ -103,8 +107,9 @@ class TestInsertReportImage:
     def test_scales_to_target_width_preserving_aspect(self):
         # 96x192 px -> 12 in wide: factor 12 -> 1152x2304 px.
         ws = self.ws()
-        consumed = insert_report_image(ws, io.BytesIO(png_bytes(96, 192)),
-                                       row=0, target_width_in=12.0)
+        consumed = insert_report_image(
+            ws, io.BytesIO(png_bytes(96, 192)), row=0, target_width_in=12.0
+        )
         image = ws._images[0]
         assert image.width == 1152
         assert image.height == 2304

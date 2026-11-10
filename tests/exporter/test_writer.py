@@ -12,8 +12,20 @@ from openpyxl import Workbook, load_workbook
 from deps.exporter.theme import ModernTheme
 from deps.exporter.writer import render_matrix_sheet, render_plain_table
 
-BASE_HEADERS = ["Test#", "Test Name", "Param", "Unit", "SpecMin", "SpecMax",
-                "Min", "Max", "Mean", "St. Dev.", "Cpk", "Fails"]
+BASE_HEADERS = [
+    "Test#",
+    "Test Name",
+    "Param",
+    "Unit",
+    "SpecMin",
+    "SpecMax",
+    "Min",
+    "Max",
+    "Mean",
+    "St. Dev.",
+    "Cpk",
+    "Fails",
+]
 
 # Layout (2026-11-10): banner 1, metadata 2..14, header 15, data 16+.
 DATA_START = 16
@@ -24,13 +36,29 @@ SCIENTIFIC = "0.00E+00"
 CPK_16 = '=IFERROR(MIN((F16-I16)/(3*J16),(I16-E16)/(3*J16)),"")'
 CPK_17 = '=IFERROR(MIN((F17-I17)/(3*J17),(I17-E17)/(3*J17)),"")'
 CPK_18 = '=IFERROR(MIN((F18-I18)/(3*J18),(I18-E18)/(3*J18)),"")'
-FAILS_LIMITS_16 = '=SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16)))'
-FAILS_LIMITS_18 = '=SUMPRODUCT((M18:O18<>"")*((E18<>"")*(M18:O18<E18)+(F18<>"")*(M18:O18>F18)))'
+FAILS_LIMITS_16 = (
+    '=SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16)))'
+)
+FAILS_LIMITS_18 = (
+    '=SUMPRODUCT((M18:O18<>"")*((E18<>"")*(M18:O18<E18)+(F18<>"")*(M18:O18>F18)))'
+)
 FAILS_FLAGS_17 = '=SUMPRODUCT((Q17:S17<>"")*(Q17:S17=1))'
 
-METADATA_NAMES = ["File ID", "Part ID", "Part TXT", "Temperature",
-                  "HW Bin", "SW Bin", "Wafer", "X", "Y", "Head-Site",
-                  "Tests Executed", "Test Time", "DUT Flag"]
+METADATA_NAMES = [
+    "File ID",
+    "Part ID",
+    "Part TXT",
+    "Temperature",
+    "HW Bin",
+    "SW Bin",
+    "Wafer",
+    "X",
+    "Y",
+    "Head-Site",
+    "Tests Executed",
+    "Test Time",
+    "DUT Flag",
+]
 
 
 def make_metadata_rows():
@@ -45,26 +73,79 @@ def make_metadata_rows():
         else:
             stats = ["-"] * 6
             unit = "TEXT"
-        rows.append([10000 + i, "METADATA", name, unit, "-", "-",
-                     *stats, 1, 2, 3])
+        rows.append([10000 + i, "METADATA", name, unit, "-", "-", *stats, 1, 2, 3])
     return rows
 
 
 def make_rows():
     return [
         # parametric with limits (row 16): Test# leads the base cells
-        [10, "0_TXCC", "VCCC_ASIC", "V", 0.5, 1.5,
-         "=MIN(M16:O16)", "=MAX(M16:O16)", "=AVERAGE(M16:O16)", "=STDEV(M16:O16)",
-         CPK_16, FAILS_LIMITS_16, 1.0, 1.2, "", "", 0, 0, ""],
+        [
+            10,
+            "0_TXCC",
+            "VCCC_ASIC",
+            "V",
+            0.5,
+            1.5,
+            "=MIN(M16:O16)",
+            "=MAX(M16:O16)",
+            "=AVERAGE(M16:O16)",
+            "=STDEV(M16:O16)",
+            CPK_16,
+            FAILS_LIMITS_16,
+            1.0,
+            1.2,
+            "",
+            "",
+            0,
+            0,
+            "",
+        ],
         # parametric without limits (row 17): mirror-driven FAILS
-        [11, "1_RX", "Margin", "dB", "", "",
-         "=MIN(M17:O17)", "=MAX(M17:O17)", "=AVERAGE(M17:O17)", "=STDEV(M17:O17)",
-         CPK_17, FAILS_FLAGS_17, 2.0, 0.1, 3.0, "", 0, 1, 0],
+        [
+            11,
+            "1_RX",
+            "Margin",
+            "dB",
+            "",
+            "",
+            "=MIN(M17:O17)",
+            "=MAX(M17:O17)",
+            "=AVERAGE(M17:O17)",
+            "=STDEV(M17:O17)",
+            CPK_17,
+            FAILS_FLAGS_17,
+            2.0,
+            0.1,
+            3.0,
+            "",
+            0,
+            1,
+            0,
+        ],
         # FTR row (row 18): Unit "P/F", synthetic real limits ±0.999999
         # (third wave), die cells carry 0/1 flags
-        [12, "2_Func", "PAT_TOP", "P/F", -0.999999, 0.999999,
-         "=MIN(M18:O18)", "=MAX(M18:O18)", "=AVERAGE(M18:O18)", "=STDEV(M18:O18)",
-         CPK_18, FAILS_LIMITS_18, 0, 1, 0, "", 0, 1, 0],
+        [
+            12,
+            "2_Func",
+            "PAT_TOP",
+            "P/F",
+            -0.999999,
+            0.999999,
+            "=MIN(M18:O18)",
+            "=MAX(M18:O18)",
+            "=AVERAGE(M18:O18)",
+            "=STDEV(M18:O18)",
+            CPK_18,
+            FAILS_LIMITS_18,
+            0,
+            1,
+            0,
+            "",
+            0,
+            1,
+            0,
+        ],
     ]
 
 
@@ -79,11 +160,20 @@ def make_matrix_spec(**overrides):
         "secondary_header": BASE_HEADERS + ["SN541", "SN541", ""],
         "rows": make_rows(),
         "formula_columns": [6, 7, 8, 9, 10, 11],
-        "number_formats": {"M": SCIENTIFIC, "N": SCIENTIFIC, "O": SCIENTIFIC,
-                           "SpecMin": SCIENTIFIC, "SpecMax": SCIENTIFIC,
-                           "Min": SCIENTIFIC, "Max": SCIENTIFIC,
-                           "Mean": SCIENTIFIC, "St. Dev.": SCIENTIFIC,
-                           "Fails": "0", "Cpk": "0.00", "Test#": "0"},
+        "number_formats": {
+            "M": SCIENTIFIC,
+            "N": SCIENTIFIC,
+            "O": SCIENTIFIC,
+            "SpecMin": SCIENTIFIC,
+            "SpecMax": SCIENTIFIC,
+            "Min": SCIENTIFIC,
+            "Max": SCIENTIFIC,
+            "Mean": SCIENTIFIC,
+            "St. Dev.": SCIENTIFIC,
+            "Fails": "0",
+            "Cpk": "0.00",
+            "Test#": "0",
+        },
         "freeze_panes": "M16",
         "row_groups": [0, 1, 2],
         "die_columns": ["M", "N", "O"],
@@ -105,8 +195,9 @@ def render(spec=None, ws_title="DUT Summary"):
     wb = Workbook()
     ws = wb.active
     ws.title = ws_title
-    render_matrix_sheet(ws, spec if spec is not None else make_matrix_spec(),
-                        ModernTheme())
+    render_matrix_sheet(
+        ws, spec if spec is not None else make_matrix_spec(), ModernTheme()
+    )
     return wb
 
 
@@ -127,6 +218,7 @@ def cf_block(ws, ref):
 # --------------------------------------------------------------------------
 # Matrix sheet: banner / header / body
 # --------------------------------------------------------------------------
+
 
 class TestMatrixLayout:
     def wb(self):
@@ -156,12 +248,12 @@ class TestMatrixLayout:
 
     def test_metadata_label_font_and_formulas(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["A2"].value == 10000          # Test# now leads the row
+        assert ws["A2"].value == 10000  # Test# now leads the row
         assert ws["B2"].value == "METADATA"
         assert ws["C2"].value == "File ID"
         assert ws["B2"].font.color.rgb == "FF3B82F6"  # label font on B+C
         assert ws["C2"].font.color.rgb == "FF3B82F6"
-        assert ws["A2"].font.color is None      # Test# keeps the plain font
+        assert ws["A2"].font.color is None  # Test# keeps the plain font
         assert ws["E2"].value == "-"  # placeholder
         assert ws["G2"].value == "=MIN(M2:O2)"  # metadata formula passed through
 
@@ -193,24 +285,24 @@ class TestMatrixLayout:
 
     def test_number_formats_per_row_type(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["A16"].number_format == "0"          # Test# (column A)
-        assert ws["E16"].number_format == SCIENTIFIC   # SpecMin
-        assert ws["F16"].number_format == SCIENTIFIC   # SpecMax
-        assert ws["G16"].number_format == SCIENTIFIC   # Min
-        assert ws["H17"].number_format == SCIENTIFIC   # Max
-        assert ws["I17"].number_format == SCIENTIFIC   # Mean
-        assert ws["J17"].number_format == SCIENTIFIC   # St. Dev.
-        assert ws["K16"].number_format == "0.00"       # Cpk
-        assert ws["L16"].number_format == "0"          # Fails
-        assert ws["M16"].number_format == SCIENTIFIC   # parametric die cell
+        assert ws["A16"].number_format == "0"  # Test# (column A)
+        assert ws["E16"].number_format == SCIENTIFIC  # SpecMin
+        assert ws["F16"].number_format == SCIENTIFIC  # SpecMax
+        assert ws["G16"].number_format == SCIENTIFIC  # Min
+        assert ws["H17"].number_format == SCIENTIFIC  # Max
+        assert ws["I17"].number_format == SCIENTIFIC  # Mean
+        assert ws["J17"].number_format == SCIENTIFIC  # St. Dev.
+        assert ws["K16"].number_format == "0.00"  # Cpk
+        assert ws["L16"].number_format == "0"  # Fails
+        assert ws["M16"].number_format == SCIENTIFIC  # parametric die cell
         assert ws["O17"].number_format == SCIENTIFIC
-        assert ws["E18"].number_format == SCIENTIFIC   # FTR synthetic SpecMin
-        assert ws["M18"].number_format == "0"          # FTR (P/F) die cell
+        assert ws["E18"].number_format == SCIENTIFIC  # FTR synthetic SpecMin
+        assert ws["M18"].number_format == "0"  # FTR (P/F) die cell
         assert ws["O18"].number_format == "0"
 
     def test_data_cell_values_follow_new_column_order(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["A16"].value == 10        # Test#
+        assert ws["A16"].value == 10  # Test#
         assert ws["B16"].value == "0_TXCC"  # Test
         assert ws["C16"].value == "VCCC_ASIC"  # Param
         assert ws["D18"].value == "P/F"
@@ -220,15 +312,16 @@ class TestMatrixLayout:
 # Matrix sheet: fixed column widths (2026-11-10 R2/R9)
 # --------------------------------------------------------------------------
 
+
 class TestMatrixColumnWidths:
     def test_pinned_widths(self):
         wb = render()
         ws = roundtrip(wb)["DUT Summary"]
-        assert ws.column_dimensions["A"].width == 8    # Test#
-        assert ws.column_dimensions["B"].width == 30   # Test name
+        assert ws.column_dimensions["A"].width == 8  # Test#
+        assert ws.column_dimensions["B"].width == 30  # Test name
         for letter in ("C", "D", "E", "F", "G", "H", "I", "J", "K", "L"):
             assert ws.column_dimensions[letter].width == 8, letter
-        for letter in ("M", "N", "O"):                 # die columns
+        for letter in ("M", "N", "O"):  # die columns
             assert ws.column_dimensions[letter].width == 8, letter
 
     def test_die_widths_follow_spec_die_columns(self):
@@ -244,21 +337,22 @@ class TestMatrixColumnWidths:
 # Matrix sheet: column alignment (2026-11-10 R5)
 # --------------------------------------------------------------------------
 
+
 class TestMatrixAlignment:
     def wb(self):
         return roundtrip(render())
 
     def test_data_rows_test_right_param_left(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["B16"].alignment.horizontal == "right"   # Test name
-        assert ws["C16"].alignment.horizontal == "left"    # Param
+        assert ws["B16"].alignment.horizontal == "right"  # Test name
+        assert ws["C16"].alignment.horizontal == "left"  # Param
         assert ws["A16"].alignment.horizontal == "center"  # Test#
         assert ws["D16"].alignment.horizontal == "center"  # Unit
 
     def test_metadata_rows_test_right_param_left(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["B2"].alignment.horizontal == "right"    # METADATA label
-        assert ws["C2"].alignment.horizontal == "left"     # field name
+        assert ws["B2"].alignment.horizontal == "right"  # METADATA label
+        assert ws["C2"].alignment.horizontal == "left"  # field name
 
     def test_vertical_center_kept(self):
         ws = self.wb()["DUT Summary"]
@@ -267,7 +361,7 @@ class TestMatrixAlignment:
 
     def test_banner_and_header_keep_centered(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["A1"].alignment.horizontal == "center"   # banner
+        assert ws["A1"].alignment.horizontal == "center"  # banner
         assert ws["B1"].alignment.horizontal == "center"
         assert ws["A15"].alignment.horizontal == "center"  # blue header
         assert ws["B15"].alignment.horizontal == "center"
@@ -276,6 +370,7 @@ class TestMatrixAlignment:
 # --------------------------------------------------------------------------
 # Matrix sheet: static yellow SpecMin/SpecMax fills (2026-11-10 R4)
 # --------------------------------------------------------------------------
+
 
 class TestSpecMinMaxStaticFill:
     def wb(self):
@@ -305,13 +400,14 @@ class TestSpecMinMaxStaticFill:
 
     def test_banner_and_header_keep_own_fills(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["E1"].fill.fgColor.rgb == "FFCBD5E1"   # banner
+        assert ws["E1"].fill.fgColor.rgb == "FFCBD5E1"  # banner
         assert ws["E15"].fill.fgColor.rgb == "FF1E40AF"  # blue header
 
 
 # --------------------------------------------------------------------------
 # Matrix sheet: conditional formatting
 # --------------------------------------------------------------------------
+
 
 class TestMatrixConditionalFormatting:
     def wb(self):
@@ -336,8 +432,7 @@ class TestMatrixConditionalFormatting:
         priorities = [r.priority for r in rules]
         assert priorities == sorted(priorities)  # insertion order = priority
         fills = [r.dxf.fill.fgColor.rgb for r in rules]
-        assert fills == ["FFFFF3CD", "FFFFCCCC", "FFFFCCCC",
-                         "FFFFCCCC", "FFCCFFCC"]
+        assert fills == ["FFFFF3CD", "FFFFCCCC", "FFFFCCCC", "FFFFCCCC", "FFCCFFCC"]
 
     def test_no_pf_visible_flag_rule_anywhere(self):
         # the removed rule keyed on LEFT($D...,3)="P/F" must not exist in
@@ -352,10 +447,10 @@ class TestMatrixConditionalFormatting:
         ws = self.wb()["DUT Summary"]
         rules = cf_block(ws, "K16:K18")
         assert [r.formula for r in rules] == [
-            ['AND(ISNUMBER(K16),K16>=1.67)'],
-            ['AND(ISNUMBER(K16),K16>=1.33)'],
-            ['AND(ISNUMBER(K16),K16>=1)'],
-            ['AND(ISNUMBER(K16),K16<1)'],
+            ["AND(ISNUMBER(K16),K16>=1.67)"],
+            ["AND(ISNUMBER(K16),K16>=1.33)"],
+            ["AND(ISNUMBER(K16),K16>=1)"],
+            ["AND(ISNUMBER(K16),K16<1)"],
         ]
         assert [r.stopIfTrue for r in rules] == [True, True, True, False]
         fills = [r.dxf.fill.fgColor.rgb for r in rules]
@@ -389,8 +484,11 @@ class TestMatrixConditionalFormatting:
         assert fills == ["FFFFF3CD", "FFFFCCCC", "FFCCFFCC"]
         # no other range touches the metadata row's base cells
         refs = [str(cf.sqref) for cf in ws.conditional_formatting]
-        assert all(ref.split(":")[0][0] not in "ABCDEFGHIJKL"
-                   for ref in refs if "14" in ref.split(":")[0])
+        assert all(
+            ref.split(":")[0][0] not in "ABCDEFGHIJKL"
+            for ref in refs
+            if "14" in ref.split(":")[0]
+        )
 
     def test_dut_flag_row_visible_and_unstyled_without_key(self):
         # the CF key is optional in the spec contract: without it the row
@@ -408,13 +506,17 @@ class TestMatrixConditionalFormatting:
         spec = make_matrix_spec(
             die_columns=["M"],
             conditional_formatting={
-                "die_rules": {"range": "M16:M18", "first_die": "M",
-                              "flag_col_offset": 2},
+                "die_rules": {
+                    "range": "M16:M18",
+                    "first_die": "M",
+                    "flag_col_offset": 2,
+                },
                 "cpk_range": "K16:K18",
                 "fails_range": "L16:L18",
                 "fails_max": 0.2,
                 "dut_flag_range": "M14:M14",
-            })
+            },
+        )
         ws = roundtrip(render(spec))["DUT Summary"]
         rules = cf_block(ws, "M14")
         assert [r.formula[0] for r in rules] == [
@@ -427,6 +529,7 @@ class TestMatrixConditionalFormatting:
 # --------------------------------------------------------------------------
 # Matrix sheet: row groups
 # --------------------------------------------------------------------------
+
 
 class TestMatrixRowGroups:
     def wb(self):
@@ -458,6 +561,7 @@ class TestMatrixRowGroups:
 # Matrix sheet: native AutoFilter (fix wave 2 — replaces the Excel Table)
 # --------------------------------------------------------------------------
 
+
 class TestMatrixAutoFilter:
     def wb(self):
         return roundtrip(render())
@@ -469,20 +573,26 @@ class TestMatrixAutoFilter:
         # the full header..last-data range, and no Excel Table is written.
         ws = self.wb()["DUT Summary"]
         assert ws.auto_filter.ref == "A15:O18"
-        assert list(ws.tables) == []   # no /xl/tables/table1.xml anymore
+        assert list(ws.tables) == []  # no /xl/tables/table1.xml anymore
         assert ws["M15"].value == "SN541"
         assert ws["N15"].value == "SN541"
         assert ws["A15"].value == "Test#"
 
     def test_no_auto_filter_without_spec_key(self):
-        spec = make_matrix_spec(rows=[], row_groups=[],
-                                conditional_formatting={
-                                    "die_rules": {"range": "M16:M16", "first_die": "M",
-                                                  "flag_col_offset": 2},
-                                    "cpk_range": "K16:K16",
-                                    "fails_range": "L16:L16",
-                                    "fails_max": 0.2,
-                                })
+        spec = make_matrix_spec(
+            rows=[],
+            row_groups=[],
+            conditional_formatting={
+                "die_rules": {
+                    "range": "M16:M16",
+                    "first_die": "M",
+                    "flag_col_offset": 2,
+                },
+                "cpk_range": "K16:K16",
+                "fails_range": "L16:L16",
+                "fails_max": 0.2,
+            },
+        )
         spec.pop("auto_filter")
         ws = roundtrip(render(spec))["DUT Summary"]
         assert ws.auto_filter.ref is None
@@ -492,6 +602,7 @@ class TestMatrixAutoFilter:
 # --------------------------------------------------------------------------
 # Matrix sheet: mirror columns + sanitization
 # --------------------------------------------------------------------------
+
 
 class TestMatrixMirrorsAndSanitization:
     def wb(self):
@@ -510,8 +621,8 @@ class TestMatrixMirrorsAndSanitization:
 
     def test_illegal_characters_sanitized(self):
         spec = make_matrix_spec()
-        spec["rows"][0][1] = "bad\x00name"           # Test name (column B)
-        spec["metadata_rows"][1][12] = "SN\x00541"   # Part ID die value
+        spec["rows"][0][1] = "bad\x00name"  # Test name (column B)
+        spec["metadata_rows"][1][12] = "SN\x00541"  # Part ID die value
         ws = roundtrip(render(spec))["DUT Summary"]
         assert ws["B16"].value == "badname"
         assert ws["M3"].value == "SN541"
@@ -526,20 +637,23 @@ class TestMatrixMirrorsAndSanitization:
 # Plain tables
 # --------------------------------------------------------------------------
 
+
 class TestPlainTable:
     def spec(self):
         return {
             "name": "File Info",
             "headers": ["File", "DUTs", "Duration"],
-            "rows": [["a.stdf", 10, "1:02"], ["b.stdf", 4, "0:31"],
-                     ["c.stdf", 7, "0:58"]],
+            "rows": [
+                ["a.stdf", 10, "1:02"],
+                ["b.stdf", 4, "0:31"],
+                ["c.stdf", 7, "0:58"],
+            ],
         }
 
     def render_and_reload(self, spec=None):
         wb = Workbook()
         ws = wb.active
-        render_plain_table(ws, spec if spec is not None else self.spec(),
-                           ModernTheme())
+        render_plain_table(ws, spec if spec is not None else self.spec(), ModernTheme())
         return roundtrip(wb)["Sheet"]
 
     def test_header_style_and_height(self):
@@ -595,7 +709,7 @@ class TestPlainTable:
         ws = self.render_and_reload(spec)
         assert ws["B2"].number_format == "0.00E+00"
         assert ws["B2"].fill.fgColor.rgb == "FFFFF3CD"
-        assert ws["B1"].number_format == "General"      # header untouched
+        assert ws["B1"].number_format == "General"  # header untouched
 
     def test_no_column_fills_keeps_banding(self):
         # absent key -> exactly the pre-wave behavior
@@ -606,7 +720,7 @@ class TestPlainTable:
     def test_column_fills_ignore_short_rows(self):
         # a row shorter than the fill column gets no phantom filled cell
         spec = self.spec()
-        spec["rows"][1] = ["b.stdf", 4]          # C cell missing in row 2
+        spec["rows"][1] = ["b.stdf", 4]  # C cell missing in row 2
         spec["column_fills"] = {"C": "FFF3CD"}
         ws = self.render_and_reload(spec)
         assert ws["C2"].fill.fgColor.rgb == "FFFFF3CD"
@@ -623,7 +737,7 @@ class TestPlainTable:
         assert ws["A2"].value == 0.985
         assert ws["A2"].number_format == "0.00%"
         assert ws["B2"].number_format == "General"
-        assert ws["A1"].number_format == "General"   # header untouched
+        assert ws["A1"].number_format == "General"  # header untouched
 
     def test_cell_number_formats_indices_zero_based_data_grid(self):
         # (row_index, col_index) is 0-based over the data grid EXCLUDING the
@@ -645,8 +759,9 @@ class TestPlainTable:
         # computation used to call get_column_letter(0) -> ValueError)
         wb = Workbook()
         ws = wb.active
-        render_plain_table(ws, {"name": "Empty", "headers": [], "rows": []},
-                           ModernTheme())
+        render_plain_table(
+            ws, {"name": "Empty", "headers": [], "rows": []}, ModernTheme()
+        )
         assert ws.auto_filter.ref is None
         assert ws.sheet_view.showGridLines is False
         reloaded = roundtrip(wb)["Sheet"]
@@ -657,6 +772,7 @@ class TestPlainTable:
 # Plain tables: conditional formatting (fourth wave, Test Statistics)
 # --------------------------------------------------------------------------
 
+
 class TestPlainTableConditionalFormatting:
     """Optional spec["conditional_formatting"] contract: {"fail_num_range",
     "cpk_range"} strings over DATA rows only (header row excluded)."""
@@ -664,14 +780,49 @@ class TestPlainTableConditionalFormatting:
     def spec(self):
         return {
             "name": "Test Statistics",
-            "headers": ["Test#", "Head", "Sites", "File ID", "Test Name",
-                        "Param", "Unit", "SpecMin", "SpecMax", "Fail Num",
-                        "Cpk", "Average"],
+            "headers": [
+                "Test#",
+                "Head",
+                "Sites",
+                "File ID",
+                "Test Name",
+                "Param",
+                "Unit",
+                "SpecMin",
+                "SpecMax",
+                "Fail Num",
+                "Cpk",
+                "Average",
+            ],
             "rows": [
-                [10000, 1, "All Sites", "", "T/vcc", "vcc", "V",
-                 0.5, 1.5, 1, 1.23, 1.0],
-                [10001, 1, "All Sites", "", "2_F/scan", "scan", "P/F",
-                 "N/A", "N/A", 0, "∞", 1.0],
+                [
+                    10000,
+                    1,
+                    "All Sites",
+                    "",
+                    "T/vcc",
+                    "vcc",
+                    "V",
+                    0.5,
+                    1.5,
+                    1,
+                    1.23,
+                    1.0,
+                ],
+                [
+                    10001,
+                    1,
+                    "All Sites",
+                    "",
+                    "2_F/scan",
+                    "scan",
+                    "P/F",
+                    "N/A",
+                    "N/A",
+                    0,
+                    "∞",
+                    1.0,
+                ],
             ],
             "conditional_formatting": {
                 "fail_num_range": "J2:J3",
@@ -682,8 +833,7 @@ class TestPlainTableConditionalFormatting:
     def render_and_reload(self, spec=None):
         wb = Workbook()
         ws = wb.active
-        render_plain_table(ws, spec if spec is not None else self.spec(),
-                           ModernTheme())
+        render_plain_table(ws, spec if spec is not None else self.spec(), ModernTheme())
         return roundtrip(wb)["Sheet"]
 
     def test_fail_num_binary_rules(self):
@@ -743,9 +893,11 @@ class TestPlainTableConditionalFormatting:
 # Integration: render a spec built by the real matrix.py builder
 # --------------------------------------------------------------------------
 
+
 class TestRealSpecIntegration:
     def test_real_matrix_spec_renders_and_reloads(self):
         from tests.exporter.test_matrix import base_duts, base_tests, build
+
         spec = build(base_tests(), base_duts())[0]
         wb = render(spec)
         # masked rows of the real fixture: File ID 2, Wafer 8, X 9, Y 10,

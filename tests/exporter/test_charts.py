@@ -40,21 +40,31 @@ from deps.exporter.charts import (
 from deps.exporter.theme import ModernTheme
 
 
-def bin_row(vheader="Hardware Bin / Head1 / All Sites", total=10,
-            bins=(("PASS_BIN", 1, 90.0), ("FAIL_BIN", 3, 10.0))):
+def bin_row(
+    vheader="Hardware Bin / Head1 / All Sites",
+    total=10,
+    bins=(("PASS_BIN", 1, 90.0), ("FAIL_BIN", 3, 10.0)),
+):
     """One classic waitForDataList(tab.Bin) row (all strings)."""
-    return ([vheader, "Yield: 90.00%", f"Total: {total}", "Pass: 9",
-             "Failed: 1", "Unknown: 0", "Superseded: 0"]
-            + [f'"{name}"\nBin {num}: {pct}%' for name, num, pct in bins])
+    return [
+        vheader,
+        "Yield: 90.00%",
+        f"Total: {total}",
+        "Pass: 9",
+        "Failed: 1",
+        "Unknown: 0",
+        "Superseded: 0",
+    ] + [f'"{name}"\nBin {num}: {pct}%' for name, num, pct in bins]
 
 
 BINS = [(1, "Bin 1 - PASS_BIN", 9), (3, "Bin 3 - FAIL_BIN", 1)]
-AGG_BINS = [(1, "PASS_BIN", 9), (3, "FAIL_BIN", 1)]   # raw names from the rows
+AGG_BINS = [(1, "PASS_BIN", 9), (3, "FAIL_BIN", 1)]  # raw names from the rows
 
 
 # --------------------------------------------------------------------------
 # parse_bin_row
 # --------------------------------------------------------------------------
+
 
 class TestParseBinRow:
     def test_classic_row(self):
@@ -74,21 +84,31 @@ class TestParseBinRow:
 
     def test_missing_total_degrades_to_none(self):
         row = bin_row()
-        del row[2]   # drop the "Total: 10" cell
+        del row[2]  # drop the "Total: 10" cell
         parsed = parse_bin_row(row)
         assert parsed["total"] is None
         assert len(parsed["bins"]) == 2
 
     def test_unparseable_leading_cells_skipped(self):
         # "Yield: nan%" (no DUTs), the VHeader, garbage — none parse
-        row = ["Hardware Bin / Head1 / All Sites", "Yield: nan%",
-               "Total: 7", "Pass: ?", "Failed: 0"]
+        row = [
+            "Hardware Bin / Head1 / All Sites",
+            "Yield: nan%",
+            "Total: 7",
+            "Pass: ?",
+            "Failed: 0",
+        ]
         parsed = parse_bin_row(row)
         assert parsed == {"total": 7, "bins": []}
 
     def test_unparseable_trailing_cells_skipped(self):
-        row = bin_row(bins=()) + ["Total: 5", '"Broken" Bin x: 1%',
-                                  "no shape at all", 42, None]
+        row = bin_row(bins=()) + [
+            "Total: 5",
+            '"Broken" Bin x: 1%',
+            "no shape at all",
+            42,
+            None,
+        ]
         parsed = parse_bin_row(row)
         assert parsed == {"total": 5, "bins": []}
 
@@ -109,29 +129,36 @@ class TestParseBinRow:
 # aggregate_bin_counts
 # --------------------------------------------------------------------------
 
+
 class TestAggregateBinCounts:
     def test_single_row_counts_from_percentage(self):
         # per-fid count = round(pct/100 * total): 90.0% of 10 -> 9
         assert aggregate_bin_counts([bin_row()]) == AGG_BINS
 
     def test_rows_summed_per_bin_across_files(self):
-        rows = [bin_row(vheader="Hardware Bin / Head1 / All Sites / File0",
-                        total=10),
-                bin_row(vheader="Hardware Bin / Head1 / All Sites / File2",
-                        total=20,
-                        bins=(("PASS_BIN", 1, 75.0), ("FAIL_BIN", 3, 25.0)))]
+        rows = [
+            bin_row(vheader="Hardware Bin / Head1 / All Sites / File0", total=10),
+            bin_row(
+                vheader="Hardware Bin / Head1 / All Sites / File2",
+                total=20,
+                bins=(("PASS_BIN", 1, 75.0), ("FAIL_BIN", 3, 25.0)),
+            ),
+        ]
         assert aggregate_bin_counts(rows) == [
-            (1, "PASS_BIN", 9 + 15), (3, "FAIL_BIN", 1 + 5)]
+            (1, "PASS_BIN", 9 + 15),
+            (3, "FAIL_BIN", 1 + 5),
+        ]
 
     def test_first_seen_name_kept(self):
-        rows = [bin_row(bins=(("First Name", 1, 100.0),)),
-                bin_row(bins=(("Second Name", 1, 100.0),))]
+        rows = [
+            bin_row(bins=(("First Name", 1, 100.0),)),
+            bin_row(bins=(("Second Name", 1, 100.0),)),
+        ]
         assert aggregate_bin_counts(rows) == [(1, "First Name", 20)]
 
     def test_sorted_by_bin_number(self):
         rows = [bin_row(bins=(("Late", 9, 50.0), ("Early", 2, 50.0)))]
-        assert aggregate_bin_counts(rows) == [
-            (2, "Early", 5), (9, "Late", 5)]
+        assert aggregate_bin_counts(rows) == [(2, "Early", 5), (9, "Late", 5)]
 
     def test_rows_without_total_skipped(self):
         row = bin_row()
@@ -145,8 +172,7 @@ class TestAggregateBinCounts:
     def test_rounding_from_one_decimal_percentages(self):
         # 33.3% of 100 -> 33 (upstream rounds to ONE decimal first, so the
         # reconstruction can be off by ±1 vs the true counts — documented)
-        rows = [bin_row(total=100,
-                        bins=(("A", 1, 33.3), ("B", 2, 66.7)))]
+        rows = [bin_row(total=100, bins=(("A", 1, 33.3), ("B", 2, 66.7)))]
         assert aggregate_bin_counts(rows) == [(1, "A", 33), (2, "B", 67)]
 
     def test_empty_input(self):
@@ -161,17 +187,22 @@ class TestAggregateBinCounts:
 # parse_kpi_row + aggregate_kpi (seventh wave: dashboard KPI cards)
 # --------------------------------------------------------------------------
 
+
 class TestParseKpiRow:
     def test_classic_row(self):
         parsed = parse_kpi_row(bin_row())
-        assert parsed == {"total": 10, "pass": 9, "failed": 1,
-                          "unknown": 0, "superseded": 0}
+        assert parsed == {
+            "total": 10,
+            "pass": 9,
+            "failed": 1,
+            "unknown": 0,
+            "superseded": 0,
+        }
 
     def test_only_recognized_labels(self):
         # the VHeader and the "Yield: ..%" cell must not contribute keys
         parsed = parse_kpi_row(bin_row())
-        assert set(parsed) == {"total", "pass", "failed",
-                               "unknown", "superseded"}
+        assert set(parsed) == {"total", "pass", "failed", "unknown", "superseded"}
 
     def test_partial_row_keeps_found_keys_only(self):
         parsed = parse_kpi_row(["VHeader", "Yield: nan%", "Total: 7"])
@@ -204,15 +235,19 @@ class TestParseKpiRow:
 class TestAggregateKpi:
     def test_single_row(self):
         kpi = aggregate_kpi([bin_row()])
-        assert kpi == {"total": 10, "pass": 9, "failed": 1, "unknown": 0,
-                       "superseded": 0, "yield": 0.9}
+        assert kpi == {
+            "total": 10,
+            "pass": 9,
+            "failed": 1,
+            "unknown": 0,
+            "superseded": 0,
+            "yield": 0.9,
+        }
         assert isinstance(kpi["yield"], float)
 
     def test_rows_summed_across_files(self):
-        first = bin_row(vheader="Hardware Bin / Head1 / All Sites / File0",
-                        total=10)
-        second = bin_row(vheader="Hardware Bin / Head1 / All Sites / File2",
-                         total=20)
+        first = bin_row(vheader="Hardware Bin / Head1 / All Sites / File0", total=10)
+        second = bin_row(vheader="Hardware Bin / Head1 / All Sites / File2", total=20)
         kpi = aggregate_kpi([first, second])
         assert kpi["total"] == 30
         assert kpi["pass"] == 18
@@ -226,9 +261,14 @@ class TestAggregateKpi:
         assert kpi["pass"] == 9
 
     def test_empty_rows_give_zeros_and_no_yield(self):
-        assert aggregate_kpi([]) == {"total": 0, "pass": 0, "failed": 0,
-                                     "unknown": 0, "superseded": 0,
-                                     "yield": None}
+        assert aggregate_kpi([]) == {
+            "total": 0,
+            "pass": 0,
+            "failed": 0,
+            "unknown": 0,
+            "superseded": 0,
+            "yield": None,
+        }
 
     def test_zero_total_gives_yield_none(self):
         kpi = aggregate_kpi([bin_row(total=0)])
@@ -236,9 +276,9 @@ class TestAggregateKpi:
         assert kpi["yield"] is None
 
     def test_yield_computed_from_summed_pass_and_total(self):
-        first = bin_row(total=10)                     # 9 pass
+        first = bin_row(total=10)  # 9 pass
         second = bin_row(total=5, bins=(("A", 1, 100.0),))
-        second[3] = "Pass: 5"                          # all 5 pass
+        second[3] = "Pass: 5"  # all 5 pass
         second[4] = "Failed: 0"
         kpi = aggregate_kpi([first, second])
         assert kpi["yield"] == pytest.approx(14 / 15)
@@ -248,8 +288,7 @@ class TestAggregateKpi:
 # write_kpi_cards (seventh wave: stylized dashboard cards, rows 3-5)
 # --------------------------------------------------------------------------
 
-KPI = {"total": 10, "pass": 9, "failed": 1, "unknown": 2, "superseded": 3,
-       "yield": 0.9}
+KPI = {"total": 10, "pass": 9, "failed": 1, "unknown": 2, "superseded": 3, "yield": 0.9}
 
 
 class TestWriteKpiCards:
@@ -275,7 +314,7 @@ class TestWriteKpiCards:
         assert ws["A3"].value == "Yield"
         assert ws["A4"].value == pytest.approx(0.9)
         assert isinstance(ws["A4"].value, float)
-        assert ws["A4"].number_format == "0.00%"   # numeric, wave-3 spirit
+        assert ws["A4"].number_format == "0.00%"  # numeric, wave-3 spirit
         assert ws["A5"].value == "9 pass / 10 total parts"
 
     def test_card2_fails(self, ws, theme):
@@ -334,16 +373,23 @@ class TestWriteKpiCards:
             for row in (3, 4, 5):
                 for column in (letter, chr(ord(letter) + 1)):
                     cell = ws[f"{column}{row}"]
-                    assert cell.fill.fgColor.rgb.endswith(hex6), \
-                        f"{column}{row}"
+                    assert cell.fill.fgColor.rgb.endswith(hex6), f"{column}{row}"
                     assert cell.fill.fill_type == "solid"
 
     def test_cards_merged_in_three_stacked_rows(self, ws, theme):
         self.written(ws, theme)
         ranges = {str(r) for r in ws.merged_cells.ranges}
-        for span in ("A3:B3", "A4:B4", "A5:B5",
-                     "C3:D3", "C4:D4", "C5:D5",
-                     "E3:F3", "E4:F4", "E5:F5"):
+        for span in (
+            "A3:B3",
+            "A4:B4",
+            "A5:B5",
+            "C3:D3",
+            "C4:D4",
+            "C5:D5",
+            "E3:F3",
+            "E4:F4",
+            "E5:F5",
+        ):
             assert span in ranges, span
 
     def test_card_text_centered(self, ws, theme):
@@ -355,6 +401,7 @@ class TestWriteKpiCards:
 # --------------------------------------------------------------------------
 # bin_label
 # --------------------------------------------------------------------------
+
 
 class TestBinLabel:
     def test_label_shape(self):
@@ -370,14 +417,14 @@ class TestBinLabel:
 # distinguished by labels/legend only; revert = re-add the DataPoint loop)
 # --------------------------------------------------------------------------
 
+
 class TestBuildBinDonut:
     @pytest.fixture
     def ws(self):
         return Workbook().active
 
     def test_chart_added_and_configured(self, ws):
-        build_bin_donut(ws, "Hardware Bin — Head1 / All Sites", BINS,
-                        "A6", 62)
+        build_bin_donut(ws, "Hardware Bin — Head1 / All Sites", BINS, "A6", 62)
         assert len(ws._charts) == 1
         chart = ws._charts[0]
         assert isinstance(chart, DoughnutChart)
@@ -468,8 +515,14 @@ class TestWriteBinTable:
 
     def written(self, ws, theme, bins=None, start_row=15):
         """write_bin_table with the standard HB title/name; returns next row."""
-        return write_bin_table(ws, start_row, bins if bins is not None
-                               else AGG_BINS, theme, TABLE_TITLE, TABLE_NAME)
+        return write_bin_table(
+            ws,
+            start_row,
+            bins if bins is not None else AGG_BINS,
+            theme,
+            TABLE_TITLE,
+            TABLE_NAME,
+        )
 
     # layout ---------------------------------------------------------------
 
@@ -500,8 +553,7 @@ class TestWriteBinTable:
         for column in range(1, 5):
             assert ws.cell(row=15, column=column).style == "Output"
 
-    def test_section_title_output_style_round_trip(self, ws, theme,
-                                                   tmp_path):
+    def test_section_title_output_style_round_trip(self, ws, theme, tmp_path):
         # the named style carries builtinId=21 into styles.xml and the
         # assignment survives a save/reload
         self.written(ws, theme)
@@ -514,24 +566,33 @@ class TestWriteBinTable:
 
     def test_header_row_blue_with_white_bold_centered(self, ws, theme):
         self.written(ws, theme)
-        assert [ws.cell(row=16, column=c).value
-                for c in range(1, 5)] == list(BIN_TABLE_HEADERS)
+        assert [ws.cell(row=16, column=c).value for c in range(1, 5)] == list(
+            BIN_TABLE_HEADERS
+        )
         for column in range(1, 5):
             cell = ws.cell(row=16, column=column)
-            assert cell.fill.fgColor.rgb == "FF1E40AF"   # theme header fill
+            assert cell.fill.fgColor.rgb == "FF1E40AF"  # theme header fill
             assert cell.font.bold is True
-            assert cell.font.color.rgb == "FFFFFFFF"     # white bold
+            assert cell.font.color.rgb == "FFFFFFFF"  # white bold
             assert cell.alignment.horizontal == "center"
-            assert cell.border.left.style == "thin"      # theme border
+            assert cell.border.left.style == "thin"  # theme border
 
     def test_data_rows_name_number_count_fraction(self, ws, theme):
         self.written(ws, theme)
-        assert [ws[cell].value for cell in
-                ("A17", "B17", "C17", "D17")] == ["PASS_BIN", 1, 9, 0.9]
+        assert [ws[cell].value for cell in ("A17", "B17", "C17", "D17")] == [
+            "PASS_BIN",
+            1,
+            9,
+            0.9,
+        ]
         assert isinstance(ws["C17"].value, int)
         assert isinstance(ws["D17"].value, float)
-        assert [ws[cell].value for cell in
-                ("A18", "B18", "C18", "D18")] == ["FAIL_BIN", 3, 1, 0.1]
+        assert [ws[cell].value for cell in ("A18", "B18", "C18", "D18")] == [
+            "FAIL_BIN",
+            3,
+            1,
+            0.1,
+        ]
         # fraction cells carry the 0.00% display format
         assert ws["D17"].number_format == "0.00%"
         assert ws["D18"].number_format == "0.00%"
@@ -567,24 +628,23 @@ class TestWriteBinTable:
 
     def test_empty_bins_noop(self, ws, theme):
         assert self.written(ws, theme, bins=[]) == 15
-        assert ws.max_row == 1                      # nothing written
+        assert ws.max_row == 1  # nothing written
         assert ws.conditional_formatting is not None and not list(
-            ws.conditional_formatting)
+            ws.conditional_formatting
+        )
         assert list(ws.tables) == []
 
     # conditional formatting -------------------------------------------------
 
     def test_data_bar_over_distribution_data_rows_only(self, ws, theme):
         self.written(ws, theme)
-        ranges = {str(cf.sqref): list(cf.rules)
-                  for cf in ws.conditional_formatting}
-        assert list(ranges) == ["D17:D18"]          # Total row (19) outside
+        ranges = {str(cf.sqref): list(cf.rules) for cf in ws.conditional_formatting}
+        assert list(ranges) == ["D17:D18"]  # Total row (19) outside
         (rule,) = ranges["D17:D18"]
         assert rule.type == "dataBar"
-        assert rule.dataBar.showValue is True       # bar AND text in the cell
+        assert rule.dataBar.showValue is True  # bar AND text in the cell
         assert rule.dataBar.color.rgb.endswith("5B9BD5")
-        assert [(f.type, f.val) for f in rule.dataBar.cfvo] == [
-            ("num", 0), ("num", 1)]
+        assert [(f.type, f.val) for f in rule.dataBar.cfvo] == [("num", 0), ("num", 1)]
 
     # Excel Table (filter arrows; wave-2 F5 repair rule respected) ----------
 
@@ -593,7 +653,7 @@ class TestWriteBinTable:
         (name,) = ws.tables
         assert name == TABLE_NAME
         table = ws.tables[TABLE_NAME]
-        assert table.ref == "A16:D18"               # Total row outside
+        assert table.ref == "A16:D18"  # Total row outside
         assert table.autoFilter is not None
         assert table.autoFilter.ref == table.ref
 
@@ -602,8 +662,9 @@ class TestWriteBinTable:
         self.written(ws, theme)
         table = ws.tables[TABLE_NAME]
         assert [c.name for c in table.tableColumns] == list(BIN_TABLE_HEADERS)
-        assert [ws.cell(row=16, column=c).value
-                for c in range(1, 5)] == [c.name for c in table.tableColumns]
+        assert [ws.cell(row=16, column=c).value for c in range(1, 5)] == [
+            c.name for c in table.tableColumns
+        ]
 
     def test_round_trip_keeps_table_and_data_bar(self, ws, theme, tmp_path):
         self.written(ws, theme)
@@ -614,7 +675,11 @@ class TestWriteBinTable:
         assert table.ref == "A16:D18"
         assert table.autoFilter.ref == table.ref
         assert [c.name for c in table.tableColumns] == list(BIN_TABLE_HEADERS)
-        (rule,) = [r for cf in reloaded.conditional_formatting
-                   for r in cf.rules if str(cf.sqref) == "D17:D18"]
+        (rule,) = [
+            r
+            for cf in reloaded.conditional_formatting
+            for r in cf.rules
+            if str(cf.sqref) == "D17:D18"
+        ]
         assert rule.type == "dataBar"
         assert rule.dataBar.color.rgb.endswith("5B9BD5")

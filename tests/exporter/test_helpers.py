@@ -100,7 +100,10 @@ class TestSplitTestName:
         assert split_test_name("A-B", pattern) == ("A", "B")
 
     def test_custom_pattern_no_match_returns_full(self):
-        assert split_test_name("A/B/C", r"^(?P<test>.+)-(?P<param>[^-]+)$") == ("A/B/C", "")
+        assert split_test_name("A/B/C", r"^(?P<test>.+)-(?P<param>[^-]+)$") == (
+            "A/B/C",
+            "",
+        )
 
 
 class TestWorkflowKey:
@@ -191,7 +194,9 @@ class TestStatFormula:
 
 class TestCpkFormula:
     def test_spec_string_row_17(self):
-        assert cpk_formula(17) == '=IFERROR(MIN((F17-I17)/(3*J17),(I17-E17)/(3*J17)),"")'
+        assert (
+            cpk_formula(17) == '=IFERROR(MIN((F17-I17)/(3*J17),(I17-E17)/(3*J17)),"")'
+        )
 
     def test_other_row(self):
         assert cpk_formula(5) == '=IFERROR(MIN((F5-I5)/(3*J5),(I5-E5)/(3*J5)),"")'
@@ -225,15 +230,15 @@ class TestParseTestTime:
         ("raw", "expected"),
         [
             ("123 ms", 123),
-            ("123ms", 123),          # no space variant
-            ("  45  ms ", 45),       # stray whitespace
+            ("123ms", 123),  # no space variant
+            ("  45  ms ", 45),  # stray whitespace
             ("0 ms", 0),
-            ("123", 123),            # already bare integer
-            (123, 123),              # already numeric (defensive)
+            ("123", 123),  # already bare integer
+            (123, 123),  # already numeric (defensive)
             (12.0, 12),
             ("", ""),
             (None, ""),
-            ("ms", ""),              # no number at all
+            ("ms", ""),  # no number at all
             ("garbage", ""),
         ],
     )
@@ -256,14 +261,14 @@ class TestParseBin:
         [
             ("Bin 3", 3),
             ("Bin 0", 0),
-            ("bin 7", 7),            # case-insensitive via regex
+            ("bin 7", 7),  # case-insensitive via regex
             ("Bin 127", 127),
-            ("3", 3),                # bare integer
-            (3, 3),                  # already numeric (defensive)
+            ("3", 3),  # bare integer
+            (3, 3),  # already numeric (defensive)
             (0, 0),
             ("", ""),
             (None, ""),
-            ("Bin", ""),             # no number at all
+            ("Bin", ""),  # no number at all
             ("garbage", ""),
         ],
     )
@@ -280,31 +285,43 @@ class TestParseBin:
 class TestMetadataStatFormulas:
     def test_mean_true_returns_min_max_mean_triple(self):
         assert metadata_stat_formulas(17, "M", "AZ", mean=True) == (
-            "=MIN(M17:AZ17)", "=MAX(M17:AZ17)", "=AVERAGE(M17:AZ17)")
+            "=MIN(M17:AZ17)",
+            "=MAX(M17:AZ17)",
+            "=AVERAGE(M17:AZ17)",
+        )
 
     def test_mean_false_drops_average(self):
         # third wave: only Temperature keeps a Mean cell — other numeric
         # metadata rows take the (MIN, MAX) pair and pad Mean with a dash
         assert metadata_stat_formulas(20, "M", "O", mean=False) == (
-            "=MIN(M20:O20)", "=MAX(M20:O20)")
+            "=MIN(M20:O20)",
+            "=MAX(M20:O20)",
+        )
 
     def test_std_true_appends_stdev_after_mean(self):
         # fourth wave: the Test Time row keeps Mean AND St. Dev. (sample
         # stdev, same STDEV semantic as the data rows' St. Dev. column)
         assert metadata_stat_formulas(21, "M", "O", mean=True, std=True) == (
-            "=MIN(M21:O21)", "=MAX(M21:O21)", "=AVERAGE(M21:O21)",
-            "=STDEV(M21:O21)")
+            "=MIN(M21:O21)",
+            "=MAX(M21:O21)",
+            "=AVERAGE(M21:O21)",
+            "=STDEV(M21:O21)",
+        )
 
     def test_std_true_without_mean(self):
         # the helper stays general: STDEV without AVERAGE is legal even
         # though no metadata row uses that combination today
         assert metadata_stat_formulas(22, "M", "O", mean=False, std=True) == (
-            "=MIN(M22:O22)", "=MAX(M22:O22)", "=STDEV(M22:O22)")
+            "=MIN(M22:O22)",
+            "=MAX(M22:O22)",
+            "=STDEV(M22:O22)",
+        )
 
 
 # --------------------------------------------------------------------------
 # Fifth user-feedback wave: live Test Statistics Cpk formula
 # --------------------------------------------------------------------------
+
 
 class TestBuildStatCpkFormula:
     """DUT-Summary-shaped Cpk formula with dynamic column letters (the
@@ -315,7 +332,8 @@ class TestBuildStatCpkFormula:
         # standard transformed header: SpecMin H, SpecMax I, Average L,
         # St. Dev. N, first data row 2
         assert build_stat_cpk_formula("H", "I", "L", "N", 2) == (
-            '=IFERROR(MIN((I2-L2)/(3*N2),(L2-H2)/(3*N2)),"")')
+            '=IFERROR(MIN((I2-L2)/(3*N2),(L2-H2)/(3*N2)),"")'
+        )
 
     def test_same_shape_as_dut_summary_formula(self):
         # substituting the DUT Summary's fixed E/F/I/J letters reproduces
@@ -335,12 +353,17 @@ class TestApplyCpkFormula:
 
     # standard transformed header indices: SpecMin 7, SpecMax 8, Cpk 10,
     # Average 11, Median 12, St. Dev. 13
-    INFO = {"enabled": True, "spec_cols": (7, 8), "avg_col": 11,
-            "std_col": 13, "cpk_col": 10}
+    INFO = {
+        "enabled": True,
+        "spec_cols": (7, 8),
+        "avg_col": 11,
+        "std_col": 13,
+        "cpk_col": 10,
+    }
 
     def test_overwrites_cpk_cell_in_place(self):
         row = [0] * 14
-        row[10] = "1.23"   # upstream-formatted string
+        row[10] = "1.23"  # upstream-formatted string
         apply_cpk_formula(row, self.INFO, 2)
         assert row[10] == '=IFERROR(MIN((I2-L2)/(3*N2),(L2-H2)/(3*N2)),"")'
 
@@ -355,8 +378,7 @@ class TestApplyCpkFormula:
         apply_cpk_formula(row, info, 2)
         assert row[10] == 0
 
-    @pytest.mark.parametrize("key",
-                             ["spec_cols", "avg_col", "std_col", "cpk_col"])
+    @pytest.mark.parametrize("key", ["spec_cols", "avg_col", "std_col", "cpk_col"])
     def test_missing_anchor_noop(self, key):
         # translated UI: any of the four anchors missing degrades to a no-op
         info = dict(self.INFO)

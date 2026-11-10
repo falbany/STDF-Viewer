@@ -22,9 +22,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-"""
 
-"""DUT Summary spec builder: metadata block, live formulas, hybrid fail logic.
+DUT Summary spec builder: metadata block, live formulas, hybrid fail logic.
 
 Pure spec construction (strings/dicts/numbers only) — the openpyxl renderer
 (Task 5) consumes the spec dicts produced here.
@@ -67,8 +66,18 @@ DATA_START = 16
 # Third wave renames: "Test" -> "Test Name" (consistency with the Test
 # Statistics sheet), "STD" -> "St. Dev.", "FAILS" -> "Fails").
 BASE_HEADERS = (
-    "Test#", "Test Name", "Param", "Unit", "SpecMin", "SpecMax",
-    "Min", "Max", "Mean", "St. Dev.", "Cpk", "Fails",
+    "Test#",
+    "Test Name",
+    "Param",
+    "Unit",
+    "SpecMin",
+    "SpecMax",
+    "Min",
+    "Max",
+    "Mean",
+    "St. Dev.",
+    "Cpk",
+    "Fails",
 )
 FORMULA_COLUMNS = [6, 7, 8, 9, 10, 11]  # G..L carry formulas
 
@@ -112,27 +121,131 @@ MASK_ALWAYS = "always"
 # status conditional formatting would be meaningless on a hidden row);
 # Head-Site and Test Time keep the unconditional fold.
 METADATA_ROWS = (
-    {"name": "File ID", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 0, "mean": False, "std": False},
-    {"name": "Part ID", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 1, "mean": False, "std": False},
-    {"name": "Part TXT", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 2, "mean": False, "std": False},
-    {"name": "Temperature", "unit_type": "CELSIUS", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": None, "mean": True, "std": False},
-    {"name": "HW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 6, "mean": False, "std": False},
-    {"name": "SW Bin", "unit_type": "BIN", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 7, "mean": False, "std": False},
-    {"name": "Wafer", "unit_type": "INT", "numeric": True, "mask": MASK_BLANK, "dutinfo_index": 8, "mean": False, "std": False},
-    {"name": "X", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9, "mean": False, "std": False},
-    {"name": "Y", "unit_type": "INT", "numeric": True, "mask": MASK_CONSTANT, "dutinfo_index": 9, "mean": False, "std": False},
-    {"name": "Head-Site", "unit_type": "TEXT", "numeric": False, "mask": MASK_ALWAYS, "dutinfo_index": 3, "mean": False, "std": False},
-    {"name": "Tests Executed", "unit_type": "INT", "numeric": True, "mask": MASK_NEVER, "dutinfo_index": 4, "mean": False, "std": False},
-    {"name": "Test Time", "unit_type": "ms", "numeric": True, "mask": MASK_ALWAYS, "dutinfo_index": 5, "mean": True, "std": True},
-    {"name": "DUT Flag", "unit_type": "TEXT", "numeric": False, "mask": MASK_NEVER, "dutinfo_index": 10, "mean": False, "std": False},
+    {
+        "name": "File ID",
+        "unit_type": "INT",
+        "numeric": True,
+        "mask": MASK_CONSTANT,
+        "dutinfo_index": 0,
+        "mean": False,
+        "std": False,
+    },
+    {
+        "name": "Part ID",
+        "unit_type": "TEXT",
+        "numeric": False,
+        "mask": MASK_NEVER,
+        "dutinfo_index": 1,
+        "mean": False,
+        "std": False,
+    },
+    {
+        "name": "Part TXT",
+        "unit_type": "TEXT",
+        "numeric": False,
+        "mask": MASK_NEVER,
+        "dutinfo_index": 2,
+        "mean": False,
+        "std": False,
+    },
+    {
+        "name": "Temperature",
+        "unit_type": "CELSIUS",
+        "numeric": True,
+        "mask": MASK_CONSTANT,
+        "dutinfo_index": None,
+        "mean": True,
+        "std": False,
+    },
+    {
+        "name": "HW Bin",
+        "unit_type": "BIN",
+        "numeric": True,
+        "mask": MASK_NEVER,
+        "dutinfo_index": 6,
+        "mean": False,
+        "std": False,
+    },
+    {
+        "name": "SW Bin",
+        "unit_type": "BIN",
+        "numeric": True,
+        "mask": MASK_NEVER,
+        "dutinfo_index": 7,
+        "mean": False,
+        "std": False,
+    },
+    {
+        "name": "Wafer",
+        "unit_type": "INT",
+        "numeric": True,
+        "mask": MASK_BLANK,
+        "dutinfo_index": 8,
+        "mean": False,
+        "std": False,
+    },
+    {
+        "name": "X",
+        "unit_type": "INT",
+        "numeric": True,
+        "mask": MASK_CONSTANT,
+        "dutinfo_index": 9,
+        "mean": False,
+        "std": False,
+    },
+    {
+        "name": "Y",
+        "unit_type": "INT",
+        "numeric": True,
+        "mask": MASK_CONSTANT,
+        "dutinfo_index": 9,
+        "mean": False,
+        "std": False,
+    },
+    {
+        "name": "Head-Site",
+        "unit_type": "TEXT",
+        "numeric": False,
+        "mask": MASK_ALWAYS,
+        "dutinfo_index": 3,
+        "mean": False,
+        "std": False,
+    },
+    {
+        "name": "Tests Executed",
+        "unit_type": "INT",
+        "numeric": True,
+        "mask": MASK_NEVER,
+        "dutinfo_index": 4,
+        "mean": False,
+        "std": False,
+    },
+    {
+        "name": "Test Time",
+        "unit_type": "ms",
+        "numeric": True,
+        "mask": MASK_ALWAYS,
+        "dutinfo_index": 5,
+        "mean": True,
+        "std": True,
+    },
+    {
+        "name": "DUT Flag",
+        "unit_type": "TEXT",
+        "numeric": False,
+        "mask": MASK_NEVER,
+        "dutinfo_index": 10,
+        "mean": False,
+        "std": False,
+    },
 )
 
 # Absolute Excel row of the DUT Flag metadata row (fourth wave): computed
 # from its METADATA_ROWS position, never hard-coded — the status CF range
 # in the spec and the writer's rules both derive from it.
 DUT_FLAG_ROW = METADATA_START + next(
-    index for index, meta in enumerate(METADATA_ROWS)
-    if meta["name"] == "DUT Flag")
+    index for index, meta in enumerate(METADATA_ROWS) if meta["name"] == "DUT Flag"
+)
 
 # First two integers inside a preformatted "(X, Y)" string.
 _XY_INT_RE = re.compile(r"-?\d+")
@@ -153,8 +266,15 @@ def sanitize_cell(value):
     return value
 
 
-def build_dut_summary_spec(summaryTable, testTuples, order, dut_ids, sheet_name,
-                           die_cap=DUT_CHUNK_CAP, tr=lambda s: s):
+def build_dut_summary_spec(
+    summaryTable,
+    testTuples,
+    order,
+    dut_ids,
+    sheet_name,
+    die_cap=DUT_CHUNK_CAP,
+    tr=lambda s: s,
+):
     """Build one spec dict per die chunk of the DUT Summary sheet.
 
     `summaryTable` is the classic protocol dict (Data/TestInfo/dut2ind/dutInfo)
@@ -177,17 +297,19 @@ def build_dut_summary_spec(summaryTable, testTuples, order, dut_ids, sheet_name,
     specs = []
     chunk_start = 0
     for chunk_index, chunk_ids in enumerate(chunks):
-        specs.append(_build_chunk(
-            summaryTable=summaryTable,
-            tests=tests,
-            order=order,
-            chunk_start=chunk_start,
-            chunk_ids=chunk_ids,
-            display_ids=display_ids[chunk_start: chunk_start + len(chunk_ids)],
-            sheet_name=sheet_name,
-            base_labels=base_labels,
-            chunk_index=chunk_index,
-        ))
+        specs.append(
+            _build_chunk(
+                summaryTable=summaryTable,
+                tests=tests,
+                order=order,
+                chunk_start=chunk_start,
+                chunk_ids=chunk_ids,
+                display_ids=display_ids[chunk_start : chunk_start + len(chunk_ids)],
+                sheet_name=sheet_name,
+                base_labels=base_labels,
+                chunk_index=chunk_index,
+            )
+        )
         chunk_start += len(chunk_ids)
     return specs
 
@@ -195,6 +317,7 @@ def build_dut_summary_spec(summaryTable, testTuples, order, dut_ids, sheet_name,
 # --------------------------------------------------------------------------
 # per-test static info (name/param/unit/limits/record type)
 # --------------------------------------------------------------------------
+
 
 def _resolve_test(summaryTable, test_tuple):
     """First-file-wins test info plus Param precedence resolution."""
@@ -268,6 +391,7 @@ def _limit_cell(limit):
 # per-cell data lookup
 # --------------------------------------------------------------------------
 
+
 def _lookup_value_flag(summaryTable, test_tuple, fid, dut_index):
     """(value, flag) of one DUT's result, or None when the DUT/file lacks it."""
     entry = summaryTable.get("Data", {}).get(test_tuple, {}).get(fid)
@@ -300,6 +424,7 @@ def _flag_cell(flag):
 # --------------------------------------------------------------------------
 # metadata block
 # --------------------------------------------------------------------------
+
 
 def _metadata_cell(meta, summaryTable, fid, dut_index, global_index):
     name = meta["name"]
@@ -387,12 +512,20 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die):
             _metadata_cell(meta, summaryTable, fid, dut_index, global_index)
             for global_index, fid, dut_index in chunk_cells
         ]
-        prefix = [METADATA_TEST_NUM_BASE + position, "METADATA", meta["name"],
-                  meta["unit_type"], "-", "-"]
+        prefix = [
+            METADATA_TEST_NUM_BASE + position,
+            "METADATA",
+            meta["name"],
+            meta["unit_type"],
+            "-",
+            "-",
+        ]
         if meta["numeric"]:
-            prefix.extend(metadata_stat_formulas(excel_row, first_die,
-                                                 last_die, mean=meta["mean"],
-                                                 std=meta["std"]))
+            prefix.extend(
+                metadata_stat_formulas(
+                    excel_row, first_die, last_die, mean=meta["mean"], std=meta["std"]
+                )
+            )
             dashes = 4 - int(meta["mean"]) - int(meta["std"])
             prefix.extend(["-"] * dashes)
         else:
@@ -407,16 +540,17 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die):
 # chunk spec assembly
 # --------------------------------------------------------------------------
 
-def _test_rows(summaryTable, tests, chunk_cells, first_die, last_die,
-               mirror_first, mirror_last):
+
+def _test_rows(
+    summaryTable, tests, chunk_cells, first_die, last_die, mirror_first, mirror_last
+):
     rows = []
     for offset, test in enumerate(tests):
         row_index = DATA_START + offset
         die_cells = []
         mirror_cells = []
         for _global_index, fid, dut_index in chunk_cells:
-            found = _lookup_value_flag(summaryTable, test["test_tuple"],
-                                       fid, dut_index)
+            found = _lookup_value_flag(summaryTable, test["test_tuple"], fid, dut_index)
             if found is None:
                 die_cells.append("")
                 mirror_cells.append("")
@@ -441,20 +575,25 @@ def _test_rows(summaryTable, tests, chunk_cells, first_die, last_die,
         else:
             spec_min = spec_max = ""
             fails = fails_formula_flags(row_index, mirror_first, mirror_last)
-        rows.append([
-            test["num"],
-            test["test"],
-            test["param"],
-            "P/F" if test["is_ftr"] else test["unit"],
-            spec_min,
-            spec_max,
-            stat_formula("MIN", row_index, first_die, last_die),
-            stat_formula("MAX", row_index, first_die, last_die),
-            stat_formula("AVERAGE", row_index, first_die, last_die),
-            stat_formula("STDEV", row_index, first_die, last_die),
-            cpk_formula(row_index),
-            fails,
-        ] + die_cells + [""] + mirror_cells)
+        rows.append(
+            [
+                test["num"],
+                test["test"],
+                test["param"],
+                "P/F" if test["is_ftr"] else test["unit"],
+                spec_min,
+                spec_max,
+                stat_formula("MIN", row_index, first_die, last_die),
+                stat_formula("MAX", row_index, first_die, last_die),
+                stat_formula("AVERAGE", row_index, first_die, last_die),
+                stat_formula("STDEV", row_index, first_die, last_die),
+                cpk_formula(row_index),
+                fails,
+            ]
+            + die_cells
+            + [""]
+            + mirror_cells
+        )
     return rows
 
 
@@ -472,8 +611,17 @@ def _row_groups(tests):
     return groups
 
 
-def _build_chunk(summaryTable, tests, order, chunk_start, chunk_ids, display_ids,
-                 sheet_name, base_labels, chunk_index):
+def _build_chunk(
+    summaryTable,
+    tests,
+    order,
+    chunk_start,
+    chunk_ids,
+    display_ids,
+    sheet_name,
+    base_labels,
+    chunk_index,
+):
     die_count = len(chunk_ids)
     # (global DUT position, fid, dutIndex) per die column of this chunk;
     # a missing `order` entry degrades to blank cells.
@@ -495,10 +643,12 @@ def _build_chunk(summaryTable, tests, order, chunk_start, chunk_ids, display_ids
         # (the naive die_col(0)/die_col(1) pair would invert to N:M).
         mirror_first = mirror_last = first_die
 
-    metadata_rows, masked_rows = _metadata_block(summaryTable, chunk_cells,
-                                                 first_die, last_die)
-    rows = _test_rows(summaryTable, tests, chunk_cells,
-                      first_die, last_die, mirror_first, mirror_last)
+    metadata_rows, masked_rows = _metadata_block(
+        summaryTable, chunk_cells, first_die, last_die
+    )
+    rows = _test_rows(
+        summaryTable, tests, chunk_cells, first_die, last_die, mirror_first, mirror_last
+    )
     last_data_row = DATA_START + len(rows) - 1 if rows else DATA_START
 
     spec = {
@@ -507,9 +657,7 @@ def _build_chunk(summaryTable, tests, order, chunk_start, chunk_ids, display_ids
         # 2 — cell value is the int 1, 2, 3…; chunk-global numbering, so
         # chunk 2 starts at its global offset; the raw part IDs stay on
         # the repeated header and the Part ID row)
-        "headers": list(base_labels) + [
-            chunk_start + i + 1 for i in range(die_count)
-        ],
+        "headers": list(base_labels) + [chunk_start + i + 1 for i in range(die_count)],
         "metadata_rows": metadata_rows,
         "masked_rows": masked_rows,
         "secondary_header": list(base_labels) + [part_id_base(d) for d in display_ids],
