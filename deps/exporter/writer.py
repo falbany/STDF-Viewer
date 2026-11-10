@@ -475,6 +475,10 @@ def render_matrix_sheet(ws: Worksheet, spec: dict, theme) -> None:
 
     cf = spec["conditional_formatting"]
     _add_die_rules(ws, cf["die_rules"], theme)
+    if cf.get("cp_range"):
+        # tenth-wave user request: the Cp column gets the same four
+        # ISNUMBER-guarded bands as Cpk (shared builder, no duplication)
+        _add_cpk_rules(ws, cf["cp_range"], theme)
     _add_cpk_rules(ws, cf["cpk_range"], theme)
     _add_fails_scale(ws, cf)
     dut_flag_range = cf.get("dut_flag_range")

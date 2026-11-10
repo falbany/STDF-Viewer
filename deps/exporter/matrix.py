@@ -706,6 +706,7 @@ def _build_chunk(
                 "first_die": first_die,
                 "flag_col_offset": die_count + 1,
             },
+            "cp_range": f"J{DATA_START}:J{last_data_row}",
             "cpk_range": f"K{DATA_START}:K{last_data_row}",
             "fails_range": f"L{DATA_START}:L{last_data_row}",
             "fails_max": 0.2 * die_count,

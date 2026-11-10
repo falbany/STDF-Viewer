@@ -190,6 +190,7 @@ def make_matrix_spec(**overrides):
         "flag_first_col": "Q",
         "conditional_formatting": {
             "die_rules": {"range": "M16:O18", "first_die": "M", "flag_col_offset": 4},
+            "cp_range": "J16:J18",
             "cpk_range": "K16:K18",
             "fails_range": "L16:L18",
             "fails_max": 0.6,
@@ -473,14 +474,21 @@ class TestMatrixConditionalFormatting:
         fills = [r.dxf.fill.fgColor.rgb for r in rules]
         assert fills == ["FFA7F3D0", "FFD1FAE5", "FFFEF3C7", "FFFECACA"]
 
-    def test_cp_column_unbanded_on_dut_summary(self):
-        # ninth wave flagged ruling: the DUT Summary Cp column (J) carries NO
-        # conditional formatting — the user asked Cpk-style bands for the
-        # Test Statistics Cp column only. K bands unchanged.
+    def test_cp_column_banded_like_cpk(self):
+        # ninth wave left the DUT Summary Cp column (J) unbanded; the user
+        # then asked for the same Cpk-style bands there — identical four
+        # ISNUMBER-guarded rules on J16:J18.
         ws = self.wb()["DUT Summary"]
-        refs = [str(cf.sqref) for cf in ws.conditional_formatting]
-        for ref in refs:
-            assert not ref.startswith("J"), ref
+        rules = cf_block(ws, "J16:J18")
+        assert [r.formula for r in rules] == [
+            ["AND(ISNUMBER(J16),J16>=1.67)"],
+            ["AND(ISNUMBER(J16),J16>=1.33)"],
+            ["AND(ISNUMBER(J16),J16>=1)"],
+            ["AND(ISNUMBER(J16),J16<1)"],
+        ]
+        assert [r.stopIfTrue for r in rules] == [True, True, True, False]
+        fills = [r.dxf.fill.fgColor.rgb for r in rules]
+        assert fills == ["FFA7F3D0", "FFD1FAE5", "FFFEF3C7", "FFFECACA"]
 
     def test_fails_color_scale(self):
         ws = self.wb()["DUT Summary"]

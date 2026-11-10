@@ -819,6 +819,7 @@ class TestStructure:
             "first_die": "M",
             "flag_col_offset": 4,
         }
+        assert cf["cp_range"] == "J16:J18"
         assert cf["cpk_range"] == "K16:K18"
         assert cf["fails_range"] == "L16:L18"
         assert cf["fails_max"] == 0.2 * 3
