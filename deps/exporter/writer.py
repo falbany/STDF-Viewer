@@ -71,7 +71,8 @@ PARAM_ALIGNMENT = Alignment(horizontal="left", vertical="center")
 
 # spec["number_formats"] keys that target fixed (non-die) columns
 # (third wave: "STD"/"FAILS" renamed to "St. Dev."/"Fails" alongside the
-# BASE_HEADERS renames).
+# BASE_HEADERS renames; ninth wave: J stopped being "St. Dev." — scientific —
+# and is "Cp" with "0.00", so J..K both read "0.00" through this map).
 FIXED_FORMAT_COLUMNS = {
     "Test#": 1,
     "SpecMin": 5,
@@ -79,7 +80,7 @@ FIXED_FORMAT_COLUMNS = {
     "Min": 7,
     "Max": 8,
     "Mean": 9,
-    "St. Dev.": 10,
+    "Cp": 10,
     "Cpk": 11,
     "Fails": 12,
 }
@@ -536,11 +537,12 @@ def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
     grid EXCLUDING the header row — to a per-cell number format applied
     after writing; ``column_fills`` (third wave) maps a column letter to a
     static data-cell fill hex that wins over the banding (headers
-    untouched); ``conditional_formatting`` (fourth wave) carries the
-    optional ``"cpk_range"`` / ``"fail_num_range"`` strings spanning the
-    DATA rows only (header excluded) — the Cpk bands reuse the matrix
-    sheet's shared builder, the Fail Num rules are binary (>0 red, =0
-    green)."""
+    untouched); ``conditional_formatting`` (fourth wave, ``cp_range``
+    ninth wave) carries the optional ``"cpk_range"`` / ``"cp_range"`` /
+    ``"fail_num_range"`` strings spanning the DATA rows only (header
+    excluded) — the Cpk AND Cp columns reuse the matrix sheet's shared
+    band builder (identical four ISNUMBER-guarded rules, parameterized
+    range), the Fail Num rules are binary (>0 red, =0 green)."""
     headers = spec["headers"]
     rows = spec.get("rows") or []
     formats = spec.get("number_formats") or {}
@@ -582,10 +584,15 @@ def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
         ws.cell(row=2 + row_index, column=1 + col_index).number_format = fmt
 
     # conditional formatting (fourth wave): optional ranges over the data
-    # rows — the shared Cpk band builder + the binary Fail Num rules
+    # rows — the shared Cpk band builder + the binary Fail Num rules.
+    # Ninth wave: "cp_range" gets the IDENTICAL four bands through the same
+    # shared builder (user asked Cpk-style CF for the Test Statistics Cp
+    # column; the DUT Summary Cp column stays unbanded).
     cf = spec.get("conditional_formatting") or {}
     if cf.get("cpk_range"):
         _add_cpk_rules(ws, cf["cpk_range"], theme)
+    if cf.get("cp_range"):
+        _add_cpk_rules(ws, cf["cp_range"], theme)
     if cf.get("fail_num_range"):
         _add_fail_num_rules(ws, cf["fail_num_range"], theme)
 

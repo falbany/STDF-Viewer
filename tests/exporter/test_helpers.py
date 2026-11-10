@@ -8,10 +8,13 @@ from deps.exporter.helpers import (
     DEFAULT_PARAM_PATTERN,
     DUT_CHUNK_CAP,
     TEMPERATURE_RE,
+    apply_cp_formula,
     apply_cpk_formula,
+    build_stat_cp_formula,
     build_stat_cpk_formula,
     col_range,
     compile_param_pattern,
+    cp_formula,
     cpk_formula,
     die_col,
     fails_formula_flags,
@@ -227,14 +230,39 @@ class TestStatFormula:
         assert stat_formula("MIN", 18, "M", "N") == "=MIN(M18:N18)"
 
 
-class TestCpkFormula:
+class TestCpFormula:
+    """Ninth wave: Cp = (USL-LSL)/(6*sigma) with sigma embedded as STDEV over
+    the row's die range (the St. Dev. column no longer exists to reference)."""
+
     def test_spec_string_row_17(self):
-        assert (
-            cpk_formula(17) == '=IFERROR(MIN((F17-I17)/(3*J17),(I17-E17)/(3*J17)),"")'
+        assert cp_formula(17, "M", "AZ") == '=IFERROR((F17-E17)/(6*STDEV(M17:AZ17)),"")'
+
+    def test_other_row_and_range(self):
+        assert cp_formula(5, "M", "N") == '=IFERROR((F5-E5)/(6*STDEV(M5:N5)),"")'
+
+
+class TestCpkFormula:
+    """Ninth wave: same Cpk semantics, but sigma comes from STDEV over the
+    die range (the signature gains the die range — the J column is now Cp)."""
+
+    def test_spec_string_row_17(self):
+        assert cpk_formula(17, "M", "AZ") == (
+            '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:AZ17)),'
+            '(I17-E17)/(3*STDEV(M17:AZ17))),"")'
         )
 
-    def test_other_row(self):
-        assert cpk_formula(5) == '=IFERROR(MIN((F5-I5)/(3*J5),(I5-E5)/(3*J5)),"")'
+    def test_other_row_and_range(self):
+        assert cpk_formula(5, "M", "N") == (
+            '=IFERROR(MIN((F5-I5)/(3*STDEV(M5:N5)),'
+            '(I5-E5)/(3*STDEV(M5:N5))),"")'
+        )
+
+    def test_sigma_from_range_not_cell(self):
+        # ninth wave divergence from build_stat_cpk_formula: the DUT Summary
+        # embeds STDEV(range) because the J column no longer holds St. Dev.
+        formula = cpk_formula(17, "M", "AZ")
+        assert "STDEV(M17:AZ17)" in formula
+        assert "J17" not in formula
 
 
 class TestFailsFormulas:
@@ -370,10 +398,14 @@ class TestBuildStatCpkFormula:
             '=IFERROR(MIN((I2-L2)/(3*N2),(L2-H2)/(3*N2)),"")'
         )
 
-    def test_same_shape_as_dut_summary_formula(self):
-        # substituting the DUT Summary's fixed E/F/I/J letters reproduces
-        # helpers.cpk_formula verbatim — one formula shape, two sheets
-        assert build_stat_cpk_formula("E", "F", "I", "J", 17) == cpk_formula(17)
+    def test_sigma_from_column_diverges_from_dut_formula(self):
+        # ninth wave divergence: the Test Statistics sigma comes from the
+        # (numeric) St. Dev. COLUMN, while the DUT Summary formula embeds
+        # STDEV over the die range — the old letter-substitution equivalence
+        # (build_stat_cpk_formula("E","F","I","J") == cpk_formula) is gone
+        assert "3*N2" in build_stat_cpk_formula("H", "I", "L", "N", 2)
+        assert "STDEV(" not in build_stat_cpk_formula("H", "I", "L", "N", 2)
+        assert "STDEV(" in cpk_formula(2, "M", "O")
 
     def test_double_digit_rows(self):
         formula = build_stat_cpk_formula("A", "B", "C", "D", 123)
@@ -434,4 +466,83 @@ class TestApplyCpkFormula:
         # nothing (no IndexError, no phantom cells)
         row = [0] * 5
         apply_cpk_formula(row, self.INFO, 2)
+        assert row == [0] * 5
+
+
+# --------------------------------------------------------------------------
+# Ninth user-feedback wave: Test Statistics Cp formula (left of Cpk)
+# --------------------------------------------------------------------------
+
+
+class TestBuildStatCpFormula:
+    """Cp = (USL-LSL)/(6*sigma) over one Test Statistics row, sigma taken
+    from the numeric St. Dev. column (unlike the DUT Summary's embedded
+    STDEV — the upstream St. Dev. values are numeric since wave 3)."""
+
+    def test_spec_string(self):
+        # SpecMin H, SpecMax I, St. Dev. O, first data row 2
+        assert build_stat_cp_formula("H", "I", "O", 2) == '=IFERROR((I2-H2)/(6*O2),"")'
+
+    def test_row_number_is_the_excel_row(self):
+        assert build_stat_cp_formula("A", "B", "C", 123) == (
+            '=IFERROR((B123-A123)/(6*C123),"")'
+        )
+
+    def test_argument_order_max_first(self):
+        # the USL (SpecMax) leads, mirroring the Cpk formula's (max-avg) arm
+        formula = build_stat_cp_formula("E", "F", "J", 17)
+        assert formula == '=IFERROR((F17-E17)/(6*J17),"")'
+
+
+class TestApplyCpFormula:
+    """Overwrites the Cp cell of a transformed stat row with the live
+    formula; graceful no-ops for the degradation cases."""
+
+    # standard transformed header after the ninth-wave Cp insert:
+    # SpecMin 7, SpecMax 8, Cp 10, Cpk 11, Average 12, Median 13, St. Dev. 14
+    INFO = {
+        "enabled": True,
+        "spec_cols": (7, 8),
+        "std_col": 14,
+        "cp_col": 10,
+    }
+
+    def test_overwrites_cp_cell_in_place(self):
+        row = [0] * 17
+        row[10] = ""  # the transform's placeholder
+        apply_cp_formula(row, self.INFO, 2)
+        assert row[10] == '=IFERROR((I2-H2)/(6*O2),"")'
+
+    def test_row_number_is_the_excel_row(self):
+        row = [0] * 17
+        apply_cp_formula(row, self.INFO, 7)
+        assert row[10] == '=IFERROR((I7-H7)/(6*O7),"")'
+
+    def test_disabled_transform_noop(self):
+        info = dict(self.INFO, enabled=False)
+        row = [0] * 17
+        apply_cp_formula(row, info, 2)
+        assert row[10] == 0
+
+    @pytest.mark.parametrize("key", ["spec_cols", "std_col", "cp_col"])
+    def test_missing_anchor_noop(self, key):
+        # translated UI: any of the three anchors missing degrades to a no-op
+        info = dict(self.INFO)
+        info[key] = None
+        row = [0] * 17
+        apply_cp_formula(row, info, 2)
+        assert row[10] == 0
+
+    def test_missing_anchor_keys_tolerated(self):
+        # header_info dicts without the ninth-wave key (older call sites)
+        # degrade to a no-op, never a KeyError
+        row = [0] * 17
+        apply_cp_formula(row, {"enabled": True}, 2)
+        assert row[10] == 0
+
+    def test_short_degraded_row_no_crash(self):
+        # a cp_col off the end of a degraded row writes nothing (no
+        # IndexError, no phantom cells)
+        row = [0] * 5
+        apply_cp_formula(row, self.INFO, 2)
         assert row == [0] * 5

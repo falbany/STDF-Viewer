@@ -950,19 +950,28 @@ class TestStatFtrCacheDetection:
     def test_fail_num_cpk_cf_shifted_letters(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["Test Statistics"]
-        # Fail Num index 10 -> K, Cpk index 11 -> L (Pattern Name shift);
-        # data rows only (header row 1 excluded)
+        # Fail Num index 10 -> K (left of the ninth-wave Cp insert,
+        # unchanged); Cp index 11 -> L (the old Cpk slot); Cpk index 12
+        # -> M (Pattern Name shift + Cp insert); data rows only (header
+        # row 1 excluded)
         fail_rules = cf_block(ws, "K2:K3")
         assert [r.formula for r in fail_rules] == [
             ["AND(ISNUMBER(K2),K2>0)"],
             ["AND(ISNUMBER(K2),K2=0)"],
         ]
-        cpk_rules = cf_block(ws, "L2:L3")
-        assert [r.formula[0] for r in cpk_rules] == [
+        cp_rules = cf_block(ws, "L2:L3")
+        assert [r.formula[0] for r in cp_rules] == [
             "AND(ISNUMBER(L2),L2>=1.67)",
             "AND(ISNUMBER(L2),L2>=1.33)",
             "AND(ISNUMBER(L2),L2>=1)",
             "AND(ISNUMBER(L2),L2<1)",
+        ]
+        cpk_rules = cf_block(ws, "M2:M3")
+        assert [r.formula[0] for r in cpk_rules] == [
+            "AND(ISNUMBER(M2),M2>=1.67)",
+            "AND(ISNUMBER(M2),M2>=1.33)",
+            "AND(ISNUMBER(M2),M2>=1)",
+            "AND(ISNUMBER(M2),M2<1)",
         ]
 
     def test_loop_count_includes_stat_rows(self, generated):

@@ -18,10 +18,21 @@ HEADER_ROW = 15
 
 SCIENTIFIC = "0.00E+00"
 
-# Exact formula strings (Global Constraints; asserted literally, not via helpers).
-CPK_16 = '=IFERROR(MIN((F16-I16)/(3*J16),(I16-E16)/(3*J16)),"")'
-CPK_17 = '=IFERROR(MIN((F17-I17)/(3*J17),(I17-E17)/(3*J17)),"")'
-CPK_18 = '=IFERROR(MIN((F18-I18)/(3*J18),(I18-E18)/(3*J18)),"")'
+# Exact formula strings (Global Constraints; asserted literally, not via
+# helpers). Ninth wave: the J column is Cp (sigma embedded as STDEV over
+# the row's die range — the old St. Dev. column is gone).
+CP_16 = '=IFERROR((F16-E16)/(6*STDEV(M16:O16)),"")'
+CP_17 = '=IFERROR((F17-E17)/(6*STDEV(M17:O17)),"")'
+CP_18 = '=IFERROR((F18-E18)/(6*STDEV(M18:O18)),"")'
+CPK_16 = (
+    '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:O16)),(I16-E16)/(3*STDEV(M16:O16))),"")'
+)
+CPK_17 = (
+    '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:O17)),(I17-E17)/(3*STDEV(M17:O17))),"")'
+)
+CPK_18 = (
+    '=IFERROR(MIN((F18-I18)/(3*STDEV(M18:O18)),(I18-E18)/(3*STDEV(M18:O18))),"")'
+)
 FAILS_LIMITS_16 = (
     '=SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16)))'
 )
@@ -40,7 +51,7 @@ BASE_HEADERS = [
     "Min",
     "Max",
     "Mean",
-    "St. Dev.",
+    "Cp",
     "Cpk",
     "Fails",
 ]
@@ -585,7 +596,8 @@ class TestRows:
         return build(base_tests(), base_duts())[0]
 
     def test_limits_row_exact(self):
-        # Test# moved to the first cell (column A)
+        # Test# moved to the first cell (column A); ninth wave: J = Cp,
+        # K = Cpk with sigma embedded as STDEV over the die range
         row = self.spec()["rows"][0]
         assert row == [
             10,
@@ -597,7 +609,7 @@ class TestRows:
             "=MIN(M16:O16)",
             "=MAX(M16:O16)",
             "=AVERAGE(M16:O16)",
-            "=STDEV(M16:O16)",
+            CP_16,
             CPK_16,
             FAILS_LIMITS_16,
             1.0,
@@ -621,7 +633,7 @@ class TestRows:
             "=MIN(M17:O17)",
             "=MAX(M17:O17)",
             "=AVERAGE(M17:O17)",
-            "=STDEV(M17:O17)",
+            CP_17,
             CPK_17,
             FAILS_FLAGS_17,
             2.0,
@@ -638,7 +650,9 @@ class TestRows:
         # floats) so the limit CF rules and the limit-variant FAILS formula
         # fire exactly like on parametric rows (die cell 1 fails high, 0
         # passes); the FTR-specific FAILS variant is gone. Fifth wave: the
-        # window is symmetric so Cpk is meaningful for FTR rows.
+        # window is symmetric so Cpk is meaningful for FTR rows. Ninth
+        # wave: Cp/Cpk feed from the same synthetic limits (a 0/1 flag
+        # population has sigma and limits, so they compute).
         row = self.spec()["rows"][2]
         assert row == [
             12,
@@ -650,7 +664,7 @@ class TestRows:
             "=MIN(M18:O18)",
             "=MAX(M18:O18)",
             "=AVERAGE(M18:O18)",
-            "=STDEV(M18:O18)",
+            CP_18,
             CPK_18,
             FAILS_LIMITS_18,
             0,
@@ -728,9 +742,10 @@ class TestStructure:
         assert self.spec()["formula_columns"] == [6, 7, 8, 9, 10, 11]
 
     def test_number_formats_scientific_hardcoded(self):
-        # E..J + parametric dies scientific; settings float_format no longer
-        # plumbed (build() has no float_format parameter anymore); third
-        # wave: "STD"/"FAILS" keys renamed to "St. Dev."/"Fails"
+        # E..I + parametric dies scientific; settings float_format no longer
+        # plumbed (build() has no float_format parameter anymore); ninth
+        # wave: J stopped being St. Dev. (scientific) and is Cp with
+        # "0.00" — K (Cpk) keeps "0.00"
         assert self.spec()["number_formats"] == {
             "M": SCIENTIFIC,
             "N": SCIENTIFIC,
@@ -740,8 +755,8 @@ class TestStructure:
             "Min": SCIENTIFIC,
             "Max": SCIENTIFIC,
             "Mean": SCIENTIFIC,
-            "St. Dev.": SCIENTIFIC,
             "Fails": "0",
+            "Cp": "0.00",
             "Cpk": "0.00",
             "Test#": "0",
         }

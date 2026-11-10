@@ -37,6 +37,7 @@ from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from deps.SharedSrc import REC
 from deps.exporter.helpers import (
     DUT_CHUNK_CAP,
+    cp_formula,
     cpk_formula,
     die_col,
     fails_formula_flags,
@@ -64,7 +65,9 @@ DATA_START = 16
 # Fixed A..L columns of the DUT Summary sheet (2026-11-10: Test# permuted
 # from C to A; only A/B/C move, so every formula's column letters stay put.
 # Third wave renames: "Test" -> "Test Name" (consistency with the Test
-# Statistics sheet), "STD" -> "St. Dev.", "FAILS" -> "Fails").
+# Statistics sheet), "STD" -> "St. Dev.", "FAILS" -> "Fails". Ninth wave:
+# J stopped being "St. Dev." and is "Cp" — the per-die sigma is embedded
+# in the Cp/Cpk formulas via STDEV over the row's die range).
 BASE_HEADERS = (
     "Test#",
     "Test Name",
@@ -75,7 +78,7 @@ BASE_HEADERS = (
     "Min",
     "Max",
     "Mean",
-    "St. Dev.",
+    "Cp",
     "Cpk",
     "Fails",
 )
@@ -89,7 +92,9 @@ METADATA_TEST_NUM_BASE = 10000
 # cell of 1 fails the high comparison, 0 passes, blank stays neutral.
 # The symmetric ±0.999999 window centers the pass/fail scale on 0.5 so the
 # Cpk formula yields a meaningful value for FTR rows (SpecMin 0 would pin
-# (mean-LSL)/(3*STD) to 0 for all-pass lots).
+# (mean-LSL)/(3*STD) to 0 for all-pass lots). Ninth wave: the same limits
+# feed BOTH Cp and Cpk (a 0/1 flag population has σ and limits, so both
+# ratios compute; IFERROR blanks them when σ=0).
 # NOTE: ±0.999999 DISPLAY AS "±1.00E+00" under the scientific 0.00E+00
 # format (2-decimal rounding) — accepted, see design addendum §13.
 FTR_SPEC_MIN = -0.999999
@@ -599,8 +604,10 @@ def _test_rows(
                 stat_formula("MIN", row_index, first_die, last_die),
                 stat_formula("MAX", row_index, first_die, last_die),
                 stat_formula("AVERAGE", row_index, first_die, last_die),
-                stat_formula("STDEV", row_index, first_die, last_die),
-                cpk_formula(row_index),
+                # ninth wave: Cp in J (sigma = STDEV over the die range —
+                # no St. Dev. column exists anymore), Cpk in K likewise
+                cp_formula(row_index, first_die, last_die),
+                cpk_formula(row_index, first_die, last_die),
                 fails,
             ]
             + die_cells
@@ -683,9 +690,9 @@ def _build_chunk(
             "Min": SCIENTIFIC_FORMAT,
             "Max": SCIENTIFIC_FORMAT,
             "Mean": SCIENTIFIC_FORMAT,
-            "St. Dev.": SCIENTIFIC_FORMAT,
             **{die_col(i): SCIENTIFIC_FORMAT for i in range(die_count)},
             "Fails": "0",
+            "Cp": "0.00",
             "Cpk": "0.00",
             "Test#": "0",
         },

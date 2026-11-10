@@ -228,9 +228,29 @@ def stat_formula(name: str, row: int, first: str, last: str) -> str:
     return f"={name}({first}{row}:{last}{row})"
 
 
-def cpk_formula(row: int) -> str:
-    """Cpk from the row's Min/Max/Average/StdDev cells (E/F/I/J)."""
-    return f'=IFERROR(MIN((F{row}-I{row})/(3*J{row}),(I{row}-E{row})/(3*J{row})),"")'
+def cp_formula(row: int, first_die: str, last_die: str) -> str:
+    """Cp of one DUT Summary data row: (USL-LSL)/(6σ) with σ embedded as
+    STDEV over the row's die range — F=SpecMax, E=SpecMin (fixed letters).
+
+    Ninth user-feedback wave (2026-11-10): the J column stopped being
+    St. Dev. and became Cp itself, so the sample stdev is computed inline
+    over ``{first}{row}:{last}{row}``. IFERROR blanks σ=0 (constant die
+    values) and missing limits.
+    """
+    return f'=IFERROR((F{row}-E{row})/(6*STDEV({first_die}{row}:{last_die}{row})),"")'
+
+
+def cpk_formula(row: int, first_die: str, last_die: str) -> str:
+    """Cpk of one DUT Summary data row (F=SpecMax, E=SpecMin, I=Mean), σ
+    embedded as STDEV over the row's die range.
+
+    Ninth user-feedback wave: the signature gains the die range — the old
+    shape read σ from the removed J (St. Dev.) column, so both ratio arms
+    now compute STDEV(``{first}{row}:{last}{row}``) inline. IFERROR blanks
+    σ=0 and missing/one-sided limits.
+    """
+    rng = f"STDEV({first_die}{row}:{last_die}{row})"
+    return f'=IFERROR(MIN((F{row}-I{row})/(3*{rng}),(I{row}-E{row})/(3*{rng})),"")'
 
 
 def fails_formula_limits(row: int, first: str, last: str) -> str:
@@ -318,6 +338,59 @@ def apply_cpk_formula(stat_row: list, header_info: dict, row_number: int) -> Non
         get_column_letter(spec_cols[0] + 1),
         get_column_letter(spec_cols[1] + 1),
         get_column_letter(avg_col + 1),
+        get_column_letter(std_col + 1),
+        row_number,
+    )
+
+
+# --------------------------------------------------------------------------
+# Ninth user-feedback wave (2026-11-10): live Test Statistics Cp formula
+# --------------------------------------------------------------------------
+
+
+def build_stat_cp_formula(
+    spec_min_l: str, spec_max_l: str, std_l: str, row_number: int
+) -> str:
+    """Live Cp formula for one Test Statistics row: (USL-LSL)/(6σ).
+
+    ``=IFERROR(({max}{r}-{min}{r})/(6*{std}{r}),"")`` with the column
+    letters substituted. Unlike the DUT Summary's :func:`cp_formula` —
+    which embeds STDEV over the die range because its J column is now Cp
+    itself — the Test Statistics σ comes from the numeric "St. Dev."
+    column (upstream values are numeric since the third wave).
+    ``row_number`` is the 1-based Excel row; the IFERROR blank covers
+    σ=0 and missing/one-sided limits.
+    """
+    return (
+        f"=IFERROR(({spec_max_l}{row_number}-{spec_min_l}{row_number})"
+        f'/(6*{std_l}{row_number}),"")'
+    )
+
+
+def apply_cp_formula(stat_row: list, header_info: dict, row_number: int) -> None:
+    """Overwrite the Cp cell of one transformed Test Statistics row in
+    place with :func:`build_stat_cp_formula`, computed from the row's
+    SpecMin/SpecMax/St. Dev. columns.
+
+    ``header_info`` carries the 0-based anchors from
+    ``generator.transform_stat_header`` (``spec_cols``, ``std_col``,
+    ``cp_col``). No-op when the transform is disabled or any of the three
+    anchors is missing (translated-UI degradation — the cell keeps its
+    placeholder), and when a degraded row is shorter than the Cp column
+    (no IndexError, no phantom cells).
+    """
+    if not header_info.get("enabled"):
+        return
+    spec_cols = header_info.get("spec_cols")
+    std_col = header_info.get("std_col")
+    cp_col = header_info.get("cp_col")
+    if spec_cols is None or std_col is None or cp_col is None:
+        return
+    if not cp_col < len(stat_row):
+        return
+    stat_row[cp_col] = build_stat_cp_formula(
+        get_column_letter(spec_cols[0] + 1),
+        get_column_letter(spec_cols[1] + 1),
         get_column_letter(std_col + 1),
         row_number,
     )

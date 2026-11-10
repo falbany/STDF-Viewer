@@ -22,7 +22,7 @@ BASE_HEADERS = [
     "Min",
     "Max",
     "Mean",
-    "St. Dev.",
+    "Cp",
     "Cpk",
     "Fails",
 ]
@@ -33,9 +33,19 @@ HEADER_ROW = 15
 
 SCIENTIFIC = "0.00E+00"
 
-CPK_16 = '=IFERROR(MIN((F16-I16)/(3*J16),(I16-E16)/(3*J16)),"")'
-CPK_17 = '=IFERROR(MIN((F17-I17)/(3*J17),(I17-E17)/(3*J17)),"")'
-CPK_18 = '=IFERROR(MIN((F18-I18)/(3*J18),(I18-E18)/(3*J18)),"")'
+# Ninth wave: J = Cp, K = Cpk — both embed STDEV over the die range.
+CP_16 = '=IFERROR((F16-E16)/(6*STDEV(M16:O16)),"")'
+CP_17 = '=IFERROR((F17-E17)/(6*STDEV(M17:O17)),"")'
+CP_18 = '=IFERROR((F18-E18)/(6*STDEV(M18:O18)),"")'
+CPK_16 = (
+    '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:O16)),(I16-E16)/(3*STDEV(M16:O16))),"")'
+)
+CPK_17 = (
+    '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:O17)),(I17-E17)/(3*STDEV(M17:O17))),"")'
+)
+CPK_18 = (
+    '=IFERROR(MIN((F18-I18)/(3*STDEV(M18:O18)),(I18-E18)/(3*STDEV(M18:O18))),"")'
+)
 FAILS_LIMITS_16 = (
     '=SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16)))'
 )
@@ -90,7 +100,7 @@ def make_rows():
             "=MIN(M16:O16)",
             "=MAX(M16:O16)",
             "=AVERAGE(M16:O16)",
-            "=STDEV(M16:O16)",
+            CP_16,
             CPK_16,
             FAILS_LIMITS_16,
             1.0,
@@ -112,7 +122,7 @@ def make_rows():
             "=MIN(M17:O17)",
             "=MAX(M17:O17)",
             "=AVERAGE(M17:O17)",
-            "=STDEV(M17:O17)",
+            CP_17,
             CPK_17,
             FAILS_FLAGS_17,
             2.0,
@@ -135,7 +145,7 @@ def make_rows():
             "=MIN(M18:O18)",
             "=MAX(M18:O18)",
             "=AVERAGE(M18:O18)",
-            "=STDEV(M18:O18)",
+            CP_18,
             CPK_18,
             FAILS_LIMITS_18,
             0,
@@ -169,8 +179,8 @@ def make_matrix_spec(**overrides):
             "Min": SCIENTIFIC,
             "Max": SCIENTIFIC,
             "Mean": SCIENTIFIC,
-            "St. Dev.": SCIENTIFIC,
             "Fails": "0",
+            "Cp": "0.00",
             "Cpk": "0.00",
             "Test#": "0",
         },
@@ -291,7 +301,7 @@ class TestMatrixLayout:
         assert ws["G16"].number_format == SCIENTIFIC  # Min
         assert ws["H17"].number_format == SCIENTIFIC  # Max
         assert ws["I17"].number_format == SCIENTIFIC  # Mean
-        assert ws["J17"].number_format == SCIENTIFIC  # St. Dev.
+        assert ws["J17"].number_format == "0.00"  # Cp (ninth wave: no scientific)
         assert ws["K16"].number_format == "0.00"  # Cpk
         assert ws["L16"].number_format == "0"  # Fails
         assert ws["M16"].number_format == SCIENTIFIC  # parametric die cell
@@ -299,6 +309,13 @@ class TestMatrixLayout:
         assert ws["E18"].number_format == SCIENTIFIC  # FTR synthetic SpecMin
         assert ws["M18"].number_format == "0"  # FTR (P/F) die cell
         assert ws["O18"].number_format == "0"
+
+    def test_cp_column_never_scientific(self):
+        # ninth wave regression guard: J held St. Dev. (scientific) before;
+        # as Cp it gets "0.00" via the fixed-column map on every data row
+        ws = self.wb()["DUT Summary"]
+        for cell in ("J16", "J17", "J18"):
+            assert ws[cell].number_format == "0.00", cell
 
     def test_data_cell_values_follow_new_column_order(self):
         ws = self.wb()["DUT Summary"]
@@ -455,6 +472,15 @@ class TestMatrixConditionalFormatting:
         assert [r.stopIfTrue for r in rules] == [True, True, True, False]
         fills = [r.dxf.fill.fgColor.rgb for r in rules]
         assert fills == ["FFA7F3D0", "FFD1FAE5", "FFFEF3C7", "FFFECACA"]
+
+    def test_cp_column_unbanded_on_dut_summary(self):
+        # ninth wave flagged ruling: the DUT Summary Cp column (J) carries NO
+        # conditional formatting — the user asked Cpk-style bands for the
+        # Test Statistics Cp column only. K bands unchanged.
+        ws = self.wb()["DUT Summary"]
+        refs = [str(cf.sqref) for cf in ws.conditional_formatting]
+        for ref in refs:
+            assert not ref.startswith("J"), ref
 
     def test_fails_color_scale(self):
         ws = self.wb()["DUT Summary"]
@@ -775,7 +801,8 @@ class TestPlainTable:
 
 class TestPlainTableConditionalFormatting:
     """Optional spec["conditional_formatting"] contract: {"fail_num_range",
-    "cpk_range"} strings over DATA rows only (header row excluded)."""
+    "cpk_range", "cp_range"} strings over DATA rows only (header row
+    excluded; cp_range ninth wave)."""
 
     def spec(self):
         return {
@@ -791,6 +818,7 @@ class TestPlainTableConditionalFormatting:
                 "SpecMin",
                 "SpecMax",
                 "Fail Num",
+                "Cp",
                 "Cpk",
                 "Average",
             ],
@@ -806,6 +834,7 @@ class TestPlainTableConditionalFormatting:
                     0.5,
                     1.5,
                     1,
+                    "",
                     1.23,
                     1.0,
                 ],
@@ -820,13 +849,15 @@ class TestPlainTableConditionalFormatting:
                     "N/A",
                     "N/A",
                     0,
+                    "",
                     "∞",
                     1.0,
                 ],
             ],
             "conditional_formatting": {
                 "fail_num_range": "J2:J3",
-                "cpk_range": "K2:K3",
+                "cp_range": "K2:K3",
+                "cpk_range": "L2:L3",
             },
         }
 
@@ -854,6 +885,21 @@ class TestPlainTableConditionalFormatting:
         # the SAME four ISNUMBER-guarded bands as the DUT Summary (shared
         # builder): first three stopIfTrue, worst band open
         ws = self.render_and_reload()
+        rules = cf_block(ws, "L2:L3")
+        assert [r.formula for r in rules] == [
+            ["AND(ISNUMBER(L2),L2>=1.67)"],
+            ["AND(ISNUMBER(L2),L2>=1.33)"],
+            ["AND(ISNUMBER(L2),L2>=1)"],
+            ["AND(ISNUMBER(L2),L2<1)"],
+        ]
+        assert [r.stopIfTrue for r in rules] == [True, True, True, False]
+        fills = [r.dxf.fill.fgColor.rgb for r in rules]
+        assert fills == ["FFA7F3D0", "FFD1FAE5", "FFFEF3C7", "FFFECACA"]
+
+    def test_cp_band_rules_same_shared_builder(self):
+        # ninth wave: the Cp column gets the IDENTICAL four bands via the
+        # same shared builder (parameterized range — no duplicated rules)
+        ws = self.render_and_reload()
         rules = cf_block(ws, "K2:K3")
         assert [r.formula for r in rules] == [
             ["AND(ISNUMBER(K2),K2>=1.67)"],
@@ -869,9 +915,9 @@ class TestPlainTableConditionalFormatting:
         # "N/A" limits and "∞" Cpk stay strings; every CF rule is
         # ISNUMBER-guarded so text/blank cells can never match (unstyled)
         ws = self.render_and_reload()
-        assert ws["K3"].value == "∞"
+        assert ws["L3"].value == "∞"
         assert ws["H3"].value == "N/A"
-        for ref in ("J2:J3", "K2:K3"):
+        for ref in ("J2:J3", "K2:K3", "L2:L3"):
             for rule in cf_block(ws, ref):
                 for formula in rule.formula:
                     assert "ISNUMBER(" in formula
@@ -880,13 +926,23 @@ class TestPlainTableConditionalFormatting:
         # ranges start at row 2: the blue header carries no rules
         ws = self.render_and_reload()
         refs = [str(cf.sqref) for cf in ws.conditional_formatting]
-        assert all(not ref.startswith(("J1", "K1")) for ref in refs)
+        assert all(not ref.startswith(("J1", "K1", "L1")) for ref in refs)
 
     def test_no_cf_without_spec_key(self):
         spec = self.spec()
         del spec["conditional_formatting"]
         ws = self.render_and_reload(spec)
         assert list(ws.conditional_formatting) == []
+
+    def test_missing_cp_range_still_bands_cpk(self):
+        # a spec without cp_range (e.g. translated-UI degradation) keeps the
+        # Cpk bands — cp_range is strictly optional
+        spec = self.spec()
+        del spec["conditional_formatting"]["cp_range"]
+        ws = self.render_and_reload(spec)
+        assert len(cf_block(ws, "L2:L3")) == 4
+        with pytest.raises(AssertionError):
+            cf_block(ws, "K2:K3")
 
 
 # --------------------------------------------------------------------------

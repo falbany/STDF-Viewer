@@ -89,6 +89,7 @@ from deps.exporter.charts import (
     write_merged_headline,
 )
 from deps.exporter.helpers import (
+    apply_cp_formula,
     apply_cpk_formula,
     parse_temperature_text,
     split_test_name,
@@ -231,10 +232,11 @@ STAT_SPEC_FILL_HEX = "FFF3CD"
 # formula results render with 2 decimals like the DUT Summary's Cpk column.
 STAT_CPK_FORMAT = "0.00"
 
-# Fixed width for the Test Statistics value columns G..P (sixth wave
-# 2026-11-10): applied AFTER the sheet-wide autofit, which keeps sizing
-# A:F (the test-name column benefits).
-STAT_VALUE_WIDTH_RANGE = ("G", "P")
+# Fixed width for the Test Statistics value columns G..Q (sixth wave
+# 2026-11-10; ninth wave extends P -> Q for the inserted Cp column):
+# applied AFTER the sheet-wide autofit, which keeps sizing A:F (the
+# test-name column benefits).
+STAT_VALUE_WIDTH_RANGE = ("G", "Q")
 STAT_VALUE_COLUMN_WIDTH = 8
 
 # Bin Chart pie helper blocks live in this fixed far column (labels) and
@@ -247,6 +249,7 @@ _STAT_RENAMES = {"Low Limit": "SpecMin", "High Limit": "SpecMax"}
 _STAT_TEST_NAME = "Test Name"
 _STAT_FAIL_NUM = "Fail Num"
 _STAT_CPK = "Cpk"
+_STAT_CP = "Cp"
 _STAT_AVERAGE = "Average"
 _STAT_STD = "St. Dev."
 _STAT_PATTERN_NAME = "Pattern Name"
@@ -305,16 +308,22 @@ def transform_stat_header(header_row) -> dict:
     - ``"Low Limit"`` / ``"High Limit"`` rename to ``"SpecMin"`` /
       ``"SpecMax"`` in place (normalized, English-only);
     - ``"Param"`` is inserted right after the ``"Test Name"`` entry
-      (English-only anchor).
+      (English-only anchor);
+    - a ``"Cp"`` column is inserted immediately BEFORE the ``"Cpk"``
+      entry (normalized English anchor — ninth wave; degraded/disabled
+      headers skip the insert, so no formulas are written either).
 
     Returns ``{"header": [...], "enabled": bool, "param_inserted": bool,
     "spec_cols": (i, j) | None, "avg_col": int | None, "std_col": int | None,
-    "cpk_col": int | None}`` where ``spec_cols`` is the 0-based (SpecMin,
-    SpecMax) column pair in the TRANSFORMED header (None when either limit
-    anchor was missing — translated UIs degrade to untransformed columns)
-    and the fifth-wave keys carry the 0-based Average / St. Dev. / Cpk
-    anchors for the live Cpk formula (normalized matching, None when
-    missing). An unexpected non-blank first cell disables the whole
+    "cp_col": int | None, "cpk_col": int | None}`` where ``spec_cols`` is
+    the 0-based (SpecMin, SpecMax) column pair in the TRANSFORMED header
+    (None when either limit anchor was missing — translated UIs degrade to
+    untransformed columns), the fifth-wave keys carry the 0-based Average /
+    St. Dev. / Cpk anchors and the ninth-wave ``cp_col`` the inserted Cp
+    column (all normalized matching, None when missing). Every anchor scan
+    runs AFTER the Cp insertion, so ``cpk_col`` points at the real Cpk
+    column; the spec columns sit LEFT of the insertion and keep their
+    indices. An unexpected non-blank first cell disables the whole
     transform (header returned untouched, all anchors None).
     """
     cells = [str(cell) if cell is not None else "" for cell in header_row]
@@ -326,6 +335,7 @@ def transform_stat_header(header_row) -> dict:
             "spec_cols": None,
             "avg_col": None,
             "std_col": None,
+            "cp_col": None,
             "cpk_col": None,
         }
     body = [str(cell) for cell in cells[1:]]
@@ -335,6 +345,15 @@ def transform_stat_header(header_row) -> dict:
     param_inserted = _STAT_TEST_NAME in normalized
     if param_inserted:
         header.insert(4 + normalized.index(_STAT_TEST_NAME) + 1, "Param")
+    # ninth wave: "Cp" immediately left of "Cpk" (normalized anchor); the
+    # anchor scans below run AFTER this insertion so cpk_col points at the
+    # real Cpk column and spec_cols reflects the final positions
+    cp_col = None
+    for index, cell in enumerate(header):
+        if _norm_header_text(cell) == _STAT_CPK:
+            header.insert(index, "Cp")
+            cp_col = index
+            break
     spec_cols = None
     if "SpecMin" in renamed and "SpecMax" in renamed:
         spec_cols = (header.index("SpecMin"), header.index("SpecMax"))
@@ -350,6 +369,7 @@ def transform_stat_header(header_row) -> dict:
         "spec_cols": spec_cols,
         "avg_col": _anchor(_STAT_AVERAGE),
         "std_col": _anchor(_STAT_STD),
+        "cp_col": cp_col,
         "cpk_col": _anchor(_STAT_CPK),
     }
 
@@ -363,7 +383,12 @@ def transform_stat_row(row, header_info: dict) -> list:
       ``split_test_name`` when the Param column exists (English anchor);
       otherwise the full name stays untransformed;
     - every remaining value cell (Unit onward, including Pattern Name /
-      MPR mix columns) goes through ``numericize_value``.
+      MPR mix columns) goes through ``numericize_value``;
+    - a ``""`` placeholder is inserted at the Cp column index (ninth
+      wave) so the upstream Cpk value and everything right of it shift
+      one cell right — rows stay header-aligned; the applier overwrites
+      the placeholder with the live formula. Rows that end before the Cp
+      column (truncated upstream) skip the insert — no phantom cells.
     """
     if not header_info.get("enabled"):
         return list(row)
@@ -379,18 +404,24 @@ def transform_stat_row(row, header_info: dict) -> list:
     elif rest:
         out.append(rest[0])
     out.extend(numericize_value(value) for value in rest[1:])
+    cp_col = header_info.get("cp_col")
+    if cp_col is not None and cp_col < len(out):
+        out.insert(cp_col, "")
     return out
 
 
 def stat_cf_ranges(header_info: dict, data_row_count: int) -> dict:
     """Conditional-formatting ranges for the Test Statistics sheet.
 
-    Computes the Fail Num / Cpk column letters from the TRANSFORMED header
-    (normalized English anchors — positions shift right of the inserted
-    FTR "Pattern Name" / MPR mix columns, never hard-coded) and spans the
-    DATA rows only: ``{"fail_num_range": "J2:Jn", "cpk_range": "K2:Kn"}``.
-    An empty dict when either anchor is missing (translated-UI degradation),
-    when the transform is disabled, or when there are no data rows.
+    Computes the Fail Num / Cpk / Cp column letters from the TRANSFORMED
+    header (normalized English anchors — positions shift right of the
+    inserted FTR "Pattern Name" / MPR mix columns and the ninth-wave Cp
+    column, never hard-coded) and spans the DATA rows only:
+    ``{"fail_num_range": "J2:Jn", "cp_range": "K2:Kn", "cpk_range":
+    "L2:Ln"}``. An empty dict when either the Fail Num or the Cpk anchor
+    is missing (translated-UI degradation), when the transform is
+    disabled, or when there are no data rows; ``cp_range`` is present
+    whenever the Cp anchor is (the transform inserts it with Cpk).
     """
     header = header_info.get("header") or []
     normalized = [_norm_header_text(cell) for cell in header]
@@ -403,10 +434,14 @@ def stat_cf_ranges(header_info: dict, data_row_count: int) -> dict:
     last_row = 1 + data_row_count
     fail_letter = get_column_letter(normalized.index(_STAT_FAIL_NUM) + 1)
     cpk_letter = get_column_letter(normalized.index(_STAT_CPK) + 1)
-    return {
+    ranges = {
         "fail_num_range": f"{fail_letter}2:{fail_letter}{last_row}",
         "cpk_range": f"{cpk_letter}2:{cpk_letter}{last_row}",
     }
+    if _STAT_CP in normalized:
+        cp_letter = get_column_letter(normalized.index(_STAT_CP) + 1)
+        ranges["cp_range"] = f"{cp_letter}2:{cp_letter}{last_row}"
+    return ranges
 
 
 def _stat_full_test_name(transformed_row, header_info) -> str:
@@ -646,10 +681,14 @@ class ModernReportGenerator(reportGenerator):
                 column_fills[letter] = STAT_SPEC_FILL_HEX
         # Cpk display format (fifth wave, controller ruling): "0.00" on the
         # formula column, letter computed from the transformed header like
-        # the spec_cols formats above
+        # the spec_cols formats above; ninth wave: the same "0.00" on the
+        # inserted Cp formula column
         cpk_col = header_info.get("cpk_col")
         if cpk_col is not None:
             number_formats[get_column_letter(cpk_col + 1)] = STAT_CPK_FORMAT
+        cp_col = header_info.get("cp_col")
+        if cp_col is not None:
+            number_formats[get_column_letter(cp_col + 1)] = STAT_CPK_FORMAT
 
         # Fail Num / Cpk conditional formatting (fourth wave): letters from
         # the transformed header, data rows only — render_plain_table adds
@@ -678,8 +717,12 @@ class ModernReportGenerator(reportGenerator):
                 apply_ftr_pseudo_limits(stat_row, header_info)
             # live Cpk formula (fifth wave): AFTER the pseudo-limits, so FTR
             # rows compute from the ±0.999999 synthetic limits exactly like
-            # the DUT Summary; row_number = 2 + data_row_index (header row 1)
+            # the DUT Summary; row_number = 2 + data_row_index (header row 1).
+            # Ninth wave: the Cp formula lands on the placeholder cell the
+            # row transform inserted, reading σ from the numeric St. Dev.
+            # column (same limits feed both ratios).
             apply_cpk_formula(stat_row, header_info, 2 + offset)
+            apply_cp_formula(stat_row, header_info, 2 + offset)
             written_rows.append(stat_row)
             write_plain_row(
                 StatSheet,

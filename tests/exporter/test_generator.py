@@ -508,6 +508,7 @@ class TestNumericizeValue:
 
 class TestTransformStatHeader:
     def test_full_english_header(self):
+        # ninth wave: a "Cp" header is inserted immediately BEFORE "Cpk"
         info = transform_stat_header([""] + STAT_HHEADER)
         assert info["header"] == [
             "Test#",
@@ -520,6 +521,7 @@ class TestTransformStatHeader:
             "SpecMin",
             "SpecMax",
             "Fail Num",
+            "Cp",
             "Cpk",
             "Average",
             "Median",
@@ -533,40 +535,51 @@ class TestTransformStatHeader:
 
     def test_stat_anchors_captured(self):
         # fifth wave: Average / St. Dev. / Cpk anchors for the live Cpk
-        # formula — 0-based indices in the TRANSFORMED header (Param shifts
-        # everything right of Test Name)
+        # formula; ninth wave adds the Cp anchor. 0-based indices in the
+        # TRANSFORMED header (Param shifts everything right of Test Name,
+        # the Cp insert shifts everything right of Fail Num)
         info = transform_stat_header([""] + STAT_HHEADER)
-        assert info["avg_col"] == 11
-        assert info["std_col"] == 13
-        assert info["cpk_col"] == 10
+        assert info["avg_col"] == 12
+        assert info["std_col"] == 14
+        assert info["cp_col"] == 10
+        assert info["cpk_col"] == 11
 
     def test_stat_anchors_shift_with_pattern_name_column(self):
         header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
         info = transform_stat_header(header)
-        assert (info["avg_col"], info["std_col"], info["cpk_col"]) == (12, 14, 11)
+        assert (info["avg_col"], info["std_col"], info["cpk_col"]) == (13, 15, 12)
+        assert info["cp_col"] == 11
 
     def test_stat_anchors_missing_degrade_to_none(self):
         info = transform_stat_header(["", "Tests", "Mean"])
         assert info["avg_col"] is None
         assert info["std_col"] is None
+        assert info["cp_col"] is None
         assert info["cpk_col"] is None
 
     def test_disabled_transform_anchors_none(self):
         info = transform_stat_header(["VHeader", "Average", "Cpk"])
         assert info["avg_col"] is None
         assert info["std_col"] is None
+        assert info["cp_col"] is None
         assert info["cpk_col"] is None
 
     def test_stat_anchors_normalized_matching(self):
-        # whitespace-normalized anchors, same ruling as the renames
+        # whitespace-normalized anchors, same ruling as the renames; the
+        # Cp insert runs on the normalized "Cpk" anchor and lands at index 6
         info = transform_stat_header(["", "Average ", "St.  Dev.", "Cpk"])
-        assert (info["avg_col"], info["std_col"], info["cpk_col"]) == (4, 5, 6)
+        assert (info["avg_col"], info["std_col"], info["cpk_col"]) == (4, 5, 7)
+        assert info["cp_col"] == 6
+        assert info["header"][6:] == ["Cp", "Cpk"]
 
     def test_ftr_mix_pattern_name_after_param(self):
+        # ninth wave: SpecMin/SpecMax sit LEFT of the Cp insert — unchanged
         header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
         info = transform_stat_header(header)
         assert info["header"][4:7] == ["Test Name", "Param", "Pattern Name"]
         assert info["spec_cols"] == (8, 9)
+        assert info["cp_col"] == 11
+        assert info["cpk_col"] == 12
 
     def test_mpr_mix_four_columns_after_param(self):
         header = (
@@ -585,6 +598,8 @@ class TestTransformStatHeader:
             "Channel Name",
         ]
         assert info["spec_cols"] == (11, 12)
+        assert info["cp_col"] == 14
+        assert info["cpk_col"] == 15
 
     def test_limit_renames_are_in_place(self):
         # only the two matched entries change text; siblings keep theirs
@@ -604,6 +619,9 @@ class TestTransformStatHeader:
         ]
 
     def test_missing_limit_columns_degrade(self):
+        # ninth wave: no SpecMin/SpecMax anchors, but the Cpk anchor found ->
+        # the "Cp" header still inserts before it (the ratio formulas stay
+        # no-ops on the missing spec_cols)
         info = transform_stat_header(["", "Tests", "Mean", "Cpk"])
         assert info["header"] == [
             "Test#",
@@ -612,6 +630,7 @@ class TestTransformStatHeader:
             "File ID",
             "Tests",
             "Mean",
+            "Cp",
             "Cpk",
         ]
         assert info["spec_cols"] is None
@@ -681,6 +700,9 @@ class TestTransformStatRow:
             "0.980",
             "1.020",
         ]
+        # ninth wave: "" placeholder at the Cp column (index 10) — the
+        # upstream Cpk value (1.23) and everything right of it shift one
+        # cell right, keeping the row header-aligned
         assert transform_stat_row(row, self.info()) == [
             10000,
             1,
@@ -692,6 +714,7 @@ class TestTransformStatRow:
             0.5,
             1.5,
             1,
+            "",
             1.23,
             1.0,
             1.0,
@@ -699,6 +722,29 @@ class TestTransformStatRow:
             0.98,
             1.02,
         ]
+
+    def test_cp_placeholder_sits_left_of_shifted_cpk(self):
+        # explicit ninth-wave pin: placeholder exactly at cp_col, the old
+        # Cpk value immediately right of it
+        row = [
+            "10000 / Head1 / All Sites",
+            "VCCC_ASIC/vcc",
+            "V",
+            "0.500",
+            "1.500",
+            "1",
+            "1.23",
+            "1.000",
+            "1.000",
+            "0.010",
+            "0.980",
+            "1.020",
+        ]
+        out = transform_stat_row(row, self.info())
+        assert out[9] == 1  # Fail Num (left of the insert — unchanged)
+        assert out[10] == ""  # Cp placeholder
+        assert out[11] == 1.23  # the old Cpk value, shifted
+        assert len(out) == len(transform_stat_header([""] + STAT_HHEADER)["header"])
 
     def test_no_slash_name_blank_param(self):
         row = ["7 / Head0 / Site2", "CONTINUITY", "V", "0", "1", "0"]
@@ -738,6 +784,8 @@ class TestTransformStatRow:
             "0.3",
             "0.4",
         ]
+        # ninth wave: placeholder at cp_col 11 (right of Fail Num, left of
+        # the shifted Cpk value 1.5)
         assert transform_stat_row(row, self.info(header)) == [
             12,
             1,
@@ -750,6 +798,7 @@ class TestTransformStatRow:
             "N/A",
             "N/A",
             0,
+            "",
             1.5,
             1.0,
             0.1,
@@ -783,6 +832,8 @@ class TestTransformStatRow:
             "0.2",
             "0.3",
         ]
+        # ninth wave: placeholder at cp_col 14 (right of Fail Num 1, left of
+        # the shifted Cpk value 2.0)
         assert transform_stat_row(row, self.info(header)) == [
             30,
             1,
@@ -798,6 +849,7 @@ class TestTransformStatRow:
             0.1,
             2.0,
             1,
+            "",
             2.0,
             1.5,
             1.5,
@@ -828,25 +880,31 @@ class TestTransformStatRow:
 
 class TestStatCfRanges:
     def test_standard_header_letters(self):
-        # standard English header: Fail Num index 9 -> J, Cpk index 10 -> K
+        # ninth wave: Fail Num stays at index 9 -> J (LEFT of the Cp insert);
+        # Cp lands at index 10 -> K (where Cpk used to be) and Cpk shifts to
+        # index 11 -> L
         info = transform_stat_header([""] + STAT_HHEADER)
         assert stat_cf_ranges(info, 1) == {
             "fail_num_range": "J2:J2",
-            "cpk_range": "K2:K2",
+            "cp_range": "K2:K2",
+            "cpk_range": "L2:L2",
         }
 
     def test_ftr_shifted_header(self):
-        # the FTR "Pattern Name" column shifts Fail Num / Cpk one column
-        # right (K / L) — letters computed from the TRANSFORMED header
+        # the FTR "Pattern Name" column shifts Cpk one further right (M);
+        # Cp takes the old Cpk slot L; Fail Num K (left of the insert)
         header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
         info = transform_stat_header(header)
         assert stat_cf_ranges(info, 5) == {
             "fail_num_range": "K2:K6",
-            "cpk_range": "L2:L6",
+            "cp_range": "L2:L6",
+            "cpk_range": "M2:M6",
         }
 
     def test_mpr_shifted_header(self):
-        # the four MPR mix columns shift Fail Num / Cpk to N / O
+        # the four MPR mix columns: Fail Num N (unchanged, left of the
+        # insert), Cp O (takes the old Cpk slot), Cpk P (+1 vs today —
+        # the Cp insert shifts Cpk exactly one column in EVERY shape)
         header = (
             [""]
             + STAT_HHEADER[:1]
@@ -856,7 +914,8 @@ class TestStatCfRanges:
         info = transform_stat_header(header)
         assert stat_cf_ranges(info, 2) == {
             "fail_num_range": "N2:N3",
-            "cpk_range": "O2:O3",
+            "cp_range": "O2:O3",
+            "cpk_range": "P2:P3",
         }
 
     def test_normalized_spacing_matched(self):
@@ -866,7 +925,8 @@ class TestStatCfRanges:
         )
         assert stat_cf_ranges(info, 4) == {
             "fail_num_range": "H2:H5",
-            "cpk_range": "I2:I5",
+            "cp_range": "I2:I5",
+            "cpk_range": "J2:J5",
         }
 
     def test_missing_anchor_degrades_empty(self):
@@ -985,10 +1045,12 @@ class TestApplyFtrPseudoLimits:
         assert row[8] == 0.999999
         assert isinstance(row[7], float)
         assert isinstance(row[8], float)
-        # sibling cells untouched ("N/A" sentinels gone, rest preserved)
+        # sibling cells untouched ("N/A" sentinels gone, rest preserved);
+        # ninth wave: index 10 is the Cp placeholder, the "∞" Cpk shifted
         assert row[6] == "P/F"
         assert row[9] == 0
-        assert row[10] == "∞"
+        assert row[10] == ""
+        assert row[11] == "∞"
 
     def test_missing_spec_cols_noop(self):
         # translated UI (no limit anchors): nothing to override
@@ -1015,7 +1077,7 @@ class TestStatisticsSheet:
     def test_header_transformed(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["Test Statistics"]
-        assert [ws.cell(row=1, column=c).value for c in range(1, 17)] == [
+        assert [ws.cell(row=1, column=c).value for c in range(1, 18)] == [
             "Test#",
             "Head",
             "Sites",
@@ -1026,6 +1088,7 @@ class TestStatisticsSheet:
             "SpecMin",
             "SpecMax",
             "Fail Num",
+            "Cp",
             "Cpk",
             "Average",
             "Median",
@@ -1034,7 +1097,7 @@ class TestStatisticsSheet:
             "Max",
         ]
         # headers keep the blue styling including the new columns
-        for cell in ("A1", "E1", "F1", "H1", "I1"):
+        for cell in ("A1", "E1", "F1", "H1", "I1", "K1"):
             assert ws[cell].fill.fgColor.rgb == "FF1E40AF", cell
 
     def test_row_split_first_column(self, generated):
@@ -1056,27 +1119,38 @@ class TestStatisticsSheet:
         assert ws["I2"].value == 1.5  # SpecMax was "1.500"
         assert ws["J2"].value == 1  # Fail Num was "1"
         assert isinstance(ws["J2"].value, int)
-        assert ws["O2"].value == 0.98  # Min was "0.980"
-        assert ws["P2"].value == 1.02  # Max was "1.020"
+        assert ws["P2"].value == 0.98  # Min was "0.980" (shifted by the Cp insert)
+        assert ws["Q2"].value == 1.02  # Max was "1.020" (shifted)
         # text cells stay text
         assert ws["G2"].value == "V"
+
+    def test_cp_cell_is_live_formula(self, generated):
+        # ninth wave: the Cp cell (K) holds (USL-LSL)/(6σ) reading sigma
+        # from the numeric St. Dev. column (O) — unlike the DUT Summary,
+        # which embeds STDEV over the die range
+        _, wb, _, _, _ = generated
+        ws = wb["Test Statistics"]
+        assert ws["K2"].value == ('=IFERROR((I2-H2)/(6*O2),"")')
 
     def test_cpk_cell_is_live_formula(self, generated):
         # fifth wave: the Cpk cell overwrites the upstream-formatted string
         # with the DUT-Summary-shaped formula over SpecMin (H) / SpecMax (I)
-        # / Average (L) / St. Dev. (N) at the row's Excel row
+        # / Average (M) / St. Dev. (O) at the row's Excel row; ninth wave
+        # shifts it from K to L (right of the inserted Cp column)
         _, wb, _, _, _ = generated
         ws = wb["Test Statistics"]
-        assert ws["K2"].value == ('=IFERROR(MIN((I2-L2)/(3*N2),(L2-H2)/(3*N2)),"")')
+        assert ws["L2"].value == ('=IFERROR(MIN((I2-M2)/(3*O2),(M2-H2)/(3*O2)),"")')
 
-    def test_cpk_column_number_format(self, generated):
-        # controller ruling: "0.00" on the Cpk column, computed from the
-        # transformed header like the wave-3 spec_cols scientific formats
+    def test_cp_cpk_column_number_formats(self, generated):
+        # controller ruling (fifth/ninth wave): "0.00" on BOTH formula
+        # columns, letters computed from the transformed header like the
+        # wave-3 spec_cols scientific formats
         _, wb, _, _, _ = generated
         ws = wb["Test Statistics"]
-        assert ws["K2"].number_format == "0.00"
+        assert ws["K2"].number_format == "0.00"  # Cp
+        assert ws["L2"].number_format == "0.00"  # Cpk
         # sibling numeric columns keep General
-        assert ws["O2"].number_format == "General"
+        assert ws["P2"].number_format == "General"
 
     def test_spec_columns_stylized_like_dut_summary(self, generated):
         _, wb, _, _, _ = generated
@@ -1091,17 +1165,18 @@ class TestStatisticsSheet:
         assert ws["A2"].fill.fgColor.rgb == "FFE9EEF6"
         assert ws["G2"].fill.fgColor.rgb == "FFE9EEF6"
         # non-spec numeric columns keep General
-        assert ws["O2"].number_format == "General"
+        assert ws["P2"].number_format == "General"
 
     def test_auto_filter_over_transformed_width(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["Test Statistics"]
-        assert ws.auto_filter.ref == "A1:P2"
+        assert ws.auto_filter.ref == "A1:Q2"
 
-    def test_fail_num_cpk_conditional_formatting(self, generated):
-        # fourth wave: binary Fail Num rules + the four Cpk bands over DATA
-        # rows only (header excluded); standard header -> J / K. The single
-        # data row collapses the stored range to "J2"/"K2".
+    def test_fail_num_cp_cpk_conditional_formatting(self, generated):
+        # fourth + ninth wave: binary Fail Num rules + the four Cpk bands
+        # (now on L) + the IDENTICAL four Cp bands (K) over DATA rows only
+        # (header excluded). The single data row collapses the stored range
+        # to "J2"/"K2"/"L2".
         _, wb, _, _, _ = generated
         ws = wb["Test Statistics"]
         fail_rules = cf_block(ws, "J2")
@@ -1109,12 +1184,19 @@ class TestStatisticsSheet:
             ["AND(ISNUMBER(J2),J2>0)"],
             ["AND(ISNUMBER(J2),J2=0)"],
         ]
-        cpk_rules = cf_block(ws, "K2")
-        assert [r.formula for r in cpk_rules] == [
+        cp_rules = cf_block(ws, "K2")
+        assert [r.formula for r in cp_rules] == [
             ["AND(ISNUMBER(K2),K2>=1.67)"],
             ["AND(ISNUMBER(K2),K2>=1.33)"],
             ["AND(ISNUMBER(K2),K2>=1)"],
             ["AND(ISNUMBER(K2),K2<1)"],
+        ]
+        cpk_rules = cf_block(ws, "L2")
+        assert [r.formula for r in cpk_rules] == [
+            ["AND(ISNUMBER(L2),L2>=1.67)"],
+            ["AND(ISNUMBER(L2),L2>=1.33)"],
+            ["AND(ISNUMBER(L2),L2>=1)"],
+            ["AND(ISNUMBER(L2),L2<1)"],
         ]
 
     def test_loop_count_still_one_tick_per_row(self, generated):
@@ -1124,12 +1206,12 @@ class TestStatisticsSheet:
         assert gen.loopCount == gen.totalLoopCnt == 3
 
     def test_value_columns_pinned_width(self, generated):
-        # sixth wave: value columns G..P get the compact fixed width 8
-        # (after the autofit, which keeps sizing A:F — the test-name column
-        # benefits)
+        # sixth wave, ninth-wave extent: value columns G..Q get the compact
+        # fixed width 8 (after the autofit, which keeps sizing A:F — the
+        # test-name column benefits; the Cp insert moved Max to Q)
         _, wb, _, _, _ = generated
         ws = wb["Test Statistics"]
-        for letter in "GHIJKLMNOP":
+        for letter in "GHIJKLMNOPQ":
             assert ws.column_dimensions[letter].width == 8, letter
         # autofit stays for A:F (E is the test-name column; longest cell is
         # the 9-char header / "VCCC_ASIC" data)
@@ -1162,7 +1244,8 @@ class TestStatOnlyFtrFallback:
     def test_fail_num_cpk_cf_shifted_letters(self, generated_stat_ftr):
         _, wb, _, _, _ = generated_stat_ftr
         ws = wb["Test Statistics"]
-        # Pattern Name shifts Fail Num -> K and Cpk -> L; data rows only
+        # Pattern Name keeps Fail Num at K (left of the Cp insert); Cp takes
+        # L (the old Cpk slot) and Cpk shifts to M; data rows only
         fail_rules = cf_block(ws, "K2:K3")
         assert [r.formula for r in fail_rules] == [
             ["AND(ISNUMBER(K2),K2>0)"],
@@ -1170,28 +1253,40 @@ class TestStatOnlyFtrFallback:
         ]
         fills = [r.dxf.fill.fgColor.rgb for r in fail_rules]
         assert fills == ["FFFFCCCC", "FFCCFFCC"]
-        cpk_rules = cf_block(ws, "L2:L3")
-        assert [r.formula for r in cpk_rules] == [
+        cp_rules = cf_block(ws, "L2:L3")
+        assert [r.formula for r in cp_rules] == [
             ["AND(ISNUMBER(L2),L2>=1.67)"],
             ["AND(ISNUMBER(L2),L2>=1.33)"],
             ["AND(ISNUMBER(L2),L2>=1)"],
             ["AND(ISNUMBER(L2),L2<1)"],
+        ]
+        cpk_rules = cf_block(ws, "M2:M3")
+        assert [r.formula for r in cpk_rules] == [
+            ["AND(ISNUMBER(M2),M2>=1.67)"],
+            ["AND(ISNUMBER(M2),M2>=1.33)"],
+            ["AND(ISNUMBER(M2),M2>=1)"],
+            ["AND(ISNUMBER(M2),M2<1)"],
         ]
 
     def test_infinity_cpk_cell_replaced_by_formula(self, generated_stat_ftr):
         _, wb, _, _, _ = generated_stat_ftr
         ws = wb["Test Statistics"]
         # fifth wave: the "∞" sentinel is gone — the Cpk cell holds the live
-        # formula (letters shifted by the Pattern Name column: SpecMin I,
-        # SpecMax J, Average M, St. Dev. O). σ=0 on the FTR row, so Excel
-        # evaluates IFERROR to "" — the display change is documented in the
-        # design addendum §16; the ISNUMBER guard keeps the cell unstyled
-        # either way (openpyxl only persists the rule formulas)
-        assert ws["L3"].value == ('=IFERROR(MIN((J3-M3)/(3*O3),(M3-I3)/(3*O3)),"")')
-        assert ws["L2"].value == ('=IFERROR(MIN((J2-M2)/(3*O2),(M2-I2)/(3*O2)),"")')
-        for rule in cf_block(ws, "L2:L3"):
-            for formula in rule.formula:
-                assert formula.startswith("AND(ISNUMBER(")
+        # formula (letters with the Pattern Name column AND the ninth-wave
+        # Cp insert: SpecMin I, SpecMax J, Average N, St. Dev. P). σ=0 on
+        # the FTR row, so Excel evaluates IFERROR to "" — the display
+        # change is documented in the design addendum §16/§21; the ISNUMBER
+        # guard keeps the cell unstyled either way (openpyxl only persists
+        # the rule formulas). Ninth wave: the Cp cell (L) likewise holds
+        # (USL-LSL)/(6σ) from the same columns.
+        assert ws["M3"].value == ('=IFERROR(MIN((J3-N3)/(3*P3),(N3-I3)/(3*P3)),"")')
+        assert ws["M2"].value == ('=IFERROR(MIN((J2-N2)/(3*P2),(N2-I2)/(3*P2)),"")')
+        assert ws["L3"].value == ('=IFERROR((J3-I3)/(6*P3),"")')
+        assert ws["L2"].value == ('=IFERROR((J2-I2)/(6*P2),"")')
+        for ref in ("L2:L3", "M2:M3"):
+            for rule in cf_block(ws, ref):
+                for formula in rule.formula:
+                    assert formula.startswith("AND(ISNUMBER(")
 
     def test_close_signal_no_error(self, generated_stat_ftr):
         _, _, _, closed, errors = generated_stat_ftr
