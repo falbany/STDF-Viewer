@@ -776,6 +776,19 @@ class TestStatisticsSheet:
         # cadence: the transforms do not alter progress semantics)
         assert gen.loopCount == gen.totalLoopCnt == 3
 
+    def test_value_columns_pinned_width(self, generated):
+        # sixth wave: value columns G..P get the compact fixed width 8
+        # (after the autofit, which keeps sizing A:F — the test-name column
+        # benefits)
+        _, wb, _, _, _ = generated
+        ws = wb["Test Statistics"]
+        for letter in "GHIJKLMNOP":
+            assert ws.column_dimensions[letter].width == 8, letter
+        # autofit stays for A:F (E is the test-name column; longest cell is
+        # the 9-char header / "VCCC_ASIC" data)
+        assert ws.column_dimensions["E"].width == pytest.approx(
+            len("Test Name") * 1.1)
+
 
 class TestStatOnlyFtrFallback:
     """Stat-only run (no DUT sheet): empty FTR cache, Pattern-Name fallback

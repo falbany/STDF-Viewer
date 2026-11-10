@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from openpyxl import load_workbook
-from openpyxl.chart import PieChart
+from openpyxl.chart import DoughnutChart
 from PIL import Image as PILImage
 from PyQt5 import QtCore
 
@@ -313,13 +313,13 @@ class TestChartSheets:
         gen, _, _, _, _ = generated
         assert len(gen._wb["Bin Chart"]._images) == 0
 
-    def test_bin_native_pie_charts(self, generated):
-        # fifth wave: two native pies per head/site block (hardware + software
-        # bins) — charts survive the save/reload round-trip
+    def test_bin_native_donut_charts(self, generated):
+        # sixth wave: the fifth-wave pies become doughnuts — charts survive
+        # the save/reload round-trip (holeSize / legend position included)
         _, wb, _, _, _ = generated
         charts = wb["Bin Chart"]._charts
         assert len(charts) == 2
-        assert all(isinstance(c, PieChart) for c in charts)
+        assert all(isinstance(c, DoughnutChart) for c in charts)
         titles = [chart_title_text(c) for c in charts]
         assert titles == ["Hardware Bin — Head1 / All Sites",
                           "Software Bin — Head1 / All Sites"]
@@ -329,6 +329,10 @@ class TestChartSheets:
         # hidden helper columns must still be plotted (survives the
         # round-trip: plotVisOnly val="0")
         assert all(c.visible_cells_only is False for c in charts)
+        # mockup: donut hole in the 50-60 band, right-hand legend
+        assert all(c.holeSize == 55 for c in charts)
+        assert all(c.legend is not None and c.legend.position == "r"
+                   for c in charts)
 
     def test_bin_chart_construction_in_memory(self, generated):
         # in-memory-only attributes (style / size are defaults after a
@@ -373,23 +377,72 @@ class TestChartSheets:
         for letter in ("BJ", "BK"):
             assert ws.column_dimensions[letter].hidden is True
 
-    def test_bin_stat_rows_written(self, generated):
-        # the themed HB/SB text tables survive below the pies (first block:
-        # charts consume 15 rows = ceil(7cm/0.21in) + 1 gap, tables at 15+)
+    def test_bin_structured_tables_written(self, generated):
+        # sixth wave: structured HB/SB tables replace the classic text rows
+        # (first block: charts consume 15 rows = ceil(7cm/0.21in) + 1 gap;
+        # HB section rows 15-19, one-row gap, SB section rows 21-25)
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        assert ws["A15"].value == "Hardware Bin / Head1 / All Sites"
-        assert ws["A16"].value == "Software Bin / Head1 / All Sites"
-        assert ws["B15"].value == "Yield: 90.00%"
-        assert ws["C15"].value == "Total: 10"
+        # HB section: title, blue header, two data rows, bold Total
+        assert ws["A15"].value == "Hardware Bins — Head1 / All Sites"
+        assert [ws.cell(row=16, column=c).value for c in range(1, 5)] == [
+            "Bin", "Value", "Count", "Distribution"]
+        assert [ws[cell].value for cell in ("A17", "B17", "C17")] == [
+            "PASS_BIN", 1, 9]
+        assert ws["D17"].value == pytest.approx(0.9)
+        assert ws["D17"].number_format == "0.00%"
+        assert ws["D18"].value == pytest.approx(0.1)
+        assert ws["A19"].value == "Total"
+        assert ws["C19"].value == 10
+        assert isinstance(ws["C19"].value, int)
+        assert ws["D19"].value == 1.0
+        assert ws["D19"].number_format == "0.00%"
+        # the classic raw upstream rows are gone (old B15 "Yield: 90.00%")
+        assert ws["B15"].value is None
+        # SB section: title at 21 (19 total + 1-row gap -> title 21)
+        assert ws["A21"].value == "Software Bins — Head1 / All Sites"
+        assert [ws.cell(row=22, column=c).value for c in range(1, 5)] == [
+            "Bin", "Value", "Count", "Distribution"]
+        assert ws["A25"].value == "Total"
+        assert ws["C25"].value == 10
 
-    def test_bin_sheet_gridlines_off_and_autofit_kept(self, generated):
+    def test_bin_tables_autofilter_on_both(self, generated):
+        # ruled: filter arrows on BOTH tables (mockup shows the SB arrows;
+        # one worksheet-level auto_filter cannot cover two ranges, so each
+        # table is a minimal Excel Table whose column names equal the header
+        # cells verbatim — the wave-2 F5 repair hazard avoided)
+        _, wb, _, _, _ = generated
+        ws = wb["Bin Chart"]
+        assert sorted(ws.tables) == ["HB_Head1_AllSites", "SB_Head1_AllSites"]
+        # header..last-data rows; Total rows (19 / 25) outside the ranges
+        assert ws.tables["HB_Head1_AllSites"].ref == "A16:D18"
+        assert ws.tables["SB_Head1_AllSites"].ref == "A22:D24"
+        for name in ("HB_Head1_AllSites", "SB_Head1_AllSites"):
+            table = ws.tables[name]
+            assert table.autoFilter is not None
+            assert table.autoFilter.ref == table.ref
+            assert [c.name for c in table.tableColumns] == [
+                "Bin", "Value", "Count", "Distribution"]
+
+    def test_bin_tables_data_bars(self, generated):
+        # one DataBarRule per table over the Distribution DATA rows only
+        _, wb, _, _, _ = generated
+        ws = wb["Bin Chart"]
+        for data_range in ("D17:D18", "D23:D24"):
+            (rule,) = [r for cf in ws.conditional_formatting
+                       for r in cf.rules if str(cf.sqref) == data_range]
+            assert rule.type == "dataBar"
+            assert rule.dataBar.showValue is True
+            assert rule.dataBar.color.rgb.endswith("5B9BD5")
+            assert [(f.type, f.val) for f in rule.dataBar.cfvo] == [
+                ("num", 0), ("num", 1)]
+
+    def test_bin_sheet_gridlines_off(self, generated):
         # the brief lists gridlines-off as existing Bin-sheet behavior; the
         # chart sheets bypass render_plain_table (where plain sheets get
-        # it), so writeBinChart now pins it explicitly — autofit unchanged
+        # it), so writeBinChart pins it explicitly
         _, wb, _, _, _ = generated
-        ws = wb["Bin Chart"]
-        assert ws.sheet_view.showGridLines is False
+        assert wb["Bin Chart"].sheet_view.showGridLines is False
 
     def test_wafer_and_trend_stat_rows_written(self, generated):
         _, wb, _, _, _ = generated
@@ -400,12 +453,15 @@ class TestChartSheets:
         assert "WAFER-W01-ROW" in wafer
         assert "TREND-ROW" in trend
 
-    def test_chart_columns_autofit(self, generated):
+    def test_bin_table_column_widths(self, generated):
+        # sixth wave: the four table columns get fixed widths (pinned AFTER
+        # the autofit, which keeps sizing the hidden helper columns)
         _, wb, _, _, _ = generated
         dims = wb["Bin Chart"].column_dimensions
-        # longest column-A cell: the two 32-char VHeaders
-        assert dims["A"].width == pytest.approx(
-            len("Software Bin / Head1 / All Sites") * 1.1)
+        assert dims["A"].width == 24
+        assert dims["B"].width == 8
+        assert dims["C"].width == 8
+        assert dims["D"].width == 14
 
 
 # --------------------------------------------------------------------------

@@ -49,7 +49,7 @@ from math import ceil
 import re
 
 from openpyxl import Workbook
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import column_index_from_string, get_column_letter
 from PyQt5 import QtCore
 
 from deps.SharedSrc import REC, getSetting, tab
@@ -61,9 +61,11 @@ from deps.uic_stdExporter import (
 )
 from deps.modernExporter.charts import (
     BIN_CHART_HEIGHT_CM,
+    BIN_TABLE_COLUMN_WIDTHS,
     aggregate_bin_counts,
     bin_label,
-    build_bin_pie,
+    build_bin_donut,
+    write_bin_table,
 )
 from deps.modernExporter.helpers import apply_cpk_formula, split_test_name
 from deps.modernExporter.matrix import (
@@ -131,6 +133,12 @@ STAT_SPEC_FILL_HEX = "FFF3CD"
 # Live Cpk display format (fifth wave 2026-11-10, controller ruling): the
 # formula results render with 2 decimals like the DUT Summary's Cpk column.
 STAT_CPK_FORMAT = "0.00"
+
+# Fixed width for the Test Statistics value columns G..P (sixth wave
+# 2026-11-10): applied AFTER the sheet-wide autofit, which keeps sizing
+# A:F (the test-name column benefits).
+STAT_VALUE_WIDTH_RANGE = ("G", "P")
+STAT_VALUE_COLUMN_WIDTH = 8
 
 # Bin Chart pie helper blocks live in this fixed far column (labels) and
 # the next one (counts); both are hidden by the chart factory. A fixed far
@@ -568,6 +576,13 @@ class ModernReportGenerator(reportGenerator):
         StatSheet.auto_filter.ref = (
             f"A1:{get_column_letter(width)}{1 + len(written_rows)}")
         self._autofit_columns(StatSheet)
+        # sixth wave: value columns G..P get a compact fixed width (autofit
+        # stays for A:F — the test-name column benefits)
+        for index in range(column_index_from_string(STAT_VALUE_WIDTH_RANGE[0]),
+                           column_index_from_string(STAT_VALUE_WIDTH_RANGE[1])
+                           + 1):
+            StatSheet.column_dimensions[get_column_letter(index)].width = (
+                STAT_VALUE_COLUMN_WIDTH)
 
     # ----------------------------------------------------------------------
     # DUT Summary matrix + chart sheets (Task 8)
@@ -656,33 +671,41 @@ class ModernReportGenerator(reportGenerator):
                 return
             # get hard bin list, then soft bin list — the same
             # waitForDataList calls as before; each table feeds BOTH the
-            # pie chart and the themed text rows below it
+            # donut chart and the structured table below it
             tables = [self.waitForDataList([head], [site],
                                            self.selectedFiles, tab.Bin,
                                            {"isHBIN": isHBIN})
                       for isHBIN in (True, False)]
-            # native pies replace the embedded PNG (fifth wave): HB anchored
+            aggregated = [aggregate_bin_counts(dataTable)
+                          for dataTable in tables]
+            site_label = "All Sites" if site == -1 else f"Site{site}"
+            site_tag = "AllSites" if site == -1 else f"Site{site}"
+            # native donuts (sixth wave; pies in the fifth): HB anchored
             # at column A, SB at H; rows consumed mirror
             # insert_report_image's spacing math (chart height + 1 gap)
-            site_label = "All Sites" if site == -1 else f"Site{site}"
-            for isHBIN, dataTable in zip((True, False), tables):
+            for isHBIN, bins in zip((True, False), aggregated):
                 title = ("Hardware Bin" if isHBIN else "Software Bin")
                 colors = (settings.color.hbin_colors if isHBIN
                           else settings.color.sbin_colors)
-                bins = [(bin_num, bin_label(bin_num, name), count)
-                        for bin_num, name, count
-                        in aggregate_bin_counts(dataTable)]
+                chart_bins = [(bin_num, bin_label(bin_num, name), count)
+                              for bin_num, name, count in bins]
                 anchor = f"{'A' if isHBIN else 'H'}{row + 1}"
-                build_bin_pie(BinSheet, f"{title} — Head{head} / {site_label}",
-                              bins, colors, anchor, BIN_HELPER_COL,
-                              helper_row=helper_row)
-                helper_row += 2 + len(bins)   # header + data rows + gap
+                build_bin_donut(BinSheet,
+                                f"{title} — Head{head} / {site_label}",
+                                chart_bins, colors, anchor, BIN_HELPER_COL,
+                                helper_row=helper_row)
+                helper_row += 2 + len(chart_bins)  # header + data rows + gap
             row += ceil((BIN_CHART_HEIGHT_CM / 2.54) / ROW_HEIGHT_IN) + 1
-            # themed bin tables under the charts (unchanged)
-            for dataTable in tables:
-                for dataList in dataTable:
-                    self._write_body_row(BinSheet, row, dataList)
-                    row += 1
+            # structured bin tables (sixth wave) replace the classic raw
+            # text rows: HB section, small gap, SB section
+            hb_bins, sb_bins = aggregated
+            row = write_bin_table(BinSheet, row, hb_bins, self._theme,
+                                  f"Hardware Bins — Head{head} / {site_label}",
+                                  f"HB_Head{head}_{site_tag}")
+            row += 1   # small gap between the two sections
+            row = write_bin_table(BinSheet, row, sb_bins, self._theme,
+                                  f"Software Bins — Head{head} / {site_label}",
+                                  f"SB_Head{head}_{site_tag}")
             # gap between head/site blocks
             row += 3
         self._row[key] = row
@@ -693,6 +716,10 @@ class ModernReportGenerator(reportGenerator):
         # render_plain_table, which is where the plain sheets get it)
         BinSheet.sheet_view.showGridLines = False
         self._autofit_columns(BinSheet)
+        # sixth wave: the four table columns get fixed widths (autofit
+        # keeps sizing the rest — the hidden helper columns stay untouched)
+        for letter, width in BIN_TABLE_COLUMN_WIDTHS:
+            BinSheet.column_dimensions[letter].width = width
 
     def writeWaferMap(self):
         WaferSheet = self.sheetDict.get(ReportSelection.Wafer, None)
