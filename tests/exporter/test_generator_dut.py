@@ -21,7 +21,7 @@ from PIL import Image as PILImage
 from PyQt5 import QtCore
 
 from deps.SharedSrc import REC, getSetting, tab
-from deps.exporter.generator import ModernReportGenerator
+from deps.exporter.generator import ModernReportGenerator, bin_banner_from_file_info
 from deps.exporter.theme import number_format_from_settings
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
 
@@ -175,10 +175,10 @@ def png_bytes(width=96, height=48):
 PNG_BYTES = png_bytes()
 
 
-def build_generated(tmp_path, qapp, with_stat=False):
+def build_generated(tmp_path, qapp, with_stat=False, with_file_info=False):
     """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus Stat when
-    `with_stat`) and return (generator, reloaded workbook, report path,
-    close/error capture)."""
+    `with_stat`, FileInfo when `with_file_info`) and return (generator,
+    reloaded workbook, report path, close/error capture)."""
     testTuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
     selectedFiles = [1]
     selectedHeads = [1]
@@ -198,6 +198,10 @@ def build_generated(tmp_path, qapp, with_stat=False):
         # classic sheet-creation order: DUT < Stat < Trend
         selection.insert(1, ReportSelection.Stat)
         totalLoopCnt += 2  # Stat: +1 per data row
+    if with_file_info:
+        # classic sheet-creation order: FileInfo first (+1 loop tick)
+        selection.insert(0, ReportSelection.FileInfo)
+        totalLoopCnt += 1
     reportInfo = (
         selection,
         testTuples,
@@ -286,6 +290,22 @@ def build_generated(tmp_path, qapp, with_stat=False):
 
     gen.waitForDataList = fake_wait_for_data_list
 
+    if with_file_info:
+        # File Info raw shape (buildFileMetaData): MIR description labels
+        # ("Product ID" / "Sublot ID" feed the Bin-sheet banner, ninth wave)
+        file_info_table = [
+            ["File Name", "demo.stdf"],
+            ["Product ID", "ASIC-X"],
+            ["Sublot ID", "LOT123"],
+            ["Yield: ", "98.50%"],
+            ["DUTs Tested: ", "10"],
+            ["DUTs Passed: ", "9"],
+            ["DUTs Failed: ", "1"],
+            ["DUTs Superseded: ", "0"],
+            ["DUTs Unknown: ", "0"],
+        ]
+        gen.waitForTableData = lambda isFileInfo: file_info_table
+
     closed, errors = [], []
     sig.closeSignal.connect(closed.append)
     sig.msgSignal.connect(errors.append)
@@ -300,6 +320,11 @@ def build_generated(tmp_path, qapp, with_stat=False):
 @pytest.fixture
 def generated(tmp_path, qapp):
     return build_generated(tmp_path, qapp)
+
+
+@pytest.fixture
+def generated_with_file_info(tmp_path, qapp):
+    return build_generated(tmp_path, qapp, with_file_info=True)
 
 
 # --------------------------------------------------------------------------
@@ -412,33 +437,40 @@ class TestChartSheets:
 
     # -- dashboard header (seventh wave) ------------------------------------
 
-    def test_bin_block_title_row_one(self, generated):
-        # R1: row 1 = "Bin Chart — Head{h} / {site}", 14pt bold theme-primary
+    def test_bin_banner_and_block_title(self, generated):
+        # ninth wave: row 1 = merged A:F "Title"-style banner (fallback
+        # "Bin Chart" — this fixture selects no File Info), row 3 = block
+        # title "Bin Chart — Head{h} / {site}", 14pt bold theme-primary
         _, wb, _, _, _ = generated
-        cell = wb["Bin Chart"]["A1"]
+        ws = wb["Bin Chart"]
+        assert ws["A1"].value == "Bin Chart"
+        assert ws["A1"].style == "Title"
+        assert "A1:F1" in {str(r) for r in ws.merged_cells.ranges}
+        assert ws["A2"].value is None  # row 2 blank
+        cell = ws["A3"]
         assert cell.value == "Bin Chart — Head1 / All Sites"
         assert cell.font.size == 14
         assert cell.font.bold is True
         assert cell.font.color.rgb.endswith("1E40AF")
-        assert wb["Bin Chart"]["A2"].value is None  # row 2 blank
+        assert ws["A4"].value is None  # row 4 blank
 
     def test_bin_kpi_cards_written(self, generated):
-        # R2: three cards on rows 3-5 (label/value/subtitle in A, C, E),
+        # R2: three cards on rows 5-7 (label/value/subtitle in A, C, E),
         # aggregated from the one-file HB row list
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        assert ws["A3"].value == "Yield"
-        assert ws["A4"].value == pytest.approx(0.9)  # float, wave-3
-        assert isinstance(ws["A4"].value, float)
-        assert ws["A4"].number_format == "0.00%"
-        assert ws["A5"].value == "9 pass / 10 total parts"
-        assert ws["C3"].value == "Fails"
-        assert ws["C4"].value == 1
-        assert ws["C5"].value == "0 unknown · 0 superseded"
-        assert ws["E3"].value == "Total Parts"
-        assert ws["E4"].value == 10
-        assert ws["E5"].value == "across 1 file(s)"
-        assert ws["B6"].value is None  # row 6 blank
+        assert ws["A5"].value == "Yield"
+        assert ws["A6"].value == pytest.approx(0.9)  # float, wave-3
+        assert isinstance(ws["A6"].value, float)
+        assert ws["A6"].number_format == "0.00%"
+        assert ws["A7"].value == "9 pass / 10 total parts"
+        assert ws["C5"].value == "Fails"
+        assert ws["C6"].value == 1
+        assert ws["C7"].value == "0 unknown · 0 superseded"
+        assert ws["E5"].value == "Total Parts"
+        assert ws["E6"].value == 10
+        assert ws["E7"].value == "across 1 file(s)"
+        assert ws["B8"].value is None  # row 8 blank
 
     def test_bin_kpi_card_fills_and_merges(self, generated):
         # card fills on the anchor cells (openpyxl's READER recreates
@@ -446,36 +478,37 @@ class TestChartSheets:
         # the saved XML); every card row merged across its 2 columns
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        for anchor, hex6 in (("A3", "FFF3CD"), ("C3", "FFCCCC"), ("E3", "E9EEF6")):
+        for anchor, hex6 in (("A5", "FFF3CD"), ("C5", "FFCCCC"), ("E5", "E9EEF6")):
             assert ws[anchor].fill.fgColor.rgb.endswith(hex6), anchor
         ranges = {str(r) for r in ws.merged_cells.ranges}
         for span in (
-            "A3:B3",
-            "A4:B4",
             "A5:B5",
-            "C3:D3",
-            "C4:D4",
+            "A6:B6",
+            "A7:B7",
             "C5:D5",
-            "E3:F3",
-            "E4:F4",
+            "C6:D6",
+            "C7:D7",
             "E5:F5",
+            "E6:F6",
+            "E7:F7",
         ):
             assert span in ranges, span
         # eighth wave (R4) borders on the ninth-wave dark accents: each
         # card carries a medium outline in its own dark accent — post-merge
         # styles survive the save/reload on the anchors
-        assert ws["A3"].border.top.style == "medium"
-        assert ws["A3"].border.left.color.rgb == "FF9C6500"
-        assert ws["C3"].border.top.color.rgb == "FF9C0006"
-        assert ws["E3"].border.left.color.rgb == "FF1E40AF"
-        assert ws["A5"].border.bottom.style == "medium"
+        assert ws["A5"].border.top.style == "medium"
+        assert ws["A5"].border.left.color.rgb == "FF9C6500"
+        assert ws["C5"].border.top.color.rgb == "FF9C0006"
+        assert ws["E5"].border.left.color.rgb == "FF1E40AF"
+        assert ws["A7"].border.bottom.style == "medium"
 
     # -- donuts tiled in their own band (eighth wave) -------------------------
 
     def test_bin_native_donut_charts(self, generated):
         # charts survive the save/reload round-trip (holeSize / legend
-        # position included); anchors: HB donut at A7, SB donut at D7 — the
-        # two 7 cm donuts tile the A:F page (0-based row 6, cols 0 / 3)
+        # position included); anchors: HB donut at A10, SB donut at D10 —
+        # below the merged "Charts" headline (row 9); the two 8.5 cm
+        # donuts tile the A:F page (0-based row 9, cols 0 / 3)
         _, wb, _, _, _ = generated
         charts = wb["Bin Chart"]._charts
         assert len(charts) == 2
@@ -486,8 +519,8 @@ class TestChartSheets:
             "Software Bin — Head1 / All Sites",
         ]
         assert [(c.anchor._from.row, c.anchor._from.col) for c in charts] == [
-            (6, 0),
-            (6, 3),
+            (9, 0),
+            (9, 3),
         ]
         # hidden helper columns must still be plotted (survives the
         # round-trip: plotVisOnly val="0")
@@ -537,77 +570,93 @@ class TestChartSheets:
     # -- structured tables after the fixed charts band (eighth wave) ---------
 
     def test_bin_structured_tables_written(self, generated):
-        # ninth-wave geometry per block (no headlines yet — Task 6 adds
-        # them): title 1, blank 2, KPIs 3-5, blank 6, charts band 7-20
-        # (14 rows = BIN_CHART_ROW_SPAN at 7 cm), blank 21, HB title 22 +
-        # header 23 + 2 data rows 24-25 + Total 26, blank 27, SB title 28
-        # + header 29 + data 30-31 + Total 32; tables sit in columns B:E
-        # (column A belongs to the page grid)
+        # ninth-wave layout per block: banner 1, blank 2, title 3, blank 4,
+        # KPIs 5-7, blank 8, "Charts" headline 9, charts band 10-23 (14
+        # rows = BIN_CHART_ROW_SPAN at 7 cm), blank 24, "Detailed Bin
+        # Contribution" headline 25, HB title 26 + header 27 + 2 data rows
+        # 28-29 + Total 30, blank 31, SB title 32 + header 33 + data 34-35
+        # + Total 36; tables sit in columns B:E (column A belongs to the
+        # page grid)
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        # HB section: Output-styled title band, blue header, two data rows,
-        # bold Total
-        assert ws["B22"].value == "Hardware Bins — Head1 / All Sites"
-        assert ws["B22"].style == "Headline 2"
-        assert [ws.cell(row=23, column=c).value for c in range(2, 6)] == [
+        # HB section: Headline-2-styled title band, blue header, two data
+        # rows, bold Total
+        assert ws["B26"].value == "Hardware Bins — Head1 / All Sites"
+        assert ws["B26"].style == "Headline 2"
+        assert [ws.cell(row=27, column=c).value for c in range(2, 6)] == [
             "Bin",
             "Value",
             "Count",
             "Distribution",
         ]
-        assert [ws[cell].value for cell in ("B24", "C24", "D24")] == [
+        assert [ws[cell].value for cell in ("B28", "C28", "D28")] == [
             "PASS_BIN",
             1,
             9,
         ]
-        assert ws["E24"].value == pytest.approx(0.9)
-        assert ws["E24"].number_format == "0.00%"
-        assert ws["E25"].value == pytest.approx(0.1)
-        assert ws["B26"].value == "Total"
-        assert ws["D26"].value == 10
-        assert isinstance(ws["D26"].value, int)
-        assert ws["E26"].value == 1.0
-        assert ws["E26"].number_format == "0.00%"
-        # SB section after ONE blank row (27): title 28, header 29,
-        # data 30-31, Total 32
-        assert ws["B28"].value == "Software Bins — Head1 / All Sites"
-        assert ws["B28"].style == "Headline 2"
-        assert [ws.cell(row=29, column=c).value for c in range(2, 6)] == [
+        assert ws["E28"].value == pytest.approx(0.9)
+        assert ws["E28"].number_format == "0.00%"
+        assert ws["E29"].value == pytest.approx(0.1)
+        assert ws["B30"].value == "Total"
+        assert ws["D30"].value == 10
+        assert isinstance(ws["D30"].value, int)
+        assert ws["E30"].value == 1.0
+        assert ws["E30"].number_format == "0.00%"
+        # SB section after ONE blank row (31): title 32, header 33,
+        # data 34-35, Total 36
+        assert ws["B32"].value == "Software Bins — Head1 / All Sites"
+        assert ws["B32"].style == "Headline 2"
+        assert [ws.cell(row=33, column=c).value for c in range(2, 6)] == [
             "Bin",
             "Value",
             "Count",
             "Distribution",
         ]
-        assert ws["B32"].value == "Total"
-        assert ws["D32"].value == 10
+        assert ws["B36"].value == "Total"
+        assert ws["D36"].value == 10
 
-    def test_bin_charts_band_geometry_single_blank_separators(self, generated):
-        # the fixed band rows 7..20 hold ONLY the two donuts (no cell values
-        # in A:F — helper data lives in BJ/BK); the single blank rows 2, 6,
-        # 21, 27 are the ONLY separators between the bands
+    def test_bin_headlines_charts_and_contribution(self, generated):
+        # ninth wave: merged A:F "Headline 1" bands — "Charts" above the
+        # donuts (row 9), "Detailed Bin Contribution - HW Bin / SW Bin"
+        # above BOTH tables (row 25, NOT replacing the per-table bands)
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        for row in (2, 6, 21, 27):
+        assert ws["A9"].value == "Charts"
+        assert ws["A9"].style == "Headline 1"
+        assert ws["A25"].value == "Detailed Bin Contribution - HW Bin / SW Bin"
+        assert ws["A25"].style == "Headline 1"
+        assert "A9:F9" in {str(r) for r in ws.merged_cells.ranges}
+        assert "A25:F25" in {str(r) for r in ws.merged_cells.ranges}
+
+    def test_bin_charts_band_geometry_single_blank_separators(self, generated):
+        # the fixed band rows 10..23 hold ONLY the two donuts (no cell
+        # values in A:F — helper data lives in BJ/BK); the single blank
+        # rows 2, 4, 8, 24, 31 are the ONLY separators between the bands
+        _, wb, _, _, _ = generated
+        ws = wb["Bin Chart"]
+        for row in (2, 4, 8, 24, 31):
             assert all(ws.cell(row=row, column=c).value is None for c in range(1, 7)), (
                 row
             )
-        for row in range(7, 21):
+        for row in range(10, 24):
             assert all(ws.cell(row=row, column=c).value is None for c in range(1, 7)), (
                 row
             )
         # content rows sandwich the separators
-        for row in (1, 3, 4, 5, 22, 23, 24, 25, 26, 28, 29, 30, 31, 32):
+        for row in (
+            1, 3, 5, 6, 7, 9, 25, 26, 27, 28, 29, 30, 32, 33, 34, 35, 36,
+        ):
             assert any(
                 ws.cell(row=row, column=c).value is not None for c in range(1, 7)
             ), row
 
     def test_bin_section_title_band_spans_table(self, generated):
-        # the Output band is merged across the table width B:E (eighth wave)
+        # the Headline-2 band is merged across the table width B:E (eighth wave)
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
         ranges = {str(r) for r in ws.merged_cells.ranges}
-        assert "B22:E22" in ranges
-        assert "B28:E28" in ranges
+        assert "B26:E26" in ranges
+        assert "B32:E32" in ranges
 
     def test_bin_tables_autofilter_on_both(self, generated):
         # ruled: filter arrows on BOTH tables (mockup shows the SB arrows;
@@ -617,9 +666,9 @@ class TestChartSheets:
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
         assert sorted(ws.tables) == ["HB_Head1_AllSites", "SB_Head1_AllSites"]
-        # header..last-data rows at B:E; Total rows (26 / 32) outside
-        assert ws.tables["HB_Head1_AllSites"].ref == "B23:E25"
-        assert ws.tables["SB_Head1_AllSites"].ref == "B29:E31"
+        # header..last-data rows at B:E; Total rows (30 / 36) outside
+        assert ws.tables["HB_Head1_AllSites"].ref == "B27:E29"
+        assert ws.tables["SB_Head1_AllSites"].ref == "B33:E35"
         for name in ("HB_Head1_AllSites", "SB_Head1_AllSites"):
             table = ws.tables[name]
             assert table.autoFilter is not None
@@ -636,7 +685,7 @@ class TestChartSheets:
         # rows only
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        for data_range in ("E24:E25", "E30:E31"):
+        for data_range in ("E28:E29", "E34:E35"):
             (rule,) = [
                 r
                 for cf in ws.conditional_formatting
@@ -837,3 +886,52 @@ class TestStatFtrCacheDetection:
         _, _, _, closed, errors = generated
         assert closed == [True]
         assert errors == []
+
+
+# --------------------------------------------------------------------------
+# Bin-sheet banner (ninth wave: Product ID / Sublot ID from File Info)
+# --------------------------------------------------------------------------
+
+
+class TestBinBanner:
+    def test_banner_from_file_info(self, generated_with_file_info):
+        _, wb, _, _, _ = generated_with_file_info
+        ws = wb["Bin Chart"]
+        assert ws["A1"].value == "ASIC-X / LOT123"
+        assert ws["A1"].style == "Title"
+        assert "A1:F1" in {str(r) for r in ws.merged_cells.ranges}
+
+    def test_bin_banner_fallback_without_file_info(self, generated):
+        # Bin selected WITHOUT File Info -> the report_core default
+        # (Review Focus 5: no AttributeError, sheet-name fallback)
+        _, wb, _, _, _ = generated
+        assert wb["Bin Chart"]["A1"].value == "Bin Chart"
+        assert wb["Bin Chart"]["A1"].style == "Title"
+
+
+class TestBinBannerFromFileInfo:
+    def test_single_file(self):
+        rows = [["Product ID", "ASIC-X"], ["Sublot ID", "LOT123"]]
+        assert bin_banner_from_file_info(rows) == "ASIC-X / LOT123"
+
+    def test_multi_file_joined_in_column_order(self):
+        # Review Focus 4: one "product / sublot" pair per file column,
+        # files joined " | " in column order
+        rows = [["Product ID", "P1", "P2"], ["Sublot ID", "S1", "S2"]]
+        assert bin_banner_from_file_info(rows) == "P1 / S1 | P2 / S2"
+
+    def test_banner_missing_anchors_returns_none(self):
+        # translated UI: no English labels -> None -> caller falls back
+        # to the sheet name (Review Focus 1)
+        assert bin_banner_from_file_info([["Produit", "X"], ["Lot", "Y"]]) is None
+
+    def test_banner_partial_values(self):
+        # Review Focus 2: a file column missing one field is dropped;
+        # all pairs dropped -> None
+        rows = [["Product ID", "P1", "P2"], ["Sublot ID", "S1", ""]]
+        assert bin_banner_from_file_info(rows) == "P1 / S1"
+        assert bin_banner_from_file_info([["Product ID", "P1"]]) is None
+
+    def test_label_matching_normalizes_and_strips_colon(self):
+        rows = [["Product ID: ", "P"], ["Sublot ID:", "S"]]
+        assert bin_banner_from_file_info(rows) == "P / S"

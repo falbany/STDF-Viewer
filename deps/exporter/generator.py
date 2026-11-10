@@ -34,6 +34,14 @@ inherited ``generate_report`` slot, the ``waitFor*`` data handshake, the
 while writing the workbook with openpyxl through the exporter theme and
 renderers instead of xlsxwriter.
 
+Ninth wave (2026-11-10, A4 print design): the Bin Chart sheet gains a
+merged A:F "Title" banner (``_bin_banner`` — "{Product ID} / {Sublot ID}"
+extracted from the File Info table by ``bin_banner_from_file_info``, or
+the sheet-name fallback), a "Headline 1" "Charts" band above the donuts
+and a "Detailed Bin Contribution - HW Bin / SW Bin" band above the two
+tables. ``report_core`` also pins the workbook default (Normal) font to
+the theme's Times New Roman 8 via ``set_workbook_default_font``.
+
 Instance state (``self._wb``, ``self._theme``, ``self._row``) replaces the
 classic module-level ``sv`` statics, so several generators can coexist.
 The DUT Summary matrix is rendered through the Task 4/5 spec builder and
@@ -60,6 +68,8 @@ from deps.uic_stdExporter import (
 )
 from deps.exporter.charts import (
     BIN_CHART_ROW_SPAN,
+    BIN_CHARTS_HEADLINE,
+    BIN_CONTRIBUTION_HEADLINE,
     BIN_PAGE_COLUMN_WIDTH,
     BIN_PAGE_WIDTH_RANGE,
     aggregate_bin_counts,
@@ -68,6 +78,7 @@ from deps.exporter.charts import (
     build_bin_donut,
     write_bin_table,
     write_kpi_cards,
+    write_merged_headline,
 )
 from deps.exporter.helpers import apply_cpk_formula, split_test_name
 from deps.exporter.matrix import (
@@ -109,6 +120,42 @@ FILE_INFO_NUMERIC_LABELS = frozenset(
     }
 )
 YIELD_FORMAT = "0.00%"
+
+
+# English-only File Info anchors feeding the Bin-sheet banner (ninth
+# wave): whitespace-normalized label, trailing ":" stripped.
+_BANNER_PRODUCT_LABEL = "Product ID"
+_BANNER_SUBLOT_LABEL = "Sublot ID"
+
+
+def bin_banner_from_file_info(rows: list) -> "str | None":
+    """"{Product ID} / {Sublot ID}" per file column, files joined " | "
+    (ninth wave banner text for the Bin sheet's Title row).
+
+    Labels match whitespace-normalized with a trailing ":" stripped,
+    English-only — ``None`` when either anchor is missing (translated
+    UIs) or no file column carries both values (blank fields), so the
+    caller falls back to the sheet name. Never raises.
+    """
+    products: list = []
+    sublots: list = []
+    for row in rows:
+        label = " ".join(str(row[0] if row else "").split())
+        if label.endswith(":"):
+            label = label[:-1]
+        if label == _BANNER_PRODUCT_LABEL:
+            products = list(row[1:])
+        elif label == _BANNER_SUBLOT_LABEL:
+            sublots = list(row[1:])
+    pairs = []
+    for index in range(max(len(products), len(sublots))):
+        product = products[index] if index < len(products) else ""
+        sublot = sublots[index] if index < len(sublots) else ""
+        product = product.strip() if isinstance(product, str) else ""
+        sublot = sublot.strip() if isinstance(sublot, str) else ""
+        if product and sublot:
+            pairs.append(f"{product} / {sublot}")
+    return " | ".join(pairs) if pairs else None
 
 
 # --------------------------------------------------------------------------
@@ -490,6 +537,13 @@ class ModernReportGenerator(reportGenerator):
         render_plain_table(InfoSheet, spec, self._theme)
         self._autofit_columns(InfoSheet)
 
+        # ninth wave: stash the Bin-sheet banner text when the English
+        # Product ID / Sublot ID anchors resolve (missing labels keep the
+        # report_core fallback — translated UIs degrade)
+        banner = bin_banner_from_file_info(dataTable)
+        if banner:
+            self._bin_banner = banner
+
         self.loopCount += 1
         self.sendProgress()
 
@@ -694,8 +748,12 @@ class ModernReportGenerator(reportGenerator):
         if BinSheet is None:
             return
 
+        # ninth wave: row 1 carries the merged A:F "Title"-style banner
+        # (Product ID / Sublot ID from File Info, or the sheet-name
+        # fallback); the blocks start below it
+        write_merged_headline(BinSheet, 1, self._bin_banner, "Title")
         key = ReportSelection.Bin
-        row = self._row.get(key, 0)
+        row = 2
         # hidden helper blocks (fixed far column) advance per chart so the
         # series references of earlier blocks stay intact
         helper_row = 1
@@ -719,9 +777,9 @@ class ModernReportGenerator(reportGenerator):
             site_label = "All Sites" if site == -1 else f"Site{site}"
             site_tag = "AllSites" if site == -1 else f"Site{site}"
 
-            # dashboard header (eighth wave, fixed band layout): block
-            # title row 1, blank row 2, KPI cards (label/value/subtitle,
-            # each with an accent outline) rows 3-5, blank row 6
+            # dashboard header (ninth wave layout): block title row (after
+            # one blank row), blank row, KPI cards (label/value/subtitle,
+            # each with a dark accent outline)
             row += 1
             title_cell = BinSheet.cell(
                 row=row, column=1, value=(f"Bin Chart — Head{head} / {site_label}")
@@ -729,12 +787,16 @@ class ModernReportGenerator(reportGenerator):
             title_cell.font = self._theme.block_title_font
             row = write_kpi_cards(BinSheet, row + 2, kpi, n_files, self._theme)
 
-            # charts band (eighth wave, R3): the two donuts TILE the A:F
-            # page — HB at A{chart_row}, SB at D{chart_row}, each 7 x 6 cm
-            # = 3 width-12 columns x BIN_CHART_ROW_SPAN rows; the band is
-            # a fixed region (empty bin lists leave it reserved, keeping
-            # the dashboard above intact)
-            chart_row = row + 1
+            # "Charts" headline (ninth wave): merged A:F "Headline 1" band
+            # above the fixed charts band; then the two donuts TILE the
+            # A:F page — HB at A{chart_row}, SB at D{chart_row}, each
+            # 8.5 x 7 cm = 3 width-20.4 columns x BIN_CHART_ROW_SPAN rows;
+            # the band is a fixed region (empty bin lists leave it
+            # reserved, keeping the dashboard above intact)
+            row = write_merged_headline(
+                BinSheet, row + 1, BIN_CHARTS_HEADLINE, "Headline 1"
+            )
+            chart_row = row
             for (kind, _prefix, anchor_letter), bins in zip(
                 (("Hardware", "HB", "A"), ("Software", "SB", "D")), aggregated
             ):
@@ -752,9 +814,13 @@ class ModernReportGenerator(reportGenerator):
                 )
                 helper_row += 2 + len(chart_bins)  # header + data rows + gap
 
-            # one blank separator after the band, then the HB section —
-            # the tables stack below with a single blank row between them
+            # one blank separator after the band, then the "Detailed Bin
+            # Contribution" headline (ninth wave) — the HB and SW tables
+            # stack below it with a single blank row between them
             row = chart_row + BIN_CHART_ROW_SPAN + 1
+            row = write_merged_headline(
+                BinSheet, row, BIN_CONTRIBUTION_HEADLINE, "Headline 1"
+            )
             for index, (isHBIN, bins) in enumerate(zip((True, False), aggregated)):
                 kind = "Hardware" if isHBIN else "Software"
                 prefix = "HB" if isHBIN else "SB"
@@ -890,6 +956,11 @@ class ModernReportGenerator(reportGenerator):
         self.sheetDict = {}
         self.loopCount = 0
         self._row = {}
+        # Bin-sheet banner (ninth wave): the report_core default is the
+        # sheet name; writeFileInfo overwrites it with
+        # "{Product ID} / {Sublot ID}" when the File Info sheet is
+        # selected and the English anchors resolve
+        self._bin_banner = self.tr("Bin Chart")
         # FTR cache (fourth wave) initialized BEFORE any writer runs:
         # writeDUT_Summary fills it when the DUT sheet is selected; a
         # Stat-only selection leaves it empty (the Pattern-Name fallback

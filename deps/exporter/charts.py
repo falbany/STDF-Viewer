@@ -184,6 +184,12 @@ BIN_TABLE_FIRST_COL = 2
 BIN_PAGE_WIDTH_RANGE = ("A", "F")
 BIN_PAGE_COLUMN_WIDTH = 20.4
 
+# Merged A:F "Headline 1" band texts on the Bin sheet (ninth wave): one
+# above the donuts, one above BOTH bin tables (it does NOT replace the
+# per-table "Hardware/Software Bins — …" Headline 2 bands).
+BIN_CHARTS_HEADLINE = "Charts"
+BIN_CONTRIBUTION_HEADLINE = "Detailed Bin Contribution - HW Bin / SW Bin"
+
 # Upstream "Total: N" cell (DataInterface.py:595) — the reconstruction
 # denominator; unparseable cells are skipped by the callers.
 BIN_ROW_TOTAL_RE = re.compile(r"^Total:\s*(\d+)$")
