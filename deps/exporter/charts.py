@@ -68,7 +68,7 @@ the KPI cards now restore EXACT total/pass/fail numbers from the summary
 cells (which never went through the percentage round-trip).
 
 openpyxl API facts verified against the installed 3.1.5 (see the §16/§17/
-§18 addenda): per-slice colors go through ``Series.data_points`` (the
+§18/§20 addenda): per-slice colors go through ``Series.data_points`` (the
 ``dPt`` alias) with ``marker.DataPoint(idx=i)`` whose
 ``graphicalProperties.solidFill`` takes a 6-digit hex string (unused
 since the seventh wave); "plot hidden cells" is
@@ -86,7 +86,21 @@ wipes the styles of non-anchor cells (it pops them from ``ws._cells``),
 so a merged range must be styled AFTER merging — the styles then reach
 the file (every cell carries its style index in sheetData XML), although
 openpyxl's READER recreates the non-anchor MergedCell objects without
-styles.
+raw styles. On reload the reader re-derives the merge borders: it first
+pulls the bottom-right cell's right/bottom sides into the anchor
+(``MergedCellRange._get_borders``), replaces the non-anchor cells with
+fresh MergedCell objects and re-propagates the anchor's sides to the
+range edges (``MergedCellRange.format``) — so a post-merge outline on a
+card block round-trips with its outer sides intact.
+
+Eighth user-feedback wave (2026-11-10, dashboard refinement +
+printability — see §20): the two donuts TILE the page in their own fixed
+charts band (7 x 6 cm each, built-in style 7, anchored A{r}/D{r} — 3
+columns of the uniform width 12 ≈ 7.05 cm per chart), every band between
+blocks is a SINGLE blank row, the tables move right to columns B:E under
+a B:E title band, and each KPI card gains a medium outline in its own
+accent (``apply_card_border``, reusing the fill palette constants — the
+band rows derive from the chart height: ``BIN_CHART_ROW_SPAN = 12``).
 """
 
 import re
@@ -95,7 +109,7 @@ from math import ceil
 from openpyxl.chart import DoughnutChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.formatting.rule import DataBarRule
-from openpyxl.styles import Font
+from openpyxl.styles import Border, Font, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import coordinate_to_tuple
 from openpyxl.worksheet.table import Table
@@ -103,26 +117,36 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from deps.exporter.matrix import sanitize_cell
 from deps.exporter.sheets import ROW_HEIGHT_IN
-from deps.exporter.theme import FONT_NAME, FONT_SIZE
+from deps.exporter.theme import (
+    FAIL_FILL_HEX,
+    FONT_NAME,
+    FONT_SIZE,
+    GROUP_FILL_HEX,
+    NEUTRAL_FILL_HEX,
+    _argb,
+)
 
 # Chart geometry in centimetres (openpyxl chart.width / chart.height units).
-BIN_CHART_WIDTH_CM = 9.0
-BIN_CHART_HEIGHT_CM = 7.0
+# Eighth wave: two 7 x 6 cm donuts TILE the Bin sheet's A:F page — each
+# chart spans 3 columns of the uniform width 12 (3 x ~2.35 cm ≈ 7.05 cm),
+# HB on A..C and SB on D..F of the same band rows.
+BIN_CHART_WIDTH_CM = 7.0
+BIN_CHART_HEIGHT_CM = 6.0
 
-# Rows one donut spans vertically (chart band + 1 gap row), mirroring
-# insert_report_image's spacing math at the 7 cm height:
-# ceil((7 / 2.54) / 0.21) + 1 == 15. Section stacking keeps every section
-# below the previous one's donut bottom edge.
-BIN_CHART_ROW_SPAN = ceil((BIN_CHART_HEIGHT_CM / 2.54) / ROW_HEIGHT_IN) + 1
+# Rows one charts band spans vertically (eighth wave: the band is its own
+# fixed layout region between two single-blank separator rows — no gap
+# row folded into the constant anymore):
+# ceil((6 / 2.54) / 0.21) == 12 (block rows 7..18).
+BIN_CHART_ROW_SPAN = ceil((BIN_CHART_HEIGHT_CM / 2.54) / ROW_HEIGHT_IN)
 
 # Donut hole diameter as a percentage of the chart diameter (sixth wave,
 # user mockup: 50-60 band; openpyxl clamps to NestedMinMax 1..90).
 BIN_DONUT_HOLE_SIZE = 55
 
-# Built-in chart style (seventh wave, "palette 1 + disposition 6"): the
-# OOXML legacy style id 6 renders with the FIRST color scheme of Excel's
-# gallery (= French "Couleur 1"). Slices are NOT overridden per-slice.
-BIN_CHART_STYLE = 6
+# Built-in chart style (eighth wave, builtin disposition 7 — was 6): the
+# OOXML legacy style id selects a gallery color scheme; slices are NOT
+# overridden per-slice (ruled in the seventh wave, unchanged).
+BIN_CHART_STYLE = 7
 
 # Helper block headers: labels column helper_col, counts column
 # helper_col + 1, one header row + one row per bin.
@@ -139,9 +163,14 @@ BIN_TOTAL_LABEL = "Total"
 BIN_SECTION_STYLE = "Output"
 # Bold dark font for the Total row (theme has no reusable bold body font).
 BIN_TOTAL_FONT = Font(name=FONT_NAME, size=FONT_SIZE, bold=True)
-# Fixed Bin-sheet widths for the four table columns, applied AFTER the
-# sheet-wide autofit (A holds the bin names, D the data-bar percentages).
-BIN_TABLE_COLUMN_WIDTHS = (("A", 24), ("B", 8), ("C", 8), ("D", 14))
+# Structured tables live in columns B:E (eighth wave: column A belongs to
+# the page grid the KPI cards and the tiled donuts share).
+BIN_TABLE_FIRST_COL = 2
+# Uniform Bin-sheet page width (eighth wave, R2): columns A:F all share
+# width 12 — the KPI cards span the same grid and each tiled 7 cm donut
+# needs 3 of these columns (~7.05 cm); G+ keep their autofit widths.
+BIN_PAGE_WIDTH_RANGE = ("A", "F")
+BIN_PAGE_COLUMN_WIDTH = 12
 
 # Upstream "Total: N" cell (DataInterface.py:595) — the reconstruction
 # denominator; unparseable cells are skipped by the callers.
@@ -162,8 +191,14 @@ KPI_PCT_FORMAT = "0.00%"  # Yield card value display format
 KPI_YIELD_PLACEHOLDER = "-"  # Yield card value when total == 0
 
 # The three KPI cards, each spanning two columns (seventh-wave mockup):
-# (start column, theme fill attribute).
-KPI_CARD_SPANS = ((1, "neutral_fill"), (3, "fail_fill"), (5, "group_fill"))
+# (start column, theme fill attribute, border hex) — the border hex REUSES
+# the same palette constant as the fill (eighth wave, R4: no new theme
+# tokens; each card gets a medium outline in its own accent).
+KPI_CARD_SPANS = (
+    (1, "neutral_fill", NEUTRAL_FILL_HEX),
+    (3, "fail_fill", FAIL_FILL_HEX),
+    (5, "group_fill", GROUP_FILL_HEX),
+)
 
 
 def parse_bin_row(row) -> dict:
@@ -259,6 +294,36 @@ def aggregate_kpi(rows) -> dict:
     return sums
 
 
+def apply_card_border(
+    ws: Worksheet, min_col: int, max_col: int, min_row: int, max_row: int, hex6: str
+) -> None:
+    """Draw a medium outline in ``hex6`` around the rectangular block
+    ``min_col..max_col`` x ``min_row..max_row`` (eighth wave, R4: KPI
+    cards get an outline in their own accent color).
+
+    Edge cells carry the correct sides — top-row cells the top side,
+    bottom-row cells the bottom side, left-column cells the left side,
+    right-column cells the right side, corners two sides; interior cells
+    are left untouched. Call AFTER any merge of the block (wave-7
+    post-merge styling rule): ``merge_cells`` wipes styles set before it,
+    while post-merge styles reach the saved XML on every edge cell — and
+    openpyxl's reader re-propagates the anchor's sides across the merged
+    rows on reload, so the outline survives the round-trip.
+    """
+    side = Side(style="medium", color=_argb(hex6))
+    for row in range(min_row, max_row + 1):
+        for column in range(min_col, max_col + 1):
+            top = side if row == min_row else None
+            bottom = side if row == max_row else None
+            left = side if column == min_col else None
+            right = side if column == max_col else None
+            if not (top or bottom or left or right):
+                continue  # interior cell — untouched
+            ws.cell(row=row, column=column).border = Border(
+                left=left, right=right, top=top, bottom=bottom
+            )
+
+
 def write_kpi_cards(
     ws: Worksheet, start_row: int, kpi: dict, n_files: int, theme
 ) -> int:
@@ -274,10 +339,14 @@ def write_kpi_cards(
       {superseded} superseded"``;
     - "Total Parts" — the total (int), subtitle ``"across {n} file(s)"``.
     Card fills: theme ``neutral_fill`` (yellow) / ``fail_fill`` (red) /
-    ``group_fill`` (blue-grey), applied to EVERY cell of each card block.
-    openpyxl's ``merge_cells`` wipes the styles of non-anchor cells, so
-    each card row is merged FIRST and styled afterwards (verified 3.1.5:
-    post-merge styles reach the saved XML on every cell of the range).
+    ``group_fill`` (blue-grey), applied to EVERY cell of each card block,
+    plus a medium outline in the card's own accent (eighth wave, R4 —
+    ``apply_card_border``; the accent hexes reuse the fill palette
+    constants). Card 2's subtitle may clip at the uniform column width 12
+    (accepted in wave 8). openpyxl's ``merge_cells`` wipes the styles of
+    non-anchor cells, so each card row is merged FIRST and styled
+    afterwards (verified 3.1.5: post-merge styles reach the saved XML on
+    every cell of the range and round-trip — see ``apply_card_border``).
     """
     label_row, value_row, sub_row = start_row, start_row + 1, start_row + 2
     alignment = theme.body_alignment  # centered, like every other face
@@ -299,7 +368,7 @@ def write_kpi_cards(
     )
 
     for index, (label, value, subtitle, is_percent) in enumerate(cards):
-        first_col, fill_attr = KPI_CARD_SPANS[index]
+        first_col, fill_attr, border_hex = KPI_CARD_SPANS[index]
         second_col = first_col + 1
         fill = getattr(theme, fill_attr)
         first_letter = get_column_letter(first_col)
@@ -322,6 +391,9 @@ def write_kpi_cards(
         sub_cell = ws.cell(row=sub_row, column=first_col, value=subtitle)
         sub_cell.font = theme.kpi_sub_font
         sub_cell.alignment = alignment
+        # eighth wave (R4): medium accent outline AFTER the merges (the
+        # post-merge styling rule)
+        apply_card_border(ws, first_col, second_col, label_row, sub_row, border_hex)
 
     return sub_row + 1
 
@@ -346,14 +418,15 @@ def build_bin_donut(
       "Bin" / "Count" + one row per bin) starting at ``helper_row`` — by
       default the row of ``anchor_cell``; pass an explicit row when two
       charts share the anchor row (the generator offsets the second one);
-    - the chart: title, built-in style ``BIN_CHART_STYLE`` (6 — the FIRST
-      color scheme in Excel's gallery), percent data labels, counts
-      column as data (``titles_from_data=True`` — the "Count" header cell
-      becomes the series name), labels column as categories, donut hole
+    - the chart: title, built-in style ``BIN_CHART_STYLE`` (7 — builtin
+      disposition 7, eighth wave), percent data labels, counts column as
+      data (``titles_from_data=True`` — the "Count" header cell becomes
+      the series name), labels column as categories, donut hole
       ``BIN_DONUT_HOLE_SIZE``, legend on the right, ``visible_cells_only
-      = False`` so the hidden helper columns still plot, 9 × 7 cm;
+      = False`` so the hidden helper columns still plot, 7 x 6 cm (eighth
+      wave: tiles 3 columns of the uniform width 12);
     - NO per-slice ``DataPoint`` fills since the seventh wave (ruled):
-      the slices follow Excel's built-in style-6 palette and bins are
+      the slices follow the built-in style palette and bins are
       distinguished by labels/legend only — the settings bin-color dicts
       no longer reach the Bin sheet (revert = re-add the data_points loop);
     - both helper columns are hidden; ``bins`` empty → no-op (no chart,
@@ -387,9 +460,9 @@ def build_bin_donut(
     chart.set_categories(categories)
 
     # seventh wave: the per-slice DataPoint loop was REMOVED with the
-    # app bin-color overrides — style 6's built-in palette colors the
-    # slices (chart.style serializes to <style val="6"/> and the absence
-    # of <dPt> entries keeps Excel on the gallery's first scheme)
+    # app bin-color overrides — the built-in style palette colors the
+    # slices (chart.style serializes to <style val="7"/> and the absence
+    # of <dPt> entries keeps Excel on the gallery scheme)
 
     # plot the hidden helper columns (openpyxl 3.1.5 name; serializes to
     # the ChartSpace-level <plotVisOnly val="0"/>)
@@ -411,17 +484,17 @@ def write_bin_table(
     Layout: a section-title band row carrying Excel's BUILT-IN "Output"
     cell style (seventh wave, R4 — ``cell.style = "Output"``; openpyxl
     3.1.5 registers it with ``builtinId=21`` so Excel's gallery shows the
-    built-in style), merged across the table width A:D and styled on
-    EVERY cell of the band AFTER the merge (openpyxl's ``merge_cells``
-    wipes styles set before it), a blue header row ``Bin | Value | Count |
-    Distribution`` with white bold centered text (theme header styles),
-    one bordered body row per bin (name, bin number, int count,
-    ``count / total`` fraction cell with the ``"0.00%"`` format and a
-    blue ``DataBarRule`` — bar + text in one cell), then a bold Total row
-    (``"Total"``, the int count sum, ``1.0`` as ``"0.00%"``). The
-    denominator is the SUM OF THE RECONSTRUCTED COUNTS, so the Total row
-    always sums to 100% even where the wave-5 reconstruction differs from
-    the true DUT total.
+    built-in style), merged across the table width B:E (eighth wave —
+    column A belongs to the page grid) and styled on EVERY cell of the
+    band AFTER the merge (openpyxl's ``merge_cells`` wipes styles set
+    before it), a blue header row ``Bin | Value | Count | Distribution``
+    with white bold centered text (theme header styles), one bordered
+    body row per bin (name, bin number, int count, ``count / total``
+    fraction cell with the ``"0.00%"`` format and a blue ``DataBarRule``
+    — bar + text in one cell), then a bold Total row (``"Total"``, the
+    int count sum, ``1.0`` as ``"0.00%"``). The denominator is the SUM OF
+    THE RECONSTRUCTED COUNTS, so the Total row always sums to 100% even
+    where the wave-5 reconstruction differs from the true DUT total.
 
     A minimal Excel Table (``table_name`` — caller keeps it unique per sheet)
     spans header..last-data row with the Total row OUTSIDE the range, giving
@@ -434,21 +507,27 @@ def write_bin_table(
     if not bins:
         return start_row
     total = sum(count for _num, _name, count in bins)
+    first_col = BIN_TABLE_FIRST_COL
+    last_col = BIN_TABLE_FIRST_COL + len(BIN_TABLE_HEADERS) - 1  # column E
+    first_letter = get_column_letter(first_col)
+    last_letter = get_column_letter(last_col)
 
-    # section-title band: merged A:D FIRST (styles set before a merge are
+    # section-title band: merged B:E FIRST (styles set before a merge are
     # wiped by merge_cells), then the Output style on EVERY band cell, so
     # the style band spans the table width
-    last_col = len(BIN_TABLE_HEADERS)
     ws.merge_cells(
-        start_row=start_row, start_column=1, end_row=start_row, end_column=last_col
+        start_row=start_row,
+        start_column=first_col,
+        end_row=start_row,
+        end_column=last_col,
     )
-    for column in range(1, last_col + 1):
+    for column in range(first_col, last_col + 1):
         ws.cell(row=start_row, column=column).style = BIN_SECTION_STYLE
-    ws.cell(row=start_row, column=1, value=title)
+    ws.cell(row=start_row, column=first_col, value=title)
 
     header_row = start_row + 1
-    for column, header in enumerate(BIN_TABLE_HEADERS, start=1):
-        cell = ws.cell(row=header_row, column=column, value=header)
+    for offset, header in enumerate(BIN_TABLE_HEADERS):
+        cell = ws.cell(row=header_row, column=first_col + offset, value=header)
         cell.font = theme.header_font
         cell.alignment = theme.header_alignment
         cell.fill = theme.header_fill
@@ -458,17 +537,19 @@ def write_bin_table(
     for offset, (bin_num, name, count) in enumerate(bins):
         row = first_data_row + offset
         values = (name, int(bin_num), int(count), count / total if total else 0.0)
-        for column, value in enumerate(values, start=1):
-            cell = ws.cell(row=row, column=column, value=sanitize_cell(value))
+        for column_offset, value in enumerate(values):
+            cell = ws.cell(
+                row=row, column=first_col + column_offset, value=sanitize_cell(value)
+            )
             cell.font = theme.body_font
             cell.alignment = theme.body_alignment
             cell.border = theme.border
-        ws.cell(row=row, column=4).number_format = BIN_PCT_FORMAT
+        ws.cell(row=row, column=last_col).number_format = BIN_PCT_FORMAT
     last_data_row = first_data_row + len(bins) - 1
 
     # blue data bar in the Distribution cells — data rows only (Total outside)
     ws.conditional_formatting.add(
-        f"D{first_data_row}:D{last_data_row}",
+        f"{last_letter}{first_data_row}:{last_letter}{last_data_row}",
         DataBarRule(
             start_type="num",
             start_value=0,
@@ -479,20 +560,23 @@ def write_bin_table(
         ),
     )
 
-    # bold Total row outside the table range (B stays empty)
+    # bold Total row outside the table range (the Value column stays empty)
     total_row = last_data_row + 1
-    for column, value in ((1, BIN_TOTAL_LABEL), (3, int(total)), (4, 1.0)):
-        cell = ws.cell(row=total_row, column=column, value=value)
+    for column_offset, value in ((0, BIN_TOTAL_LABEL), (2, int(total)), (3, 1.0)):
+        cell = ws.cell(row=total_row, column=first_col + column_offset, value=value)
         cell.font = BIN_TOTAL_FONT
         cell.alignment = theme.body_alignment
         cell.border = theme.border
-    ws.cell(row=total_row, column=4).number_format = BIN_PCT_FORMAT
+    ws.cell(row=total_row, column=last_col).number_format = BIN_PCT_FORMAT
 
     # minimal Excel Table over header..last-data row: its own AutoFilter
     # gives the table filter arrows; column names MUST equal the header
     # cells (openpyxl 3.1.5: add_table does NOT initialize columns, and
     # _initialise_columns() also attaches the table AutoFilter)
-    table = Table(displayName=table_name, ref=f"A{header_row}:D{last_data_row}")
+    table = Table(
+        displayName=table_name,
+        ref=f"{first_letter}{header_row}:{last_letter}{last_data_row}",
+    )
     table._initialise_columns()
     for column, header in zip(table.tableColumns, BIN_TABLE_HEADERS):
         column.name = header

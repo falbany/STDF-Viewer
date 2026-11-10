@@ -48,6 +48,7 @@ import re
 
 from openpyxl import Workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
+from openpyxl.worksheet.properties import PageSetupProperties
 from PyQt5 import QtCore
 
 from deps.SharedSrc import REC, tab
@@ -59,7 +60,8 @@ from deps.uic_stdExporter import (
 )
 from deps.exporter.charts import (
     BIN_CHART_ROW_SPAN,
-    BIN_TABLE_COLUMN_WIDTHS,
+    BIN_PAGE_COLUMN_WIDTH,
+    BIN_PAGE_WIDTH_RANGE,
     aggregate_bin_counts,
     aggregate_kpi,
     bin_label,
@@ -717,50 +719,58 @@ class ModernReportGenerator(reportGenerator):
             site_label = "All Sites" if site == -1 else f"Site{site}"
             site_tag = "AllSites" if site == -1 else f"Site{site}"
 
-            # dashboard header (seventh wave): block title row, blank row,
-            # KPI cards (label/value/subtitle), blank separator row
+            # dashboard header (eighth wave, fixed band layout): block
+            # title row 1, blank row 2, KPI cards (label/value/subtitle,
+            # each with an accent outline) rows 3-5, blank row 6
             row += 1
             title_cell = BinSheet.cell(
                 row=row, column=1, value=(f"Bin Chart — Head{head} / {site_label}")
             )
             title_cell.font = self._theme.block_title_font
-            row = write_kpi_cards(BinSheet, row + 2, kpi, n_files, self._theme) + 1
+            row = write_kpi_cards(BinSheet, row + 2, kpi, n_files, self._theme)
 
-            # HB section then SB section (seventh wave): the table sits at
-            # A:D with its section title above; the donut sits RIGHT of it
-            # (anchor column G at the table-header row); the next section
-            # starts BELOW the taller of table and donut (+ 1 blank row).
-            # The geometry is fixed per section (donut ~15 rows at 7 cm),
-            # so empty bin lists leave their band reserved — the KPI
-            # dashboard above stays intact.
-            for isHBIN, bins in zip((True, False), aggregated):
-                kind = "Hardware" if isHBIN else "Software"
-                prefix = "HB" if isHBIN else "SB"
-                title_row = row
+            # charts band (eighth wave, R3): the two donuts TILE the A:F
+            # page — HB at A{chart_row}, SB at D{chart_row}, each 7 x 6 cm
+            # = 3 width-12 columns x BIN_CHART_ROW_SPAN rows; the band is
+            # a fixed region (empty bin lists leave it reserved, keeping
+            # the dashboard above intact)
+            chart_row = row + 1
+            for (kind, _prefix, anchor_letter), bins in zip(
+                (("Hardware", "HB", "A"), ("Software", "SB", "D")), aggregated
+            ):
                 chart_bins = [
                     (bin_num, bin_label(bin_num, name), count)
                     for bin_num, name, count in bins
                 ]
-                write_bin_table(
+                build_bin_donut(
                     BinSheet,
-                    title_row,
+                    f"{kind} Bin — Head{head} / {site_label}",
+                    chart_bins,
+                    f"{anchor_letter}{chart_row}",
+                    BIN_HELPER_COL,
+                    helper_row=helper_row,
+                )
+                helper_row += 2 + len(chart_bins)  # header + data rows + gap
+
+            # one blank separator after the band, then the HB section —
+            # the tables stack below with a single blank row between them
+            row = chart_row + BIN_CHART_ROW_SPAN + 1
+            for index, (isHBIN, bins) in enumerate(zip((True, False), aggregated)):
+                kind = "Hardware" if isHBIN else "Software"
+                prefix = "HB" if isHBIN else "SB"
+                row = write_bin_table(
+                    BinSheet,
+                    row,
                     bins,
                     self._theme,
                     f"{kind} Bins — Head{head} / {site_label}",
                     f"{prefix}_Head{head}_{site_tag}",
                 )
-                build_bin_donut(
-                    BinSheet,
-                    f"{kind} Bin — Head{head} / {site_label}",
-                    chart_bins,
-                    f"G{title_row + 1}",
-                    BIN_HELPER_COL,
-                    helper_row=helper_row,
-                )
-                helper_row += 2 + len(chart_bins)  # header + data rows + gap
-                row += max(len(bins) + 3, BIN_CHART_ROW_SPAN) + 1
-            # the stacking blank row after the SB donut separates the
-            # blocks — no extra gap anymore (the old +3 chart-band cadence)
+                if index == 0:
+                    row += 1  # single blank separator before the SB section
+            # block end: the cursor sits on the blank row after the SB
+            # Total; the next block's `row += 1` writes its title after
+            # that one blank row
         self._row[key] = row
 
         self.loopCount += 1
@@ -769,10 +779,23 @@ class ModernReportGenerator(reportGenerator):
         # render_plain_table, which is where the plain sheets get it)
         BinSheet.sheet_view.showGridLines = False
         self._autofit_columns(BinSheet)
-        # sixth wave: the four table columns get fixed widths (autofit
-        # keeps sizing the rest — the hidden helper columns stay untouched)
-        for letter, width in BIN_TABLE_COLUMN_WIDTHS:
-            BinSheet.column_dimensions[letter].width = width
+        # eighth wave (R2): the Bin sheet is a fixed A:F page — all six
+        # columns share width 12 (KPI grid + the two tiled donuts); the
+        # autofit keeps sizing only the hidden helper columns
+        first_col, last_col = (
+            column_index_from_string(letter) for letter in BIN_PAGE_WIDTH_RANGE
+        )
+        for index in range(first_col, last_col + 1):
+            BinSheet.column_dimensions[
+                get_column_letter(index)
+            ].width = BIN_PAGE_COLUMN_WIDTH
+        # eighth wave (R1): the Bin sheet prints on A4, fit to one page
+        # wide with unlimited height (same fitToPage pattern as the DUT
+        # Summary matrix setup in writer.py); other sheets are untouched
+        BinSheet.page_setup.paperSize = BinSheet.PAPERSIZE_A4
+        BinSheet.page_setup.fitToWidth = 1
+        BinSheet.page_setup.fitToHeight = 0
+        BinSheet.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
 
     def writeWaferMap(self):
         WaferSheet = self.sheetDict.get(ReportSelection.Wafer, None)

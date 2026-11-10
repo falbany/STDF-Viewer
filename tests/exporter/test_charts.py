@@ -5,6 +5,12 @@ dashboard header: title row, stylized KPI cards; tables use Excel's
 built-in "Output" style; charts drop the per-slice color overrides for
 the built-in palette).
 
+Eighth wave (2026-11-10, printability + dashboard refinement): the two
+donuts tile a fixed charts band (A{r}/D{r}, 7x6 cm, built-in style 7),
+tables move right to columns B:E, KPI cards gain a medium accent outline
+(``apply_card_border``), and the band geometry derives from the chart
+height constant (``BIN_CHART_ROW_SPAN == 12``).
+
 Data shapes confirmed upstream (DataInterface.py:596-608 +
 STDF-Viewer.py:1600-1604): one waitForDataList(tab.Bin) row PER FILE,
 all strings — [VHeader, "Yield: {pct}%", "Total: {n}", "Pass: {c}",
@@ -21,15 +27,21 @@ asserted IN MEMORY only — openpyxl's reader recreates MergedCell objects
 without styles, though the styles themselves are in the saved XML.
 """
 
+from math import ceil
+
 import pytest
 from openpyxl import Workbook, load_workbook
 from openpyxl.chart import DoughnutChart
 
 from deps.exporter.charts import (
+    BIN_CHART_HEIGHT_CM,
+    BIN_CHART_ROW_SPAN,
+    BIN_CHART_WIDTH_CM,
     BIN_DONUT_HOLE_SIZE,
     BIN_TABLE_HEADERS,
     aggregate_bin_counts,
     aggregate_kpi,
+    apply_card_border,
     bin_label,
     build_bin_donut,
     parse_bin_row,
@@ -37,7 +49,20 @@ from deps.exporter.charts import (
     write_bin_table,
     write_kpi_cards,
 )
+from deps.exporter.sheets import ROW_HEIGHT_IN
 from deps.exporter.theme import ModernTheme
+
+
+def sides(border):
+    """``{side: (style, rgb) | None}`` for one Border — reload-safe (the
+    reader recreates missing sides as empty ``Side()`` objects, not None)."""
+    out = {}
+    for name in ("top", "bottom", "left", "right"):
+        side = getattr(border, name)
+        out[name] = (
+            None if side is None or side.style is None else (side.style, side.color.rgb)
+        )
+    return out
 
 
 def bin_row(
@@ -397,6 +422,159 @@ class TestWriteKpiCards:
         for coordinate in ("A3", "A4", "A5"):
             assert ws[coordinate].alignment.horizontal == "center"
 
+    # accent borders (eighth wave, R4) ----------------------------------------
+
+    def test_card1_border_outline(self, ws, theme):
+        # each card gets a medium outline in its OWN accent (the same theme
+        # hex as its fill): corners combine two sides, edge cells one side
+        self.written(ws, theme)
+        rgb = "FFFFF3CD"
+        assert sides(ws["A3"].border) == {
+            "top": ("medium", rgb),
+            "bottom": None,
+            "left": ("medium", rgb),
+            "right": None,
+        }
+        assert sides(ws["B3"].border)["top"] == ("medium", rgb)
+        assert sides(ws["B3"].border)["right"] == ("medium", rgb)
+        assert sides(ws["A4"].border) == {
+            "top": None,
+            "bottom": None,
+            "left": ("medium", rgb),
+            "right": None,
+        }
+        assert sides(ws["B4"].border)["right"] == ("medium", rgb)
+        assert sides(ws["A5"].border)["bottom"] == ("medium", rgb)
+        assert sides(ws["B5"].border)["bottom"] == ("medium", rgb)
+        assert sides(ws["B5"].border)["right"] == ("medium", rgb)
+        # no foreign accent leaks in
+        assert sides(ws["C3"].border)["top"] == ("medium", "FFFFCCCC")
+
+    def test_card2_and_card3_border_accents(self, ws, theme):
+        # Fails card -> fail red, Total card -> group blue-grey
+        self.written(ws, theme)
+        assert sides(ws["C3"].border)["top"] == ("medium", "FFFFCCCC")
+        assert sides(ws["C3"].border)["left"] == ("medium", "FFFFCCCC")
+        assert sides(ws["D3"].border)["right"] == ("medium", "FFFFCCCC")
+        assert sides(ws["C5"].border)["bottom"] == ("medium", "FFFFCCCC")
+        assert sides(ws["D5"].border)["bottom"] == ("medium", "FFFFCCCC")
+        assert sides(ws["E3"].border)["top"] == ("medium", "FFE9EEF6")
+        assert sides(ws["E3"].border)["left"] == ("medium", "FFE9EEF6")
+        assert sides(ws["F3"].border)["right"] == ("medium", "FFE9EEF6")
+        assert sides(ws["E5"].border)["bottom"] == ("medium", "FFE9EEF6")
+        assert sides(ws["F5"].border)["right"] == ("medium", "FFE9EEF6")
+
+    def test_card_borders_survive_save_reload(self, ws, theme, tmp_path):
+        # styles set POST-merge reach the saved XML on every edge cell;
+        # openpyxl's reader re-propagates the anchor sides across each
+        # merged row (MergedCellRange._get_borders/format), so the anchors
+        # keep their outer corner sides after the round-trip
+        self.written(ws, theme)
+        path = tmp_path / "cards.xlsx"
+        ws.parent.save(path)
+        reloaded = load_workbook(path)["Sheet"]
+        assert reloaded["A3"].border.top.style == "medium"
+        assert reloaded["A3"].border.left.color.rgb == "FFFFF3CD"
+        assert reloaded["C3"].border.top.color.rgb == "FFFFCCCC"
+        assert reloaded["E3"].border.left.color.rgb == "FFE9EEF6"
+        assert reloaded["A5"].border.bottom.style == "medium"
+        assert reloaded["A5"].border.left.color.rgb == "FFFFF3CD"
+
+
+# --------------------------------------------------------------------------
+# apply_card_border (eighth wave, R4: KPI card outline helper)
+# --------------------------------------------------------------------------
+
+
+class TestApplyCardBorder:
+    @pytest.fixture
+    def ws(self):
+        return Workbook().active
+
+    def test_corners_combine_edges_single_interior_untouched(self, ws):
+        # 3x3 block B2:D4: corners carry two sides, edge-mids one side,
+        # the interior C3 stays fully untouched
+        apply_card_border(ws, 2, 4, 2, 4, "E9EEF6")
+        rgb = "FFE9EEF6"
+        assert sides(ws["B2"].border) == {
+            "top": ("medium", rgb),
+            "bottom": None,
+            "left": ("medium", rgb),
+            "right": None,
+        }
+        assert sides(ws["D2"].border)["top"] == ("medium", rgb)
+        assert sides(ws["D2"].border)["right"] == ("medium", rgb)
+        assert sides(ws["B4"].border)["bottom"] == ("medium", rgb)
+        assert sides(ws["B4"].border)["left"] == ("medium", rgb)
+        assert sides(ws["D4"].border) == {
+            "top": None,
+            "bottom": ("medium", rgb),
+            "left": None,
+            "right": ("medium", rgb),
+        }
+        assert sides(ws["C2"].border) == {
+            "top": ("medium", rgb),
+            "bottom": None,
+            "left": None,
+            "right": None,
+        }
+        assert sides(ws["B3"].border)["left"] == ("medium", rgb)
+        assert sides(ws["D3"].border)["right"] == ("medium", rgb)
+        assert sides(ws["C3"].border) == {
+            "top": None,
+            "bottom": None,
+            "left": None,
+            "right": None,
+        }
+        # (untouched cells hold openpyxl's default border: sides present
+        # but style-less — the sides() None mapping above proves it)
+
+    def test_single_cell_block_all_four_sides(self, ws):
+        apply_card_border(ws, 1, 1, 1, 1, "FFCCCC")
+        rgb = "FFFFCCCC"
+        assert sides(ws["A1"].border) == {
+            "top": ("medium", rgb),
+            "bottom": ("medium", rgb),
+            "left": ("medium", rgb),
+            "right": ("medium", rgb),
+        }
+
+    def test_unmerged_block_round_trip(self, ws, tmp_path):
+        # without merges every edge cell keeps its exact sides after a
+        # save/reload
+        apply_card_border(ws, 1, 2, 1, 3, "FFF3CD")
+        path = tmp_path / "outline.xlsx"
+        ws.parent.save(path)
+        reloaded = load_workbook(path)["Sheet"]
+        rgb = "FFFFF3CD"
+        assert sides(reloaded["A1"].border) == {
+            "top": ("medium", rgb),
+            "bottom": None,
+            "left": ("medium", rgb),
+            "right": None,
+        }
+        assert sides(reloaded["B3"].border) == {
+            "top": None,
+            "bottom": ("medium", rgb),
+            "left": None,
+            "right": ("medium", rgb),
+        }
+
+
+# --------------------------------------------------------------------------
+# chart band geometry (eighth wave: table-driven, derived from the height)
+# --------------------------------------------------------------------------
+
+
+class TestChartGeometry:
+    def test_tile_size_and_band_rows(self):
+        # the two donuts tile the A:F page: 7 cm wide = 3 columns at the
+        # uniform width 12 (~3 x 2.35 cm), 6 cm tall = 12 default rows
+        assert BIN_CHART_WIDTH_CM == 7.0
+        assert BIN_CHART_HEIGHT_CM == 6.0
+        assert BIN_CHART_ROW_SPAN == ceil((BIN_CHART_HEIGHT_CM / 2.54) / ROW_HEIGHT_IN)
+        assert BIN_CHART_ROW_SPAN == 12  # band rows 7..18 of each block
+
 
 # --------------------------------------------------------------------------
 # bin_label
@@ -430,10 +608,10 @@ class TestBuildBinDonut:
         assert isinstance(chart, DoughnutChart)
         assert chart.anchor == "A6"
         assert chart.title is not None
-        assert chart.style == 6
+        assert chart.style == 7  # eighth wave: builtin disposition 7
         assert chart.dataLabels.showPercent is True
-        assert chart.width == 9
-        assert chart.height == 7
+        assert chart.width == 7  # eighth wave: tiles 3 width-12 columns
+        assert chart.height == 6  # 12 default rows = BIN_CHART_ROW_SPAN
         # mockup: donut hole (openpyxl 3.1.5 DoughnutChart.holeSize,
         # NestedMinMax 1..90 — the factory constant sits in the 50-60 band)
         assert chart.holeSize == BIN_DONUT_HOLE_SIZE
@@ -535,22 +713,23 @@ class TestWriteBinTable:
         # "Output" cell style (openpyxl 3.1.5 registers it with
         # builtinId=21, so Excel's gallery shows it as the built-in style
         # in the Data and Model group); the band spans the table width
+        # B:E (eighth wave — column A belongs to the donut/KPI page grid)
         self.written(ws, theme)
-        assert ws["A15"].style == "Output"
-        assert ws["A15"].value == TABLE_TITLE
+        assert ws["B15"].style == "Output"
+        assert ws["B15"].value == TABLE_TITLE
         # resolved look of the builtin style (openpyxl's builtins.py
         # definition): bold dark font on the light grey band
-        assert ws["A15"].font.b is True
-        assert ws["A15"].fill.fgColor.rgb == "FFF2F2F2"
+        assert ws["B15"].font.b is True
+        assert ws["B15"].fill.fgColor.rgb == "FFF2F2F2"
 
     def test_section_title_band_merged_and_styled_across_table(self, ws, theme):
-        # merge A15:D15 and style EVERY cell of the band (fills apply
+        # merge B15:E15 and style EVERY cell of the band (fills apply
         # per-cell; styles must be applied AFTER merging — openpyxl's
         # merge_cells wipes styles set before it)
         self.written(ws, theme)
         ranges = {str(r) for r in ws.merged_cells.ranges}
-        assert "A15:D15" in ranges
-        for column in range(1, 5):
+        assert "B15:E15" in ranges
+        for column in range(2, 6):
             assert ws.cell(row=15, column=column).style == "Output"
 
     def test_section_title_output_style_round_trip(self, ws, theme, tmp_path):
@@ -560,16 +739,16 @@ class TestWriteBinTable:
         path = tmp_path / "out.xlsx"
         ws.parent.save(path)
         reloaded = load_workbook(path)["Sheet"]
-        assert reloaded["A15"].style == "Output"
+        assert reloaded["B15"].style == "Output"
         named = {s.name: s for s in reloaded.parent._named_styles}
         assert named["Output"].builtinId == 21
 
     def test_header_row_blue_with_white_bold_centered(self, ws, theme):
         self.written(ws, theme)
-        assert [ws.cell(row=16, column=c).value for c in range(1, 5)] == list(
+        assert [ws.cell(row=16, column=c).value for c in range(2, 6)] == list(
             BIN_TABLE_HEADERS
         )
-        for column in range(1, 5):
+        for column in range(2, 6):
             cell = ws.cell(row=16, column=column)
             assert cell.fill.fgColor.rgb == "FF1E40AF"  # theme header fill
             assert cell.font.bold is True
@@ -579,52 +758,52 @@ class TestWriteBinTable:
 
     def test_data_rows_name_number_count_fraction(self, ws, theme):
         self.written(ws, theme)
-        assert [ws[cell].value for cell in ("A17", "B17", "C17", "D17")] == [
+        assert [ws[cell].value for cell in ("B17", "C17", "D17", "E17")] == [
             "PASS_BIN",
             1,
             9,
             0.9,
         ]
-        assert isinstance(ws["C17"].value, int)
-        assert isinstance(ws["D17"].value, float)
-        assert [ws[cell].value for cell in ("A18", "B18", "C18", "D18")] == [
+        assert isinstance(ws["D17"].value, int)
+        assert isinstance(ws["E17"].value, float)
+        assert [ws[cell].value for cell in ("B18", "C18", "D18", "E18")] == [
             "FAIL_BIN",
             3,
             1,
             0.1,
         ]
         # fraction cells carry the 0.00% display format
-        assert ws["D17"].number_format == "0.00%"
-        assert ws["D18"].number_format == "0.00%"
+        assert ws["E17"].number_format == "0.00%"
+        assert ws["E18"].number_format == "0.00%"
         # data cells: body font + theme border
-        for coordinate in ("A17", "B17", "C17", "D17", "D18"):
+        for coordinate in ("B17", "C17", "D17", "E17", "E18"):
             cell = ws[coordinate]
             assert cell.border.left.style == "thin"
             assert cell.alignment.horizontal == "center"
 
     def test_total_row_bold_sum_and_100_percent(self, ws, theme):
         self.written(ws, theme)
-        assert ws["A19"].value == "Total"
-        assert ws["B19"].value is None
-        total = ws["C19"]
+        assert ws["B19"].value == "Total"
+        assert ws["C19"].value is None
+        total = ws["D19"]
         assert total.value == 10
         assert isinstance(total.value, int)
         assert total.font.bold is True
-        dist = ws["D19"]
+        dist = ws["E19"]
         assert dist.value == 1.0
         assert dist.number_format == "0.00%"
         assert dist.font.bold is True
-        assert ws["A19"].font.bold is True
+        assert ws["B19"].font.bold is True
 
     def test_fraction_denominator_is_the_count_sum(self, ws, theme):
         # counts are the wave-5 reconstruction; the denominator is their own
         # sum (may differ from the true DUT total by the rounding caveat)
         bins = [(1, "A", 33), (2, "B", 67)]
         self.written(ws, theme, bins=bins)
-        assert ws["D17"].value == pytest.approx(0.33)
-        assert ws["D18"].value == pytest.approx(0.67)
-        assert ws["C19"].value == 100
-        assert ws["D19"].value == 1.0
+        assert ws["E17"].value == pytest.approx(0.33)
+        assert ws["E18"].value == pytest.approx(0.67)
+        assert ws["D19"].value == 100
+        assert ws["E19"].value == 1.0
 
     def test_empty_bins_noop(self, ws, theme):
         assert self.written(ws, theme, bins=[]) == 15
@@ -639,8 +818,8 @@ class TestWriteBinTable:
     def test_data_bar_over_distribution_data_rows_only(self, ws, theme):
         self.written(ws, theme)
         ranges = {str(cf.sqref): list(cf.rules) for cf in ws.conditional_formatting}
-        assert list(ranges) == ["D17:D18"]  # Total row (19) outside
-        (rule,) = ranges["D17:D18"]
+        assert list(ranges) == ["E17:E18"]  # Total row (19) outside
+        (rule,) = ranges["E17:E18"]
         assert rule.type == "dataBar"
         assert rule.dataBar.showValue is True  # bar AND text in the cell
         assert rule.dataBar.color.rgb.endswith("5B9BD5")
@@ -653,7 +832,7 @@ class TestWriteBinTable:
         (name,) = ws.tables
         assert name == TABLE_NAME
         table = ws.tables[TABLE_NAME]
-        assert table.ref == "A16:D18"  # Total row outside
+        assert table.ref == "B16:E18"  # Total row outside
         assert table.autoFilter is not None
         assert table.autoFilter.ref == table.ref
 
@@ -662,7 +841,7 @@ class TestWriteBinTable:
         self.written(ws, theme)
         table = ws.tables[TABLE_NAME]
         assert [c.name for c in table.tableColumns] == list(BIN_TABLE_HEADERS)
-        assert [ws.cell(row=16, column=c).value for c in range(1, 5)] == [
+        assert [ws.cell(row=16, column=c).value for c in range(2, 6)] == [
             c.name for c in table.tableColumns
         ]
 
@@ -672,14 +851,14 @@ class TestWriteBinTable:
         ws.parent.save(path)
         reloaded = load_workbook(path)["Sheet"]
         table = reloaded.tables[TABLE_NAME]
-        assert table.ref == "A16:D18"
+        assert table.ref == "B16:E18"
         assert table.autoFilter.ref == table.ref
         assert [c.name for c in table.tableColumns] == list(BIN_TABLE_HEADERS)
         (rule,) = [
             r
             for cf in reloaded.conditional_formatting
             for r in cf.rules
-            if str(cf.sqref) == "D17:D18"
+            if str(cf.sqref) == "E17:E18"
         ]
         assert rule.type == "dataBar"
         assert rule.dataBar.color.rgb.endswith("5B9BD5")
