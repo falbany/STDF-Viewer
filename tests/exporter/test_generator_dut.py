@@ -99,18 +99,24 @@ def make_dut_info(
     )
 
 
-def make_summary():
-    """Classic waitForDutSummary dict: 2 tests x 3 DUTs in file 1."""
+def make_summary(tagged=True):
+    """Classic waitForDutSummary dict: 2 tests x 3 DUTs in file 1.
+
+    `tagged` controls the _T<n>C temperature tag on the part IDs — the
+    untagged variant exercises the MIR Test Temperature fallback."""
+    def part_id(base, temp):
+        return f"{base}_T{temp}C" if tagged else base
+
     duts = [
-        (1, 0, make_dut_info(part_id="SN541_T25C")),
+        (1, 0, make_dut_info(part_id=part_id("SN541", 25))),
         (
             1,
             1,
             make_dut_info(
-                part_id="SN542_T25C", sw_bin="Bin 3", xy=(4, -6), dut_flag="Failed"
+                part_id=part_id("SN542", 25), sw_bin="Bin 3", xy=(4, -6), dut_flag="Failed"
             ),
         ),
-        (1, 2, make_dut_info(part_id="SN543_T85C")),
+        (1, 2, make_dut_info(part_id=part_id("SN543", 85))),
     ]
     tests = [
         # parametric with limits (data row 16)
@@ -175,10 +181,15 @@ def png_bytes(width=96, height=48):
 PNG_BYTES = png_bytes()
 
 
-def build_generated(tmp_path, qapp, with_stat=False, with_file_info=False):
+def build_generated(
+    tmp_path, qapp, with_stat=False, with_file_info=False,
+    part_id_tagged=True, file_temperature=None,
+):
     """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus Stat when
     `with_stat`, FileInfo when `with_file_info`) and return (generator,
-    reloaded workbook, report path, close/error capture)."""
+    reloaded workbook, report path, close/error capture). `file_temperature`
+    appends a File Info "Test Temperature:" row (the DUT Summary fallback
+    source); `part_id_tagged` drops the _T<n>C tag from the part IDs."""
     testTuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
     selectedFiles = [1]
     selectedHeads = [1]
@@ -220,7 +231,9 @@ def build_generated(tmp_path, qapp, with_stat=False, with_file_info=False):
     )
 
     # GUI side: classic-protocol summary table, chart PNGs, stat rows
-    gen.waitForDutSummary = lambda heads, sites, fids, testTuples: make_summary()
+    gen.waitForDutSummary = lambda heads, sites, fids, testTuples: make_summary(
+        tagged=part_id_tagged
+    )
 
     def fake_wait_for_image(testTuple, head, sites, fids, chartType):
         return io.BytesIO(PNG_BYTES)
@@ -290,6 +303,11 @@ def build_generated(tmp_path, qapp, with_stat=False, with_file_info=False):
 
     gen.waitForDataList = fake_wait_for_data_list
 
+    # writeDUT_Summary fetches the File Info table for the temperature
+    # fallback regardless of the sheet selection — the stub answers from
+    # the fixture's table (empty when the sheet is not selected, plus the
+    # "Test Temperature:" row when `file_temperature` is set)
+    file_info_table = []
     if with_file_info:
         # File Info raw shape (buildFileMetaData): MIR description labels
         # ("Product ID" / "Sublot ID" feed the Bin-sheet banner, ninth wave)
@@ -304,7 +322,9 @@ def build_generated(tmp_path, qapp, with_stat=False, with_file_info=False):
             ["DUTs Superseded: ", "0"],
             ["DUTs Unknown: ", "0"],
         ]
-        gen.waitForTableData = lambda isFileInfo: file_info_table
+    if file_temperature is not None:
+        file_info_table = file_info_table + [["Test Temperature: ", file_temperature]]
+    gen.waitForTableData = lambda isFileInfo: file_info_table
 
     closed, errors = [], []
     sig.closeSignal.connect(closed.append)
@@ -416,6 +436,56 @@ class TestDutSummarySheet:
         assert dims["B"].width == 30  # Test name
         assert dims["C"].width == 8  # Param
         assert dims["M"].width == 8  # die columns pinned
+
+
+# --------------------------------------------------------------------------
+# Temperature metadata row: Part ID tag vs recorded MIR fallback
+# --------------------------------------------------------------------------
+
+
+class TestDutTemperatureFallback:
+    """writeDUT_Summary wires the File Info "Test Temperature:" row into the
+    Temperature metadata row's fallback (untagged part IDs)."""
+
+    @pytest.fixture
+    def generated_fallback(self, tmp_path, qapp):
+        # part IDs carry no tag; the file records 85C
+        return build_generated(tmp_path, qapp, part_id_tagged=False, file_temperature="85C")
+
+    @pytest.fixture
+    def generated_tagged(self, tmp_path, qapp):
+        # part IDs keep their tags even though the file records one too
+        return build_generated(tmp_path, qapp, file_temperature="85C")
+
+    @pytest.fixture
+    def generated_no_source(self, tmp_path, qapp):
+        # no tag and no recorded temperature: blank cells
+        return build_generated(tmp_path, qapp, part_id_tagged=False)
+
+    def test_untagged_part_ids_take_file_temperature(self, generated_fallback):
+        _, wb, _, _, _ = generated_fallback
+        ws = wb["DUT Summary"]
+        assert ws["M5"].value == 85.0  # Temperature row (5): die cells M..O
+        assert ws["N5"].value == 85.0
+        assert ws["O5"].value == 85.0
+
+    def test_tagged_part_ids_keep_encoded_temperature(self, generated_tagged):
+        _, wb, _, _, _ = generated_tagged
+        ws = wb["DUT Summary"]
+        assert ws["M5"].value == 25.0  # part-ID tag wins over the file value
+        assert ws["N5"].value == 25.0
+        assert ws["O5"].value == 85.0
+
+    def test_no_tag_no_file_row_stays_blank(self, generated_no_source):
+        _, wb, _, _, _ = generated_no_source
+        ws = wb["DUT Summary"]
+        assert ws["M5"].value in ("", None)
+        assert ws["O5"].value in ("", None)
+
+    def test_fallback_temperatures_fold_like_tags(self, generated_fallback):
+        # constant 85C across all DUTs -> the Temperature row hides
+        _, wb, _, _, _ = generated_fallback
+        assert wb["DUT Summary"].row_dimensions[5].hidden is True
 
 
 # --------------------------------------------------------------------------

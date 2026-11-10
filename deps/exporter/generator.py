@@ -91,7 +91,7 @@ from deps.exporter.charts import (
     write_kpi_cards,
     write_merged_headline,
 )
-from deps.exporter.helpers import apply_cpk_formula, split_test_name
+from deps.exporter.helpers import apply_cpk_formula, parse_temperature_text, split_test_name
 from deps.exporter.matrix import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
@@ -138,6 +138,11 @@ YIELD_FORMAT = "0.00%"
 _BANNER_PRODUCT_LABEL = "Product ID"
 _BANNER_SUBLOT_LABEL = "Sublot ID"
 
+# English-only File Info anchor feeding the DUT Summary temperature
+# fallback: the MIR TST_TEMP values ("Test Temperature: " row, one cell
+# per selected file column).
+_FILE_INFO_TEMPERATURE_LABEL = "Test Temperature"
+
 
 def bin_banner_from_file_info(rows: list) -> "str | None":
     """ "{Product ID} / {Sublot ID}" per file column, files joined " | "
@@ -167,6 +172,31 @@ def bin_banner_from_file_info(rows: list) -> "str | None":
         if product and sublot:
             pairs.append(f"{product} / {sublot}")
     return " | ".join(pairs) if pairs else None
+
+
+def file_temperatures_from_file_info(rows: list, fids: list) -> dict:
+    """{fid: temperature float | None} from the File Info table's
+    "Test Temperature:" row (MIR TST_TEMP per file column).
+
+    Values are position-matched with `fids` (getFileInfoForReport's
+    per-file value order — the same contract as the "File #n" header).
+    Labels match whitespace-normalized with a trailing ":" stripped,
+    English-only like the banner anchors — a translated UI (or a missing
+    row) yields all ``None`` so the DUT Summary keeps its blank cells.
+    Composite multi-subfile cells parse to the first subfile's value.
+    """
+    values: list = []
+    for row in rows:
+        label = " ".join(str(row[0] if row else "").split())
+        if label.endswith(":"):
+            label = label[:-1]
+        if label == _FILE_INFO_TEMPERATURE_LABEL:
+            values = list(row[1:])
+            break
+    return {
+        fid: parse_temperature_text(values[index] if index < len(values) else None)
+        for index, fid in enumerate(fids)
+    }
 
 
 # --------------------------------------------------------------------------
@@ -727,6 +757,18 @@ class ModernReportGenerator(reportGenerator):
             part_id = info[1] if len(info) > 1 and info[1] else ""
             dut_ids.append(part_id if part_id else f"DUT #{i + 1}")
 
+        # per-file MIR Test Temperature (fix wave: the Temperature metadata
+        # row falls back to it when a part ID carries no _T<n>C tag). The
+        # File Info table is fetched even when that sheet is not selected —
+        # the GUI side answers from its immutable fileMetaData; the File
+        # Info sheet, when selected, fetched the identical table moments ago.
+        file_info_rows = self.waitForTableData(isFileInfo=True)
+        if self.forceQuit:
+            return
+        file_temperatures = file_temperatures_from_file_info(
+            file_info_rows, self.selectedFiles
+        )
+
         specs = build_dut_summary_spec(
             summaryTable,
             self.testTuples,
@@ -736,6 +778,7 @@ class ModernReportGenerator(reportGenerator):
             # numeric cell formats are hardcoded scientific in the spec
             # builder (2026-11-10) — no settings-derived float format anymore
             tr=self.tr,
+            file_temperatures=file_temperatures,
         )
 
         # chunk 0 renders on the existing DUT Summary sheet; chunks 1+

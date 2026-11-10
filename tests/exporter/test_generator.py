@@ -14,6 +14,7 @@ from PyQt5 import QtCore
 from deps.exporter.generator import (
     ModernReportGenerator,
     apply_ftr_pseudo_limits,
+    file_temperatures_from_file_info,
     numericize_value,
     parse_vheader,
     stat_cf_ranges,
@@ -1236,3 +1237,37 @@ class TestFileInfoMultiFile:
         _, _, _, closed, errors = generated_multi
         assert closed == [True]
         assert errors == []
+
+
+class TestFileInfoTemperatures:
+    """file_temperatures_from_file_info: the DUT Summary temperature
+    fallback source (MIR TST_TEMP row of the File Info table)."""
+
+    def test_row_parsed_per_selected_fid(self):
+        rows = [
+            ["File Name: ", "a.stdf", "b.stdf"],
+            ["Test Temperature: ", "25C", "-40C"],
+        ]
+        assert file_temperatures_from_file_info(rows, [0, 2]) == {0: 25.0, 2: -40.0}
+
+    def test_label_match_ignores_spacing_and_colon(self):
+        # getFileInfoForReport labels carry a trailing space after the colon
+        rows = [["Test  Temperature: ", "25"]]
+        assert file_temperatures_from_file_info(rows, [0]) == {0: 25.0}
+
+    def test_missing_row_yields_none(self):
+        rows = [["File Name: ", "a.stdf"], ["Yield: ", "98.50%"]]
+        assert file_temperatures_from_file_info(rows, [0, 1]) == {0: None, 1: None}
+
+    def test_blank_and_composite_values(self):
+        rows = [["Test Temperature: ", "", "#1 → 25C\n#2 → -40C"]]
+        assert file_temperatures_from_file_info(rows, [0, 1]) == {0: None, 1: 25.0}
+
+    def test_short_row_keeps_tail_fids_blank(self):
+        # getFileInfoForReport skips fids beyond the row's length
+        rows = [["Test Temperature: ", "25C"]]
+        assert file_temperatures_from_file_info(rows, [0, 1]) == {0: 25.0, 1: None}
+
+    def test_translated_label_degrades_to_none(self):
+        rows = [["試験温度: ", "25C"]]
+        assert file_temperatures_from_file_info(rows, [0]) == {0: None}

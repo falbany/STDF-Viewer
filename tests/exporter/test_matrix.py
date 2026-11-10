@@ -184,7 +184,10 @@ def base_tests():
     ]
 
 
-def build(tests, duts, sheet_name="DUT Summary", die_cap=DUT_CHUNK_CAP, tr=None):
+def build(
+    tests, duts, sheet_name="DUT Summary", die_cap=DUT_CHUNK_CAP, tr=None,
+    file_temperatures=None,
+):
     summary = make_summary(tests, duts)
     test_tuples = [(t["num"], 0, t["name"]) for t in tests]
     if tr is None:
@@ -195,6 +198,7 @@ def build(tests, duts, sheet_name="DUT Summary", die_cap=DUT_CHUNK_CAP, tr=None)
             make_dut_ids(duts),
             sheet_name,
             die_cap,
+            file_temperatures=file_temperatures,
         )
     return build_dut_summary_spec(
         summary,
@@ -204,6 +208,7 @@ def build(tests, duts, sheet_name="DUT Summary", die_cap=DUT_CHUNK_CAP, tr=None)
         sheet_name,
         die_cap,
         tr,
+        file_temperatures=file_temperatures,
     )
 
 
@@ -498,6 +503,48 @@ class TestMetadataBlock:
             (1, 1, make_dut_info(part_id="SN542")),
         ]
         assert 5 in build([], duts)[0]["masked_rows"]
+
+    def test_temperature_falls_back_to_file_recorded_value(self):
+        # part IDs without a _T<n>C tag pick up the file's recorded
+        # temperature (MIR TST_TEMP via the File Info table)
+        duts = [
+            (1, 0, make_dut_info(part_id="SN541")),
+            (1, 1, make_dut_info(part_id="SN542")),
+        ]
+        spec = build([], duts, file_temperatures={1: 85.0})[0]
+        assert spec["metadata_rows"][3][12:] == [85.0, 85.0]
+        assert 5 in spec["masked_rows"]  # constant fallback folds like a tag
+
+    def test_part_id_temperature_wins_over_file_value(self):
+        # the encoded tag keeps precedence even when the file records one
+        spec = build([], base_duts(), file_temperatures={1: 85.0})[0]
+        assert spec["metadata_rows"][3][12:] == [25.0, 25.0, 85.0]
+
+    def test_temperature_fallback_is_per_file(self):
+        duts = [
+            (1, 0, make_dut_info(fid=1, part_id="SN541")),
+            (2, 0, make_dut_info(fid=2, part_id="SN542")),
+        ]
+        spec = build([], duts, file_temperatures={1: 25.0, 2: 85.0})[0]
+        assert spec["metadata_rows"][3][12:] == [25.0, 85.0]
+
+    def test_temperature_blank_without_tag_and_file_value(self):
+        # no tag and no recorded temperature: blank cells (unchanged classic)
+        duts = [
+            (1, 0, make_dut_info(part_id="SN541")),
+            (1, 1, make_dut_info(part_id="SN542")),
+        ]
+        spec = build([], duts, file_temperatures={1: None})[0]
+        assert spec["metadata_rows"][3][12:] == ["", ""]
+
+    def test_temperature_fallback_skips_unknown_file(self):
+        # a fid absent from the mapping (missing File Info row) stays blank
+        duts = [
+            (1, 0, make_dut_info(fid=1, part_id="SN541")),
+            (2, 0, make_dut_info(fid=2, part_id="SN542")),
+        ]
+        spec = build([], duts, file_temperatures={2: 85.0})[0]
+        assert spec["metadata_rows"][3][12:] == ["", 85.0]
 
     def test_always_mask_folds_distinct_values(self):
         # Head-Site / Test Time fold even when values differ; the DUT Flag

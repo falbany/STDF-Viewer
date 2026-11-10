@@ -112,11 +112,13 @@ MASK_ALWAYS = "always"
 # `unit_type` is the visible Unit cell. `dutinfo_index` maps into the
 # dutInfo tuple [File ID, Part ID, Part Text, Head-Site, Tests Executed,
 # Test Time, HW Bin, SW Bin, Wafer ID, (X, Y), DUT Flag]; None marks the
-# derived row (Temperature = parsed from the raw Part ID). Test Time and
-# HW/SW Bin arrive as DB-shaped strings ("123 ms" / "Bin 1") and parse to
-# bare numerics. `mean`/`std` keep live AVERAGE/STDEV formulas: third wave
-# mean=True only for Temperature; fourth wave the Test Time row takes
-# mean=True + std=True; every other numeric row shows MIN/MAX and dashes.
+# derived row (Temperature = parsed from the raw Part ID, falling back to
+# the file's recorded Test Temperature — MIR TST_TEMP — when the ID
+# carries no _T<n>C tag). Test Time and HW/SW Bin arrive as DB-shaped
+# strings ("123 ms" / "Bin 1") and parse to bare numerics. `mean`/`std`
+# keep live AVERAGE/STDEV formulas: third wave mean=True only for
+# Temperature; fourth wave the Test Time row takes mean=True + std=True;
+# every other numeric row shows MIN/MAX and dashes.
 # Fourth wave: DUT Flag folds "always" -> "never" (row visible — its
 # status conditional formatting would be meaningless on a hidden row);
 # Head-Site and Test Time keep the unconditional fold.
@@ -274,13 +276,17 @@ def build_dut_summary_spec(
     sheet_name,
     die_cap=DUT_CHUNK_CAP,
     tr=lambda s: s,
+    file_temperatures=None,
 ):
     """Build one spec dict per die chunk of the DUT Summary sheet.
 
     `summaryTable` is the classic protocol dict (Data/TestInfo/dut2ind/dutInfo)
     from `waitForDutSummary`; `order` is the `(fid, dutIndex)` display order;
     `dut_ids` carries the full part ID per ordered DUT (blank entries get a
-    "DUT #n" fallback for the repeated header).
+    "DUT #n" fallback for the repeated header). `file_temperatures` maps
+    selected fid -> the file's recorded Test Temperature (MIR TST_TEMP via
+    the File Info table) — the Temperature metadata row's fallback when a
+    part ID carries no _T<n>C tag; ``None``/absent fids leave blank cells.
 
     Since 2026-11-10 the banner row carries plain numeric DUT indices
     (global numbering, fix wave 2) and the numeric cell formats are
@@ -308,6 +314,7 @@ def build_dut_summary_spec(
                 sheet_name=sheet_name,
                 base_labels=base_labels,
                 chunk_index=chunk_index,
+                file_temperatures=file_temperatures,
             )
         )
         chunk_start += len(chunk_ids)
@@ -426,7 +433,7 @@ def _flag_cell(flag):
 # --------------------------------------------------------------------------
 
 
-def _metadata_cell(meta, summaryTable, fid, dut_index, global_index):
+def _metadata_cell(meta, summaryTable, fid, dut_index, global_index, file_temperatures=None):
     name = meta["name"]
     info = summaryTable.get("dutInfo", {}).get(fid, {}).get(dut_index) or ()
 
@@ -436,6 +443,10 @@ def _metadata_cell(meta, summaryTable, fid, dut_index, global_index):
     if name == "Temperature":
         part_id = raw(1)
         temperature = parse_temperature(part_id if isinstance(part_id, str) else None)
+        if temperature is None and file_temperatures is not None:
+            # no _T<n>C tag in the part ID: the file's recorded temperature
+            # (MIR TST_TEMP per selected fid) covers the DUT
+            temperature = file_temperatures.get(fid)
         return "" if temperature is None else float(temperature)
     if name in ("HW Bin", "SW Bin"):
         # DB shape "Bin N" -> bare int N
@@ -492,7 +503,7 @@ def _is_masked(meta, values):
     return False
 
 
-def _metadata_block(summaryTable, chunk_cells, first_die, last_die):
+def _metadata_block(summaryTable, chunk_cells, first_die, last_die, file_temperatures=None):
     """The 13 metadata row-lists plus the absolute Excel rows to hide.
 
     Numeric rows carry live MIN/MAX over their die range; Temperature
@@ -509,7 +520,9 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die):
     for position, meta in enumerate(METADATA_ROWS):
         excel_row = METADATA_START + position
         values = [
-            _metadata_cell(meta, summaryTable, fid, dut_index, global_index)
+            _metadata_cell(
+                meta, summaryTable, fid, dut_index, global_index, file_temperatures
+            )
             for global_index, fid, dut_index in chunk_cells
         ]
         prefix = [
@@ -621,6 +634,7 @@ def _build_chunk(
     sheet_name,
     base_labels,
     chunk_index,
+    file_temperatures=None,
 ):
     die_count = len(chunk_ids)
     # (global DUT position, fid, dutIndex) per die column of this chunk;
@@ -644,7 +658,7 @@ def _build_chunk(
         mirror_first = mirror_last = first_die
 
     metadata_rows, masked_rows = _metadata_block(
-        summaryTable, chunk_cells, first_die, last_die
+        summaryTable, chunk_cells, first_die, last_die, file_temperatures
     )
     rows = _test_rows(
         summaryTable, tests, chunk_cells, first_die, last_die, mirror_first, mirror_last

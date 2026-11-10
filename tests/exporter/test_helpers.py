@@ -20,6 +20,7 @@ from deps.exporter.helpers import (
     metadata_stat_formulas,
     parse_bin,
     parse_temperature,
+    parse_temperature_text,
     parse_test_time,
     part_id_base,
     split_dut_chunks,
@@ -54,6 +55,40 @@ class TestParseTemperature:
     def test_module_level_regex(self):
         assert isinstance(TEMPERATURE_RE, re.Pattern)
         assert TEMPERATURE_RE.flags & re.IGNORECASE
+
+
+class TestParseTemperatureText:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("25C", 25.0),
+            ("25", 25.0),
+            ("-40C", -40.0),
+            ("25.5 °C", 25.5),
+            ("+25C", 25.0),  # sign dropped by the regex, number still found
+            ("#1 → 25C\n#2 → -40C", 25.0),  # composite: first subfile wins
+            ("Set to 25C on chuck", 25.0),  # free text: first number wins
+            ("", None),
+            ("N/A", None),
+            (None, None),
+        ],
+    )
+    def test_spec_cases(self, value, expected):
+        assert parse_temperature_text(value) == expected
+
+    def test_composite_prefix_index_never_parses_as_number(self):
+        # the "#1 →" source index must not leak into the parsed value
+        assert parse_temperature_text("#2 → -40C") == -40.0
+
+    def test_numeric_passthrough(self):
+        assert parse_temperature_text(25) == 25.0
+        assert isinstance(parse_temperature_text(25), float)
+
+    def test_nan_becomes_none(self):
+        assert parse_temperature_text(float("nan")) is None
+
+    def test_returns_float(self):
+        assert isinstance(parse_temperature_text("25C"), float)
 
 
 class TestPartIdBase:
