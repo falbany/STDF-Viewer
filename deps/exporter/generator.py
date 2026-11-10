@@ -42,6 +42,12 @@ and a "Detailed Bin Contribution - HW Bin / SW Bin" band above the two
 tables. ``report_core`` also pins the workbook default (Normal) font to
 the theme's Times New Roman 8 via ``set_workbook_default_font``.
 
+Tenth wave (2026-11-10, layout compaction): the banner wraps in a 50 pt
+row 1, the per-block title row is gone (KPI cards one blank row under
+the banner), the "Bin Charts" headline carries a blank row on both
+sides, the contribution headline a blank row below, and the charts band
+is one 250 pt row with square ``band_anchor()``-pinned donuts.
+
 Instance state (``self._wb``, ``self._theme``, ``self._row``) replaces the
 classic module-level ``sv`` statics, so several generators can coexist.
 The DUT Summary matrix is rendered through the Task 4/5 spec builder and
@@ -55,6 +61,7 @@ from itertools import product
 import re
 
 from openpyxl import Workbook
+from openpyxl.styles import Alignment
 from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.worksheet.properties import PageSetupProperties
 from PyQt5 import QtCore
@@ -67,13 +74,17 @@ from deps.uic_stdExporter import (
     signals,
 )
 from deps.exporter.charts import (
-    BIN_CHART_ROW_SPAN,
+    BIN_BANNER_ROW_HEIGHT_PT,
+    BIN_CHART_BAND_HEIGHT_PT,
+    BIN_CHART_GAP_CM,
+    BIN_CHART_SIZE_CM,
     BIN_CHARTS_HEADLINE,
     BIN_CONTRIBUTION_HEADLINE,
     BIN_PAGE_COLUMN_WIDTH,
     BIN_PAGE_WIDTH_RANGE,
     aggregate_bin_counts,
     aggregate_kpi,
+    band_anchor,
     bin_label,
     build_bin_donut,
     write_bin_table,
@@ -129,7 +140,7 @@ _BANNER_SUBLOT_LABEL = "Sublot ID"
 
 
 def bin_banner_from_file_info(rows: list) -> "str | None":
-    """"{Product ID} / {Sublot ID}" per file column, files joined " | "
+    """ "{Product ID} / {Sublot ID}" per file column, files joined " | "
     (ninth wave banner text for the Bin sheet's Title row).
 
     Labels match whitespace-normalized with a trailing ":" stripped,
@@ -750,8 +761,14 @@ class ModernReportGenerator(reportGenerator):
 
         # ninth wave: row 1 carries the merged A:F "Title"-style banner
         # (Product ID / Sublot ID from File Info, or the sheet-name
-        # fallback); the blocks start below it
+        # fallback); tenth wave: the banner wraps in a 50 pt row so a
+        # 2-line title fits, the per-block title row is GONE and the KPI
+        # cards sit one blank row below the banner
         write_merged_headline(BinSheet, 1, self._bin_banner, "Title")
+        BinSheet.row_dimensions[1].height = BIN_BANNER_ROW_HEIGHT_PT
+        BinSheet.cell(row=1, column=1).alignment = Alignment(
+            wrap_text=True, vertical="center"
+        )
         key = ReportSelection.Bin
         row = 2
         # hidden helper blocks (fixed far column) advance per chart so the
@@ -777,28 +794,28 @@ class ModernReportGenerator(reportGenerator):
             site_label = "All Sites" if site == -1 else f"Site{site}"
             site_tag = "AllSites" if site == -1 else f"Site{site}"
 
-            # dashboard header (ninth wave layout): block title row (after
-            # one blank row), blank row, KPI cards (label/value/subtitle,
-            # each with a dark accent outline)
-            row += 1
-            title_cell = BinSheet.cell(
-                row=row, column=1, value=(f"Bin Chart — Head{head} / {site_label}")
-            )
-            title_cell.font = self._theme.block_title_font
-            row = write_kpi_cards(BinSheet, row + 2, kpi, n_files, self._theme)
+            # KPI cards (label/value/subtitle, each with a dark accent
+            # outline) after ONE blank separator row — the head/site
+            # identification lives in the chart and table titles only
+            row = write_kpi_cards(BinSheet, row + 1, kpi, n_files, self._theme)
 
-            # "Charts" headline (ninth wave): merged A:F "Headline 1" band
-            # above the fixed charts band; then the two donuts TILE the
-            # A:F page — HB at A{chart_row}, SB at D{chart_row}, each
-            # 8.5 x 7 cm = 3 width-20.4 columns x BIN_CHART_ROW_SPAN rows;
-            # the band is a fixed region (empty bin lists leave it
-            # reserved, keeping the dashboard above intact)
+            # "Bin Charts" headline (tenth wave rename) with a blank row
+            # on BOTH sides, then the charts band: ONE 250 pt row with
+            # both donuts square-sized to the line (HB from column A, SB
+            # offset past the HB chart's right edge); empty bin lists
+            # leave the band reserved, keeping the dashboard above intact
             row = write_merged_headline(
                 BinSheet, row + 1, BIN_CHARTS_HEADLINE, "Headline 1"
             )
+            row += 1  # blank between the headline and the band
             chart_row = row
-            for (kind, _prefix, anchor_letter), bins in zip(
-                (("Hardware", "HB", "A"), ("Software", "SB", "D")), aggregated
+            BinSheet.row_dimensions[chart_row].height = BIN_CHART_BAND_HEIGHT_PT
+            for (kind, _prefix, offset_cm), bins in zip(
+                (
+                    ("Hardware", "HB", 0.0),
+                    ("Software", "SB", BIN_CHART_SIZE_CM + BIN_CHART_GAP_CM),
+                ),
+                aggregated,
             ):
                 chart_bins = [
                     (bin_num, bin_label(bin_num, name), count)
@@ -808,19 +825,20 @@ class ModernReportGenerator(reportGenerator):
                     BinSheet,
                     f"{kind} Bin — Head{head} / {site_label}",
                     chart_bins,
-                    f"{anchor_letter}{chart_row}",
+                    band_anchor(chart_row, offset_cm),
                     BIN_HELPER_COL,
                     helper_row=helper_row,
                 )
                 helper_row += 2 + len(chart_bins)  # header + data rows + gap
 
             # one blank separator after the band, then the "Detailed Bin
-            # Contribution" headline (ninth wave) — the HB and SW tables
-            # stack below it with a single blank row between them
-            row = chart_row + BIN_CHART_ROW_SPAN + 1
+            # Contribution" headline (ninth wave) with a blank row below it
+            # (tenth wave) — the HB and SW tables stack below with a
+            # single blank row between them
             row = write_merged_headline(
-                BinSheet, row, BIN_CONTRIBUTION_HEADLINE, "Headline 1"
+                BinSheet, chart_row + 2, BIN_CONTRIBUTION_HEADLINE, "Headline 1"
             )
+            row += 1  # blank below the contribution headline
             for index, (isHBIN, bins) in enumerate(zip((True, False), aggregated)):
                 kind = "Hardware" if isHBIN else "Software"
                 prefix = "HB" if isHBIN else "SB"
@@ -835,8 +853,7 @@ class ModernReportGenerator(reportGenerator):
                 if index == 0:
                     row += 1  # single blank separator before the SB section
             # block end: the cursor sits on the blank row after the SB
-            # Total; the next block's `row += 1` writes its title after
-            # that one blank row
+            # Total; the next block's KPI cards start after it
         self._row[key] = row
 
         self.loopCount += 1
@@ -845,9 +862,10 @@ class ModernReportGenerator(reportGenerator):
         # render_plain_table, which is where the plain sheets get it)
         BinSheet.sheet_view.showGridLines = False
         self._autofit_columns(BinSheet)
-        # eighth wave (R2): the Bin sheet is a fixed A:F page — all six
-        # columns share width 12 (KPI grid + the two tiled donuts); the
-        # autofit keeps sizing only the hidden helper columns
+        # eighth wave (R2), tenth-wave width: the Bin sheet is a fixed
+        # A:F page — all six columns share width 15 (KPI grid + tables;
+        # the 250 pt band charts overflow the grid on absolute anchors);
+        # the autofit keeps sizing only the hidden helper columns
         first_col, last_col = (
             column_index_from_string(letter) for letter in BIN_PAGE_WIDTH_RANGE
         )

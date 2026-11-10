@@ -117,20 +117,30 @@ design meant) and the donut data labels pin EVERY ``show*`` flag —
 Excel renders missing flags as TRUE, stacking
 "Count; Bin N - name; count; pct" over the slices — in a white bold
 theme font for contrast on the saturated slices.
+
+Tenth user-feedback wave (2026-11-10, layout compaction): columns A:F
+drop to width 15, the per-block title row is GONE (KPI cards sit one
+blank row under the 50 pt wrapped banner), the "Charts" headline becomes
+"Bin Charts" with a blank row on BOTH sides, the contribution headline
+gains a blank row below it, and the 14-row charts band collapses to ONE
+250 pt line with both donuts square-sized to the line via absolute
+``band_anchor()`` extents (HB from column A, SB offset past the HB
+chart's right edge).
 """
 
 import re
-from math import ceil
 
 from openpyxl.chart import DoughnutChart, Reference
 from openpyxl.chart.label import DataLabelList
 from openpyxl.chart.text import RichText
+from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
 from openpyxl.drawing.text import (
     CharacterProperties,
     Font as DrawingFont,
     Paragraph,
     ParagraphProperties,
 )
+from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.formatting.rule import DataBarRule
 from openpyxl.styles import Border, Font, Side
 from openpyxl.utils import get_column_letter
@@ -139,7 +149,6 @@ from openpyxl.worksheet.table import Table
 from openpyxl.worksheet.worksheet import Worksheet
 
 from deps.exporter.matrix import sanitize_cell
-from deps.exporter.sheets import ROW_HEIGHT_IN
 from deps.exporter.theme import (
     FONT_NAME,
     FONT_SIZE,
@@ -149,19 +158,39 @@ from deps.exporter.theme import (
     _argb,
 )
 
-# Chart geometry in centimetres (openpyxl chart.width / chart.height units).
-# Ninth wave: two 8.5 x 7 cm donuts TILE the Bin sheet's A:F page — each
-# chart spans 3 columns of the uniform width 20.4 (3 x ~2.83 cm ≈ 8.5 cm;
-# MDW=5 px for Times New Roman 8), HB on A..C and SB on D..F of the same
-# band rows.
-BIN_CHART_WIDTH_CM = 8.5
-BIN_CHART_HEIGHT_CM = 7.0
+# Chart geometry (tenth user-feedback wave, 2026-11-10): the two donuts
+# sit on ONE band row sized to the row height (user ruling: 250 pt) and
+# are SQUARE — 250 pt ≈ 8.82 cm on a side. The band collapses the
+# ninth-wave 14-row region into a single tall line; the charts overflow
+# the narrower A:F grid (width 15) and are pinned with absolute
+# OneCellAnchor extents so Excel sizes them to the line exactly.
+BIN_CHART_BAND_HEIGHT_PT = 250
+BIN_CHART_SIZE_CM = BIN_CHART_BAND_HEIGHT_PT * 2.54 / 72  # ≈ 8.82
+BIN_CHART_GAP_CM = 0.25  # gap between the HB and SB chart frames
+# Row-1 banner height (tenth wave): a wrapped 2-line Title must fit.
+BIN_BANNER_ROW_HEIGHT_PT = 50
 
-# Rows one charts band spans vertically (ninth wave: the band is its own
-# fixed layout region between two single-blank separator rows — no gap
-# row folded into the constant anymore):
-# ceil((7 / 2.54) / 0.21) == 14 (block rows 10..23).
-BIN_CHART_ROW_SPAN = ceil((BIN_CHART_HEIGHT_CM / 2.54) / ROW_HEIGHT_IN)
+# EMU math for the absolute band anchors (1 pt = 12700 EMU, 1 cm =
+# 360000 EMU, 1 px @ 96 dpi = 9525 EMU).
+EMU_PER_PT = 12700
+EMU_PER_CM = 360000
+EMU_PER_PX = 9525
+
+
+def band_anchor(chart_row: int, offset_cm: float = 0.0) -> OneCellAnchor:
+    """Absolute anchor pinning one band chart to the single band row
+    (tenth wave): top-left corner ``offset_cm`` right of column A on
+    1-based ``chart_row``, extent = one ``BIN_CHART_BAND_HEIGHT_PT``
+    square. Absolute extents (not chart.width/height) keep both donuts
+    exactly line-sized whatever Excel's column metrics do."""
+    x_emu = int(round(offset_cm * EMU_PER_CM))
+    col, col_off = divmod(x_emu, BIN_COL_EMU)
+    ext = int(round(BIN_CHART_BAND_HEIGHT_PT * EMU_PER_PT))
+    return OneCellAnchor(
+        _from=AnchorMarker(col=col, colOff=col_off, row=chart_row - 1, rowOff=0),
+        ext=XDRPositiveSize2D(cx=ext, cy=ext),
+    )
+
 
 # Donut hole diameter as a percentage of the chart diameter (sixth wave,
 # user mockup: 50-60 band; openpyxl clamps to NestedMinMax 1..90).
@@ -211,18 +240,21 @@ BIN_TOTAL_FONT = Font(name=FONT_NAME, size=FONT_SIZE, bold=True)
 # Structured tables live in columns B:E (eighth wave: column A belongs to
 # the page grid the KPI cards and the tiled donuts share).
 BIN_TABLE_FIRST_COL = 2
-# Uniform Bin-sheet page width (ninth wave): columns A:F all share width
-# 20.4 — each tiled 8.5 cm donut needs 3 of these columns (3 x (20.4 * 5
-# + 5) px = 321 px = 8.50 cm at MDW=5 px for Times New Roman 8 — the
-# workbook Normal font set by set_workbook_default_font); G+ keep their
-# autofit widths.
+# Uniform Bin-sheet page width (tenth wave: user ruling 15 — was 20.4):
+# columns A:F all share width 15 (80 px each at MDW=5 px for Times New
+# Roman 8 — the workbook Normal font set by set_workbook_default_font).
+# The 250 pt band charts overflow this grid and are anchored absolutely.
 BIN_PAGE_WIDTH_RANGE = ("A", "F")
-BIN_PAGE_COLUMN_WIDTH = 20.4
+BIN_PAGE_COLUMN_WIDTH = 15
+# One grid column in EMU (BIN_COL_PX = width x MDW + 5 = 80 px).
+BIN_COL_PX = int(BIN_PAGE_COLUMN_WIDTH * 5 + 5)
+BIN_COL_EMU = BIN_COL_PX * EMU_PER_PX
 
-# Merged A:F "Headline 1" band texts on the Bin sheet (ninth wave): one
-# above the donuts, one above BOTH bin tables (it does NOT replace the
-# per-table "Hardware/Software Bins — …" Headline 2 bands).
-BIN_CHARTS_HEADLINE = "Charts"
+# Merged A:F "Headline 1" band texts on the Bin sheet (ninth wave, one
+# renamed in the tenth): one above the donuts, one above BOTH bin tables
+# (it does NOT replace the per-table "Hardware/Software Bins — …"
+# Headline 2 bands).
+BIN_CHARTS_HEADLINE = "Bin Charts"
 BIN_CONTRIBUTION_HEADLINE = "Detailed Bin Contribution - HW Bin / SW Bin"
 
 # Upstream "Total: N" cell (DataInterface.py:595) — the reconstruction
@@ -508,8 +540,10 @@ def build_bin_donut(
       data (``titles_from_data=True`` — the "Count" header cell becomes
       the series name), labels column as categories, donut hole
       ``BIN_DONUT_HOLE_SIZE``, legend on the right, ``visible_cells_only
-      = False`` so the hidden helper columns still plot, 8.5 x 7 cm
-      (ninth wave: tiles 3 columns of the uniform width 20.4);
+      = False`` so the hidden helper columns still plot, and a square
+      ``BIN_CHART_SIZE_CM`` frame (tenth wave: sized to the 250 pt band
+      line — ``anchor_cell`` may be a string or an absolute
+      ``band_anchor()``);
     - NO per-slice ``DataPoint`` fills since the seventh wave (ruled):
       the slices follow the built-in style palette and bins are
       distinguished by labels/legend only — the settings bin-color dicts
@@ -564,8 +598,11 @@ def build_bin_donut(
     # plot the hidden helper columns (openpyxl 3.1.5 name; serializes to
     # the ChartSpace-level <plotVisOnly val="0"/>)
     chart.visible_cells_only = False
-    chart.width = BIN_CHART_WIDTH_CM
-    chart.height = BIN_CHART_HEIGHT_CM
+    # tenth wave: square charts sized to the 250 pt band line — when the
+    # caller passes a string anchor this drives the saved extent; band
+    # callers pass an absolute band_anchor() whose ext governs instead
+    chart.width = BIN_CHART_SIZE_CM
+    chart.height = BIN_CHART_SIZE_CM
     ws.add_chart(chart, anchor_cell)
 
     ws.column_dimensions[label_letter].hidden = True

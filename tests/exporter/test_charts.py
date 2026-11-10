@@ -27,22 +27,21 @@ asserted IN MEMORY only — openpyxl's reader recreates MergedCell objects
 without styles, though the styles themselves are in the saved XML.
 """
 
-from math import ceil
-
 import pytest
 from openpyxl import Workbook, load_workbook
 from openpyxl.chart import DoughnutChart
 
 from deps.exporter.charts import (
-    BIN_CHART_HEIGHT_CM,
-    BIN_CHART_ROW_SPAN,
-    BIN_CHART_WIDTH_CM,
+    BIN_CHART_BAND_HEIGHT_PT,
+    BIN_CHART_SIZE_CM,
+    BIN_COL_EMU,
     BIN_DONUT_HOLE_SIZE,
     BIN_PAGE_COLUMN_WIDTH,
     BIN_TABLE_HEADERS,
     aggregate_bin_counts,
     aggregate_kpi,
     apply_card_border,
+    band_anchor,
     bin_label,
     build_bin_donut,
     parse_bin_row,
@@ -51,7 +50,6 @@ from deps.exporter.charts import (
     write_kpi_cards,
     write_merged_headline,
 )
-from deps.exporter.sheets import ROW_HEIGHT_IN
 from deps.exporter.theme import ModernTheme
 
 
@@ -590,16 +588,30 @@ class TestApplyCardBorder:
 
 
 class TestChartGeometry:
-    def test_tile_size_and_band_rows(self):
-        # ninth wave: two 8.5 x 7 cm donuts tile the A:F page; 7 cm tall
-        # = 14 default rows; each chart spans 3 columns of width 20.4
-        # (3 x (20.4 * 5 + 5) px = 321 px = 8.50 cm at MDW=5 for TNR 8)
-        assert BIN_CHART_WIDTH_CM == 8.5
-        assert BIN_CHART_HEIGHT_CM == 7.0
-        assert BIN_CHART_ROW_SPAN == ceil((BIN_CHART_HEIGHT_CM / 2.54) / ROW_HEIGHT_IN)
-        assert BIN_CHART_ROW_SPAN == 14  # band rows 10..23 of each block
-        px = 3 * (BIN_PAGE_COLUMN_WIDTH * 5 + 5)
-        assert abs(px / 96 * 2.54 - 8.5) < 0.05
+    def test_band_line_size_and_grid(self):
+        # tenth wave: the two donuts sit on ONE 250 pt band row, square-
+        # sized to the line (250 pt ≈ 8.82 cm); the A:F grid drops to
+        # width 15 (80 px per column at MDW=5 for TNR 8) and the charts
+        # overflow it on absolute anchors
+        assert BIN_CHART_BAND_HEIGHT_PT == 250
+        assert BIN_CHART_SIZE_CM == pytest.approx(250 * 2.54 / 72)
+        assert BIN_PAGE_COLUMN_WIDTH == 15
+        assert BIN_COL_EMU == (15 * 5 + 5) * 9525  # 80 px -> EMU
+
+    def test_band_anchor_positions(self):
+        # HB pinned at column A of the band row, SB one chart-width +
+        # gap to the right (col E = 4 x 762000 EMU, plus a colOff), both
+        # 250 pt square (3175000 EMU) on 0-based row chart_row - 1
+        hb = band_anchor(9, 0.0)
+        assert (hb._from.row, hb._from.col, hb._from.colOff) == (8, 0, 0)
+        sb = band_anchor(9, BIN_CHART_SIZE_CM + 0.25)
+        assert sb._from.col == 4
+        assert sb._from.colOff > 0
+        for anchor in (hb, sb):
+            assert anchor.ext.cx == 250 * 12700
+            assert anchor.ext.cy == 250 * 12700
+        # the SB left edge clears the HB chart's right edge
+        assert sb._from.col * BIN_COL_EMU + sb._from.colOff >= 250 * 12700
 
 
 # --------------------------------------------------------------------------
@@ -649,8 +661,8 @@ class TestBuildBinDonut:
         assert chart.dataLabels.showBubbleSize is False
         # white bold label font — readable on the saturated slice colors
         assert chart.dataLabels.txPr is not None
-        assert chart.width == 8.5  # ninth wave: tiles 3 width-20.4 columns
-        assert chart.height == 7  # 14 default rows = BIN_CHART_ROW_SPAN
+        assert chart.width == pytest.approx(BIN_CHART_SIZE_CM)  # 250 pt square
+        assert chart.height == pytest.approx(BIN_CHART_SIZE_CM)
         # mockup: donut hole (openpyxl 3.1.5 DoughnutChart.holeSize,
         # NestedMinMax 1..90 — the factory constant sits in the 50-60 band)
         assert chart.holeSize == BIN_DONUT_HOLE_SIZE

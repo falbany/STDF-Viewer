@@ -129,3 +129,21 @@ label stacked "Count; Bin N - name; count; pct" over the slices.
 `build_bin_donut` now pins all six `show*` flags explicitly (percent
 only) and gives the labels a white bold Times New Roman 9 (`txPr`) for
 contrast on the saturated slices.
+
+## Tenth user-feedback wave (same day, layout compaction)
+
+User rulings, implemented verbatim:
+
+- Row-1 banner: wrap enabled, row height 50 pt (a 2-line title fits).
+- The per-block "Bin Chart — Head{h} / {site}" title row is REMOVED —
+  KPI cards sit one blank row below the banner (head/site stays in the
+  chart titles and per-table bands).
+- "Charts" headline renamed **"Bin Charts"**.
+- One blank row between the "Bin Charts" headline and the charts band.
+- One blank row below the "Detailed Bin Contribution" headline.
+- Columns A:F width 15 (was 20.4).
+- The charts band collapses to ONE 250 pt row; both donuts are SQUARE,
+  sized to the line (250 pt ≈ 8.82 cm), pinned with absolute
+  `OneCellAnchor` extents (`band_anchor()` — HB from column A, SB one
+  chart width + 0.25 cm gap to the right). The charts intentionally
+  overflow the narrower grid; fitToWidth absorbs the difference.
