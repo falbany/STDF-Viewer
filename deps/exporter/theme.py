@@ -24,10 +24,6 @@
 #
 """
 
-from functools import cached_property
-
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-
 # Palette / style constants (spec section 7 / STDFx).
 FONT_NAME = "Times New Roman"
 FONT_SIZE = 8
@@ -52,20 +48,54 @@ KPI_BORDER_DARK_RED = "9C0006"
 KPI_BORDER_DARK_BLUE = "1E40AF"
 CPK_BAND_HEXES = ("A7F3D0", "D1FAE5", "FEF3C7", "FECACA")
 
+# Sheet tab colors (xlsxwriter migration upgrade 5): keyed by English sheet
+# role; the generator maps its ReportSelection entries onto these.
+TAB_COLOR_HEXES = {
+    "file_info": "94A3B8",
+    "dut": "1E40AF",
+    "gdr": "94A3B8",
+    "stat": "1E40AF",
+    "trend": "0EA5E9",
+    "histo": "0EA5E9",
+    "bin": "EA580C",
+    "wafer": "7C3AED",
+}
 
-def _argb(hex6: str) -> str:
-    """Expand a 6-digit palette hex into an 8-digit aRGB color string."""
-    return "FF" + hex6
-
-
-def set_workbook_default_font(wb, name: str = FONT_NAME, size: int = FONT_SIZE) -> None:
-    """Point the workbook's built-in Normal (builtinId 0) style at the
-    theme font so unstyled cells — and Excel's column-width metrics —
-    follow the global default (ninth wave)."""
-    for style in wb._named_styles:
-        if style.name == "Normal":
-            style.font = Font(name=name, size=size)
-            return
+# Excel built-in named styles have no xlsxwriter equivalent (no named-style
+# API), so the Bin sheet's Title/Headline bands render from explicit
+# lookalike formats. Definitions extracted from Excel's own built-in style
+# table (ECMA-376 Part 4 Annex G.2 as Excel renders it, via the openpyxl
+# builtins records the previous engine relied on; theme colors resolved
+# against the default Office theme openpyxl embeds):
+#   Title       builtinId 15 — Cambria 18 bold, theme3 (dk2) = 44546A
+#   Headline 1  builtinId 16 — Calibri 15 bold, theme3, thick bottom
+#                 border in theme4 (accent1) = 4472C4
+#   Headline 2  builtinId 17 — Calibri 13 bold, theme3, thick bottom
+#                 border in accent1 lighter 50% = 8EA9DB
+LOOKALIKE_DEFS = {
+    "title": {
+        "font_name": "Cambria",
+        "font_size": 18,
+        "bold": True,
+        "font_color": "#44546A",
+    },
+    "headline1": {
+        "font_name": "Calibri",
+        "font_size": 15,
+        "bold": True,
+        "font_color": "#44546A",
+        "bottom": 5,  # thick (xlsxwriter border code)
+        "bottom_color": "#4472C4",
+    },
+    "headline2": {
+        "font_name": "Calibri",
+        "font_size": 13,
+        "bold": True,
+        "font_color": "#44546A",
+        "bottom": 5,  # thick (xlsxwriter border code)
+        "bottom_color": "#8EA9DB",
+    },
+}
 
 
 def number_format_from_settings(precision: int, notation: str) -> str:
@@ -86,133 +116,210 @@ def number_format_from_settings(precision: int, notation: str) -> str:
 
 
 class ModernTheme:
-    """Factory of cached openpyxl style objects for the modern exporter.
+    """Factory of cached xlsxwriter Format objects for the exporter.
 
-    Takes nothing; every property builds its style object once from the
-    module-level palette constants and returns the same object afterwards.
+    Takes the workbook (formats are workbook-scoped in xlsxwriter and
+    immutable — every distinct style decision needs its own Format, so a
+    composition cache keys the kwargs). Palette tokens are identical to
+    the openpyxl era; only the object layer changed.
     """
 
-    def _solid_fill(self, hex6: str) -> PatternFill:
-        argb = _argb(hex6)
-        return PatternFill(start_color=argb, end_color=argb, fill_type="solid")
+    def __init__(self, wb):
+        self._wb = wb
+        self._cache: dict = {}
 
-    def _thin_border(self) -> Border:
-        side = Side(style="thin", color=_argb(BORDER_HEX))
-        return Border(left=side, right=side, top=side, bottom=side)
+    # ------------------------------------------------------------------
+    # primitive formats (the named styles the rest of the package reads)
+    # ------------------------------------------------------------------
 
-    # Header row: bold white 10pt on dark blue.
-    @cached_property
-    def header_font(self) -> Font:
-        return Font(
-            name=FONT_NAME,
-            size=FONT_SIZE,
-            bold=True,
-            color=_argb(HEADER_FONT_HEX),
-        )
+    def _format(self, kwargs: dict):
+        """wb.add_format with a kwargs-dict cache — same kwargs, same object."""
+        key = tuple(sorted(kwargs.items()))
+        fmt = self._cache.get(key)
+        if fmt is None:
+            fmt = self._wb.add_format(dict(kwargs))
+            self._cache[key] = fmt
+        return fmt
 
-    @cached_property
-    def header_fill(self) -> PatternFill:
-        return self._solid_fill(HEADER_FILL_HEX)
+    @staticmethod
+    def _font_kwargs(key: str) -> dict:
+        """Font layer per FontKey."""
+        if key is None:
+            return {}
+        if key == "header":
+            return {
+                "font_name": FONT_NAME,
+                "font_size": FONT_SIZE,
+                "bold": True,
+                "font_color": f"#{HEADER_FONT_HEX}",
+            }
+        if key == "banner":
+            return {
+                "font_name": FONT_NAME,
+                "font_size": FONT_SIZE,
+                "bold": True,
+                "font_color": f"#{BANNER_FONT_HEX}",
+            }
+        if key == "metadata":
+            return {
+                "font_name": FONT_NAME,
+                "font_size": FONT_SIZE,
+                "bold": True,
+                "font_color": f"#{METADATA_LABEL_HEX}",
+            }
+        if key == "block":
+            return {
+                "font_name": FONT_NAME,
+                "font_size": 14,
+                "bold": True,
+                "font_color": f"#{HEADER_FILL_HEX}",
+            }
+        if key == "kpi_label":
+            return {
+                "font_name": FONT_NAME,
+                "font_size": 9,
+                "bold": True,
+                "font_color": f"#{KPI_LABEL_HEX}",
+            }
+        if key == "kpi_value":
+            return {
+                "font_name": FONT_NAME,
+                "font_size": 16,
+                "bold": True,
+                "font_color": f"#{BANNER_FONT_HEX}",
+            }
+        if key == "kpi_sub":
+            return {
+                "font_name": FONT_NAME,
+                "font_size": 9,
+                "italic": True,
+                "font_color": f"#{KPI_SUB_HEX}",
+            }
+        if key == "bold_body":
+            return {"font_name": FONT_NAME, "font_size": FONT_SIZE, "bold": True}
+        # "body" and anything else: plain Times New Roman 8
+        return {"font_name": FONT_NAME, "font_size": FONT_SIZE}
 
-    @cached_property
-    def header_alignment(self) -> Alignment:
-        return Alignment(horizontal="center", vertical="center")
+    @staticmethod
+    def _align_kwargs(key: str) -> dict:
+        """Alignment layer per AlignKey (vertical center everywhere, like
+        the openpyxl Alignment(horizontal=..., vertical='center'))."""
+        if key is None:
+            return {"valign": "vcenter"}
+        return {"align": key, "valign": "vcenter"}
 
-    @cached_property
-    def border(self) -> Border:
-        return self._thin_border()
+    def cell_format(
+        self,
+        font: "str | None" = None,
+        align: "str | None" = None,
+        border: bool = False,
+        fill_hex: "str | None" = None,
+        num_fmt: "str | None" = None,
+        extra: "dict | None" = None,
+    ):
+        """One composed Format: font key + alignment key + thin border +
+        fill + number format + raw extra kwargs, cached on the tuple."""
+        kwargs = {}
+        kwargs.update(self._font_kwargs(font))
+        kwargs.update(self._align_kwargs(align))
+        if border:
+            kwargs["border"] = 1
+            kwargs["border_color"] = f"#{BORDER_HEX}"
+        if fill_hex:
+            kwargs["bg_color"] = f"#{fill_hex}"
+        if num_fmt:
+            kwargs["num_format"] = num_fmt
+        if extra:
+            kwargs.update(extra)
+        return self._format(kwargs)
 
-    # Workflow banner row: dark bold on light slate.
-    @cached_property
-    def banner_font(self) -> Font:
-        return Font(
-            name=FONT_NAME,
-            size=FONT_SIZE,
-            bold=True,
-            color=_argb(BANNER_FONT_HEX),
-        )
+    def cf_fill(self, hex6: str):
+        """Background-only Format for conditional-formatting rules (Excel
+        merges the rule's fill itself; the format carries just the color)."""
+        return self._format({"bg_color": f"#{hex6}"})
 
-    @cached_property
-    def banner_fill(self) -> PatternFill:
-        return self._solid_fill(BANNER_FILL_HEX)
+    def lookalike(self, key: str, wrap: bool = False):
+        """Built-in named style lookalike (Title / Headline 1 / Headline 2 —
+        definitions in LOOKALIKE_DEFS); ``wrap`` adds text wrapping and a
+        top valign (the Bin banner row wraps in its 50 pt row)."""
+        kwargs = dict(LOOKALIKE_DEFS[key])
+        if wrap:
+            kwargs["text_wrap"] = True
+            kwargs["valign"] = "top"
+        return self._format(kwargs)
 
-    # Metadata block labels: bold blue.
-    @cached_property
-    def metadata_label_font(self) -> Font:
-        return Font(
-            name=FONT_NAME,
-            size=FONT_SIZE,
-            bold=True,
-            color=_argb(METADATA_LABEL_HEX),
-        )
+    # ------------------------------------------------------------------
+    # named styles (same names as the openpyxl era; Format objects now)
+    # ------------------------------------------------------------------
 
-    # Bin-sheet block title (seventh wave dashboard): 14pt bold on the
-    # theme primary blue (HEADER_FILL_HEX used as a font color).
-    @cached_property
-    def block_title_font(self) -> Font:
-        return Font(
-            name=FONT_NAME,
-            size=14,
-            bold=True,
-            color=_argb(HEADER_FILL_HEX),
-        )
+    @property
+    def header_font(self):
+        return self.cell_format(font="header")
 
-    # KPI card faces (seventh wave dashboard mockup): label bold 9 grey,
-    # value bold 16 dark, subtitle italic 9 light grey.
-    @cached_property
-    def kpi_label_font(self) -> Font:
-        return Font(
-            name=FONT_NAME,
-            size=9,
-            bold=True,
-            color=_argb(KPI_LABEL_HEX),
-        )
+    @property
+    def header_fill(self):
+        return self._format({"bg_color": f"#{HEADER_FILL_HEX}"})
 
-    @cached_property
-    def kpi_value_font(self) -> Font:
-        return Font(
-            name=FONT_NAME,
-            size=16,
-            bold=True,
-            color=_argb(BANNER_FONT_HEX),
-        )
+    @property
+    def header_alignment(self):
+        return self.cell_format(align="center")
 
-    @cached_property
-    def kpi_sub_font(self) -> Font:
-        return Font(
-            name=FONT_NAME,
-            size=9,
-            italic=True,
-            color=_argb(KPI_SUB_HEX),
-        )
+    @property
+    def border(self):
+        return self.cell_format(border=True)
 
-    # Body cells.
-    @cached_property
-    def body_font(self) -> Font:
-        return Font(name=FONT_NAME, size=FONT_SIZE)
+    @property
+    def banner_font(self):
+        return self.cell_format(font="banner")
 
-    @cached_property
-    def body_alignment(self) -> Alignment:
-        return Alignment(horizontal="center", vertical="center")
+    @property
+    def banner_fill(self):
+        return self._format({"bg_color": f"#{BANNER_FILL_HEX}"})
 
-    # Result highlighting.
-    @cached_property
-    def pass_fill(self) -> PatternFill:
-        return self._solid_fill(PASS_FILL_HEX)
+    @property
+    def metadata_label_font(self):
+        return self.cell_format(font="metadata")
 
-    @cached_property
-    def fail_fill(self) -> PatternFill:
-        return self._solid_fill(FAIL_FILL_HEX)
+    @property
+    def block_title_font(self):
+        return self.cell_format(font="block")
 
-    @cached_property
-    def neutral_fill(self) -> PatternFill:
-        return self._solid_fill(NEUTRAL_FILL_HEX)
+    @property
+    def kpi_label_font(self):
+        return self.cell_format(font="kpi_label")
+
+    @property
+    def kpi_value_font(self):
+        return self.cell_format(font="kpi_value")
+
+    @property
+    def kpi_sub_font(self):
+        return self.cell_format(font="kpi_sub")
+
+    @property
+    def body_font(self):
+        return self.cell_format(font="body")
+
+    @property
+    def body_alignment(self):
+        return self.cell_format(align="center")
+
+    @property
+    def pass_fill(self):
+        return self._format({"bg_color": f"#{PASS_FILL_HEX}"})
+
+    @property
+    def fail_fill(self):
+        return self._format({"bg_color": f"#{FAIL_FILL_HEX}"})
+
+    @property
+    def neutral_fill(self):
+        return self._format({"bg_color": f"#{NEUTRAL_FILL_HEX}"})
+
+    @property
+    def group_fill(self):
+        return self._format({"bg_color": f"#{GROUP_FILL_HEX}"})
 
     # Cpk conditional-formatting band colors, best to worst.
     def cpk_band_fills(self) -> list[str]:
         return list(CPK_BAND_HEXES)
-
-    # Row-group banding.
-    @cached_property
-    def group_fill(self) -> PatternFill:
-        return self._solid_fill(GROUP_FILL_HEX)
