@@ -461,12 +461,13 @@ class TestChartSheets:
             "E5:F5",
         ):
             assert span in ranges, span
-        # eighth wave (R4): each card carries a medium outline in its own
-        # accent — post-merge styles survive the save/reload on the anchors
+        # eighth wave (R4) borders on the ninth-wave dark accents: each
+        # card carries a medium outline in its own dark accent — post-merge
+        # styles survive the save/reload on the anchors
         assert ws["A3"].border.top.style == "medium"
-        assert ws["A3"].border.left.color.rgb == "FFFFF3CD"
-        assert ws["C3"].border.top.color.rgb == "FFFFCCCC"
-        assert ws["E3"].border.left.color.rgb == "FFE9EEF6"
+        assert ws["A3"].border.left.color.rgb == "FF9C6500"
+        assert ws["C3"].border.top.color.rgb == "FF9C0006"
+        assert ws["E3"].border.left.color.rgb == "FF1E40AF"
         assert ws["A5"].border.bottom.style == "medium"
 
     # -- donuts tiled in their own band (eighth wave) -------------------------

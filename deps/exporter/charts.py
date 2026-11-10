@@ -126,11 +126,11 @@ from openpyxl.worksheet.worksheet import Worksheet
 from deps.exporter.matrix import sanitize_cell
 from deps.exporter.sheets import ROW_HEIGHT_IN
 from deps.exporter.theme import (
-    FAIL_FILL_HEX,
     FONT_NAME,
     FONT_SIZE,
-    GROUP_FILL_HEX,
-    NEUTRAL_FILL_HEX,
+    KPI_BORDER_DARK_BLUE,
+    KPI_BORDER_DARK_RED,
+    KPI_BORDER_DARK_YELLOW,
     _argb,
 )
 
@@ -202,13 +202,13 @@ KPI_PCT_FORMAT = "0.00%"  # Yield card value display format
 KPI_YIELD_PLACEHOLDER = "-"  # Yield card value when total == 0
 
 # The three KPI cards, each spanning two columns (seventh-wave mockup):
-# (start column, theme fill attribute, border hex) — the border hex REUSES
-# the same palette constant as the fill (eighth wave, R4: no new theme
-# tokens; each card gets a medium outline in its own accent).
+# (start column, theme fill attribute, border hex) — the border hexes are
+# the ninth-wave DARK accent tokens (dark yellow / dark red / dark blue),
+# each matching its card's fill family.
 KPI_CARD_SPANS = (
-    (1, "neutral_fill", NEUTRAL_FILL_HEX),
-    (3, "fail_fill", FAIL_FILL_HEX),
-    (5, "group_fill", GROUP_FILL_HEX),
+    (1, "neutral_fill", KPI_BORDER_DARK_YELLOW),
+    (3, "fail_fill", KPI_BORDER_DARK_RED),
+    (5, "group_fill", KPI_BORDER_DARK_BLUE),
 )
 
 
@@ -291,8 +291,11 @@ def aggregate_kpi(rows) -> dict:
 
     Returns ``{"total", "pass", "failed", "unknown", "superseded"}`` as
     ints (missing keys default 0; empty ``rows`` -> all zeros) plus
-    ``"yield"`` = ``pass / total`` as a float, or ``None`` when the total
-    is 0 (no DUTs) so the card can show a placeholder instead of ``inf``.
+    ``"yield"`` = ``pass / (total - superseded)`` as a float, or ``None``
+    when the effective total (``total - superseded``) is 0 (no DUTs, or
+    every DUT superseded) so the card can show a placeholder instead of
+    ``inf``. Ninth wave: superseded DUTs are excluded from the yield
+    denominator and the Total Parts card (user ruling).
     NOTE: feed ONE of the two bin lists (HB or SB) — upstream writes the
     SAME summary cells into both rows, so summing both double-counts.
     """
@@ -301,7 +304,8 @@ def aggregate_kpi(rows) -> dict:
         for key, value in parse_kpi_row(row).items():
             if key in sums:
                 sums[key] += value
-    sums["yield"] = (sums["pass"] / sums["total"]) if sums["total"] else None
+    effective = sums["total"] - sums["superseded"]
+    sums["yield"] = (sums["pass"] / effective) if effective else None
     return sums
 
 
@@ -344,17 +348,19 @@ def write_kpi_cards(
     Three cards, each a 3x2 block (label / value / subtitle rows, two
     merged columns A:B, C:D, E:F):
     - "Yield" — the yield fraction as a FLOAT cell with the ``"0.00%"``
-      format (``kpi["yield"]``, or the ``"-"`` placeholder when the total
-      is 0), subtitle ``"{pass} pass / {total} total parts"``;
+      format (``kpi["yield"]``, or the ``"-"`` placeholder when the
+      effective total is 0), subtitle ``"{pass} pass / {effective_total}
+      total parts"`` — the total EXCLUDES superseded DUTs (ninth wave);
     - "Fails" — the failed count (int), subtitle ``"{unknown} unknown ·
       {superseded} superseded"``;
-    - "Total Parts" — the total (int), subtitle ``"across {n} file(s)"``.
+    - "Total Parts" — the EFFECTIVE total, ``total - superseded`` (int,
+      ninth wave), subtitle ``"across {n} file(s)"``.
     Card fills: theme ``neutral_fill`` (yellow) / ``fail_fill`` (red) /
     ``group_fill`` (blue-grey), applied to EVERY cell of each card block,
-    plus a medium outline in the card's own accent (eighth wave, R4 —
-    ``apply_card_border``; the accent hexes reuse the fill palette
-    constants). Card 2's subtitle may clip at the uniform column width 12
-    (accepted in wave 8). openpyxl's ``merge_cells`` wipes the styles of
+    plus a medium outline in the card's DARK accent (ninth wave —
+    ``apply_card_border``; dark yellow / dark red / dark blue). Card 2's
+    subtitle may clip at the uniform column width (accepted in wave 8).
+    openpyxl's ``merge_cells`` wipes the styles of
     non-anchor cells, so each card row is merged FIRST and styled
     afterwards (verified 3.1.5: post-merge styles reach the saved XML on
     every cell of the range and round-trip — see ``apply_card_border``).
@@ -362,11 +368,12 @@ def write_kpi_cards(
     label_row, value_row, sub_row = start_row, start_row + 1, start_row + 2
     alignment = theme.body_alignment  # centered, like every other face
     yield_value = kpi.get("yield")
+    effective_total = kpi.get("total", 0) - kpi.get("superseded", 0)
     cards = (
         (
             "Yield",
             yield_value if yield_value is not None else KPI_YIELD_PLACEHOLDER,
-            f"{kpi.get('pass', 0)} pass / {kpi.get('total', 0)} total parts",
+            f"{kpi.get('pass', 0)} pass / {effective_total} total parts",
             True,
         ),
         (
@@ -375,7 +382,7 @@ def write_kpi_cards(
             f"{kpi.get('unknown', 0)} unknown · {kpi.get('superseded', 0)} superseded",
             False,
         ),
-        ("Total Parts", int(kpi.get("total", 0)), f"across {n_files} file(s)", False),
+        ("Total Parts", int(effective_total), f"across {n_files} file(s)", False),
     )
 
     for index, (label, value, subtitle, is_percent) in enumerate(cards):

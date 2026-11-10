@@ -309,6 +309,20 @@ class TestAggregateKpi:
         kpi = aggregate_kpi([first, second])
         assert kpi["yield"] == pytest.approx(14 / 15)
 
+    def test_superseded_excluded_from_yield_denominator(self):
+        row = bin_row()
+        row[6] = "Superseded: 2"  # total 10, pass 9 -> effective 8
+        kpi = aggregate_kpi([row])
+        assert kpi["superseded"] == 2
+        assert kpi["yield"] == pytest.approx(9 / 8)
+
+    def test_kpi_superseded_ge_total(self):
+        # degenerate counts: effective total <= 0 -> yield None (placeholder)
+        row = bin_row()
+        row[2] = "Total: 2"
+        row[6] = "Superseded: 2"
+        assert aggregate_kpi([row])["yield"] is None
+
 
 # --------------------------------------------------------------------------
 # write_kpi_cards (seventh wave: stylized dashboard cards, rows 3-5)
@@ -341,7 +355,7 @@ class TestWriteKpiCards:
         assert ws["A4"].value == pytest.approx(0.9)
         assert isinstance(ws["A4"].value, float)
         assert ws["A4"].number_format == "0.00%"  # numeric, wave-3 spirit
-        assert ws["A5"].value == "9 pass / 10 total parts"
+        assert ws["A5"].value == "9 pass / 7 total parts"  # 10 - 3 superseded
 
     def test_card2_fails(self, ws, theme):
         self.written(ws, theme)
@@ -353,9 +367,15 @@ class TestWriteKpiCards:
     def test_card3_total_parts(self, ws, theme):
         self.written(ws, theme)
         assert ws["E3"].value == "Total Parts"
-        assert ws["E4"].value == 10
+        assert ws["E4"].value == 7  # 10 total - 3 superseded
         assert isinstance(ws["E4"].value, int)
         assert ws["E5"].value == "across 4 file(s)"
+
+    def test_total_parts_card_excludes_superseded(self, ws, theme):
+        kpi = {**KPI, "total": 5, "superseded": 5, "yield": None}
+        self.written(ws, theme, kpi=kpi)
+        assert ws["E4"].value == 0
+        assert ws["A5"].value == "9 pass / 0 total parts"
 
     def test_zero_total_yield_cell_is_dash(self, ws, theme):
         kpi = dict(KPI, total=0, **{"pass": 0, "yield": None})
@@ -426,10 +446,11 @@ class TestWriteKpiCards:
     # accent borders (eighth wave, R4) ----------------------------------------
 
     def test_card1_border_outline(self, ws, theme):
-        # each card gets a medium outline in its OWN accent (the same theme
-        # hex as its fill): corners combine two sides, edge cells one side
+        # each card gets a medium outline in its OWN DARK accent (ninth
+        # wave — dark yellow for Yield): corners combine two sides, edge
+        # cells one side
         self.written(ws, theme)
-        rgb = "FFFFF3CD"
+        rgb = "FF9C6500"
         assert sides(ws["A3"].border) == {
             "top": ("medium", rgb),
             "bottom": None,
@@ -449,21 +470,21 @@ class TestWriteKpiCards:
         assert sides(ws["B5"].border)["bottom"] == ("medium", rgb)
         assert sides(ws["B5"].border)["right"] == ("medium", rgb)
         # no foreign accent leaks in
-        assert sides(ws["C3"].border)["top"] == ("medium", "FFFFCCCC")
+        assert sides(ws["C3"].border)["top"] == ("medium", "FF9C0006")
 
     def test_card2_and_card3_border_accents(self, ws, theme):
-        # Fails card -> fail red, Total card -> group blue-grey
+        # Fails card -> dark red, Total card -> dark blue (ninth wave)
         self.written(ws, theme)
-        assert sides(ws["C3"].border)["top"] == ("medium", "FFFFCCCC")
-        assert sides(ws["C3"].border)["left"] == ("medium", "FFFFCCCC")
-        assert sides(ws["D3"].border)["right"] == ("medium", "FFFFCCCC")
-        assert sides(ws["C5"].border)["bottom"] == ("medium", "FFFFCCCC")
-        assert sides(ws["D5"].border)["bottom"] == ("medium", "FFFFCCCC")
-        assert sides(ws["E3"].border)["top"] == ("medium", "FFE9EEF6")
-        assert sides(ws["E3"].border)["left"] == ("medium", "FFE9EEF6")
-        assert sides(ws["F3"].border)["right"] == ("medium", "FFE9EEF6")
-        assert sides(ws["E5"].border)["bottom"] == ("medium", "FFE9EEF6")
-        assert sides(ws["F5"].border)["right"] == ("medium", "FFE9EEF6")
+        assert sides(ws["C3"].border)["top"] == ("medium", "FF9C0006")
+        assert sides(ws["C3"].border)["left"] == ("medium", "FF9C0006")
+        assert sides(ws["D3"].border)["right"] == ("medium", "FF9C0006")
+        assert sides(ws["C5"].border)["bottom"] == ("medium", "FF9C0006")
+        assert sides(ws["D5"].border)["bottom"] == ("medium", "FF9C0006")
+        assert sides(ws["E3"].border)["top"] == ("medium", "FF1E40AF")
+        assert sides(ws["E3"].border)["left"] == ("medium", "FF1E40AF")
+        assert sides(ws["F3"].border)["right"] == ("medium", "FF1E40AF")
+        assert sides(ws["E5"].border)["bottom"] == ("medium", "FF1E40AF")
+        assert sides(ws["F5"].border)["right"] == ("medium", "FF1E40AF")
 
     def test_card_borders_survive_save_reload(self, ws, theme, tmp_path):
         # styles set POST-merge reach the saved XML on every edge cell;
@@ -475,11 +496,11 @@ class TestWriteKpiCards:
         ws.parent.save(path)
         reloaded = load_workbook(path)["Sheet"]
         assert reloaded["A3"].border.top.style == "medium"
-        assert reloaded["A3"].border.left.color.rgb == "FFFFF3CD"
-        assert reloaded["C3"].border.top.color.rgb == "FFFFCCCC"
-        assert reloaded["E3"].border.left.color.rgb == "FFE9EEF6"
+        assert reloaded["A3"].border.left.color.rgb == "FF9C6500"
+        assert reloaded["C3"].border.top.color.rgb == "FF9C0006"
+        assert reloaded["E3"].border.left.color.rgb == "FF1E40AF"
         assert reloaded["A5"].border.bottom.style == "medium"
-        assert reloaded["A5"].border.left.color.rgb == "FFFFF3CD"
+        assert reloaded["A5"].border.left.color.rgb == "FF9C6500"
 
 
 # --------------------------------------------------------------------------
