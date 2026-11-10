@@ -353,6 +353,7 @@ def build_bin_donut(
         ws.write(row0 + index, helper_col + 1, int(count))
 
     chart = wb.add_chart({"type": "doughnut"})
+    chart.set_title({"name": title})
     chart.set_hole_size(BIN_DONUT_HOLE_SIZE)
     chart.set_style(BIN_CHART_STYLE)
     chart.add_series(

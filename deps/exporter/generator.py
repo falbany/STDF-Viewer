@@ -60,10 +60,8 @@ mirroring the classic cursor gaps and progress cadence.
 from itertools import product
 import re
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment
-from openpyxl.utils import column_index_from_string, get_column_letter
-from openpyxl.worksheet.properties import PageSetupProperties
+import xlsxwriter
+import xlsxwriter.utility as xlutil
 from PyQt5 import QtCore
 
 from deps.SharedSrc import REC, tab
@@ -84,6 +82,7 @@ from deps.exporter.charts import (
     aggregate_kpi,
     bin_label,
     build_bin_donut,
+    complete_chart_flags,
     write_bin_table,
     write_kpi_cards,
     write_merged_headline,
@@ -91,8 +90,11 @@ from deps.exporter.charts import (
 from deps.exporter.helpers import (
     apply_cp_formula,
     apply_cpk_formula,
+    get_column_letter,
     parse_temperature_text,
     split_test_name,
+    stat_cp_value,
+    stat_cpk_value,
 )
 from deps.exporter.matrix import (
     FTR_SPEC_MAX,
@@ -103,10 +105,13 @@ from deps.exporter.sheets import (
     insert_report_image,
     plain_table_spec,
 )
-from deps.exporter.theme import ModernTheme, set_workbook_default_font
+from deps.exporter.theme import ModernTheme, TAB_COLOR_HEXES
 from deps.exporter.writer import (
+    FOOTER_TEXT,
+    apply_autofit,
     render_matrix_sheet,
     render_plain_table,
+    reset_widths,
     write_body_cell,
     write_plain_row,
 )
@@ -133,6 +138,10 @@ FILE_INFO_NUMERIC_LABELS = frozenset(
     }
 )
 YIELD_FORMAT = "0.00%"
+
+# Group-banding fill hex (theme token) passed to write_plain_row as a
+# plain string — xlsxwriter formats compose per cell.
+theme_group_fill_hex = "E9EEF6"
 
 
 # English-only File Info anchors feeding the Bin-sheet banner (ninth
@@ -242,7 +251,8 @@ STAT_VALUE_COLUMN_WIDTH = 8
 # Bin Chart pie helper blocks live in this fixed far column (labels) and
 # the next one (counts); both are hidden by the chart factory. A fixed far
 # column keeps them clear of the auto-fitted table columns (BJ/BK > cap 60).
-BIN_HELPER_COL = 62
+# 0-BASED in the xlsxwriter era: 61 = BJ, 62 = BK (was openpyxl 1-based 62).
+BIN_HELPER_COL = 61
 
 # English-only header anchors (whitespace-normalized matching).
 _STAT_RENAMES = {"Low Limit": "SpecMin", "High Limit": "SpecMax"}
@@ -522,6 +532,13 @@ def _numeric_file_info_cell(value):
         return value, None
 
 
+def _is_number(value) -> bool:
+    """Real numeric cell (bools and NaN excluded)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return value == value  # NaN != NaN
+
+
 class ModernReportGenerator(reportGenerator):
     def __init__(
         self,
@@ -533,8 +550,8 @@ class ModernReportGenerator(reportGenerator):
     ):
         super().__init__(signals, mutex, conditionWait, reportInfo, channel)
         # instance state replacing the classic module-level sv statics
-        self._wb: Workbook | None = None
-        self._theme = ModernTheme()
+        self._wb: xlsxwriter.Workbook | None = None
+        self._theme = None  # ModernTheme binds to the workbook in report_core
         self._row: dict[ReportSelection, int] = {}  # per-sheet row cursors
 
     # ----------------------------------------------------------------------
@@ -542,28 +559,44 @@ class ModernReportGenerator(reportGenerator):
     # ----------------------------------------------------------------------
 
     def _autofit_columns(self, ws) -> None:
-        """Set each used column's width to max content length * 1.1, capped
-        at AUTOFIT_CAP (the modern counterpart of the classic
-        ``set_column(col, col, width*1.1)`` calls). Plain sheets only — the
-        DUT Summary matrix pins its column widths in the renderer."""
-        widths: dict[int, int] = {}
-        for row in ws.iter_rows():
-            for cell in row:
-                if cell.value is None:
-                    continue
-                length = len(str(cell.value))
-                if length > widths.get(cell.column, 0):
-                    widths[cell.column] = length
-        for column, length in widths.items():
-            ws.column_dimensions[get_column_letter(column)].width = min(
-                length * AUTOFIT_FACTOR, AUTOFIT_CAP
-            )
+        """Apply the writer's width ledger as ``max content length * 1.1``
+        capped at AUTOFIT_CAP (xlsxwriter cells cannot be re-read, so the
+        renderer notes widths at write time)."""
+        apply_autofit(ws, AUTOFIT_FACTOR, AUTOFIT_CAP)
 
     def _write_body_row(self, ws, row: int, values: list, fill=None) -> None:
         """One themed body row at 1-based ``row``: body font/alignment and
-        thin border via writer.write_body_cell, optional band fill."""
+        thin border via writer.write_body_cell, optional band fill hex."""
         for column, value in enumerate(values, start=1):
             write_body_cell(ws, row, column, value, self._theme, fill=fill)
+
+    @staticmethod
+    def _stat_formula_values(stat_row: list, header_info: dict) -> dict:
+        """Cached Cp/Cpk results for one transformed Test Statistics row,
+        keyed by 1-based column: the same values the live formulas compute
+        (sigma/mu from the row's numericized Average/St. Dev. cells, limits
+        from the EFFECTIVE SpecMin/SpecMax cells — FTR pseudo-limits already
+        applied by ``apply_ftr_pseudo_limits``). Uncomputable -> "" so the
+        cache stays blank (never xlsxwriter's default cached 0)."""
+        cp_col = header_info.get("cp_col")
+        cpk_col = header_info.get("cpk_col")
+        spec_cols = header_info.get("spec_cols")
+        if cp_col is None or cpk_col is None or spec_cols is None:
+            return {}
+        def _cell(index):
+            value = stat_row[index] if index < len(stat_row) else None
+            return value if _is_number(value) else None
+
+        spec_min = _cell(spec_cols[0])
+        spec_max = _cell(spec_cols[1])
+        avg = _cell(header_info.get("avg_col"))
+        std = _cell(header_info.get("std_col"))
+        cp_cache = stat_cp_value(spec_min, spec_max, std)
+        cpk_cache = stat_cpk_value(spec_min, spec_max, avg, std)
+        return {
+            cp_col + 1: "" if cp_cache is None else cp_cache,
+            cpk_col + 1: "" if cpk_cache is None else cpk_cache,
+        }
 
     # ----------------------------------------------------------------------
     # plain sheets (Task 7)
@@ -611,6 +644,8 @@ class ModernReportGenerator(reportGenerator):
             self.tr,
             cell_number_formats=cell_number_formats,
         )
+        spec["tab_color"] = TAB_COLOR_HEXES["file_info"]
+        spec["repeat_header_row"] = 1
         render_plain_table(InfoSheet, spec, self._theme)
         self._autofit_columns(InfoSheet)
 
@@ -641,6 +676,8 @@ class ModernReportGenerator(reportGenerator):
             dataTable,
             self.tr,
         )
+        spec["tab_color"] = TAB_COLOR_HEXES["gdr"]
+        spec["repeat_header_row"] = 1
         render_plain_table(GDR_DTR_Sheet, spec, self._theme)
         self._autofit_columns(GDR_DTR_Sheet)
 
@@ -701,6 +738,8 @@ class ModernReportGenerator(reportGenerator):
         )
         spec["number_formats"] = number_formats
         spec["column_fills"] = column_fills
+        spec["tab_color"] = TAB_COLOR_HEXES["stat"]
+        spec["repeat_header_row"] = 1
         if cf_ranges:
             spec["conditional_formatting"] = cf_ranges
         render_plain_table(StatSheet, spec, self._theme)
@@ -723,15 +762,21 @@ class ModernReportGenerator(reportGenerator):
             # column (same limits feed both ratios).
             apply_cpk_formula(stat_row, header_info, 2 + offset)
             apply_cp_formula(stat_row, header_info, 2 + offset)
+            # cached formula results (xlsxwriter migration): the same
+            # values the Cp/Cpk formulas compute — σ/μ from the row's
+            # numericized cells, limits from the EFFECTIVE spec cells
+            # (FTR pseudo-limits already applied); uncomputable -> ""
+            formula_values = self._stat_formula_values(stat_row, header_info)
             written_rows.append(stat_row)
             write_plain_row(
                 StatSheet,
                 2 + offset,
                 stat_row,
                 self._theme,
-                band=(self._theme.group_fill if offset % 2 == 0 else None),
+                band=(theme_group_fill_hex if offset % 2 == 0 else None),
                 number_formats=number_formats,
                 column_fills=column_fills,
+                formula_values=formula_values,
             )
             self._row[ReportSelection.Stat] = 2 + offset
             self.loopCount += 1
@@ -740,19 +785,15 @@ class ModernReportGenerator(reportGenerator):
         # extend the auto-filter over the written rows (render_plain_table
         # only knew about the header when it drew the sheet)
         width = max([len(header_info["header"])] + [len(row) for row in written_rows])
-        StatSheet.auto_filter.ref = (
-            f"A1:{get_column_letter(width)}{1 + len(written_rows)}"
-        )
+        StatSheet.autofilter(0, 0, len(written_rows), width - 1)
         self._autofit_columns(StatSheet)
-        # sixth wave: value columns G..P get a compact fixed width (autofit
+        # sixth wave: value columns G..Q get a compact fixed width (autofit
         # stays for A:F — the test-name column benefits)
-        for index in range(
-            column_index_from_string(STAT_VALUE_WIDTH_RANGE[0]),
-            column_index_from_string(STAT_VALUE_WIDTH_RANGE[1]) + 1,
-        ):
-            StatSheet.column_dimensions[
-                get_column_letter(index)
-            ].width = STAT_VALUE_COLUMN_WIDTH
+        StatSheet.set_column(
+            xlutil.xl_cell_to_rowcol(f"{STAT_VALUE_WIDTH_RANGE[0]}1")[1],
+            xlutil.xl_cell_to_rowcol(f"{STAT_VALUE_WIDTH_RANGE[1]}1")[1],
+            STAT_VALUE_COLUMN_WIDTH,
+        )
 
     # ----------------------------------------------------------------------
     # DUT Summary matrix + chart sheets (Task 8)
@@ -830,7 +871,7 @@ class ModernReportGenerator(reportGenerator):
         # spec names already carry the " (n)" suffixes. Column widths are
         # pinned inside render_matrix_sheet (A=8, B=30, C..L=8, dies=8).
         for chunk_index, spec in enumerate(specs):
-            ws = DutSheet if chunk_index == 0 else self._wb.create_sheet(spec["name"])
+            ws = DutSheet if chunk_index == 0 else self._wb.add_worksheet(spec["name"])
             render_matrix_sheet(ws, spec, self._theme)
 
         # classic cadence: one tick after the DUT info part...
@@ -846,16 +887,20 @@ class ModernReportGenerator(reportGenerator):
         if BinSheet is None:
             return
 
-        # ninth wave: row 1 carries the merged A:F "Title"-style banner
+        # ninth wave: row 1 carries the merged A:F Title-lookalike banner
         # (Product ID / Sublot ID from File Info, or the sheet-name
         # fallback); tenth wave: the banner wraps in a 50 pt row so a
         # 2-line title fits, the per-block title row is GONE and the KPI
         # cards sit one blank row below the banner
-        write_merged_headline(BinSheet, 1, self._bin_banner, "Title")
-        BinSheet.row_dimensions[1].height = BIN_BANNER_ROW_HEIGHT_PT
-        BinSheet.cell(row=1, column=1).alignment = Alignment(
-            wrap_text=True, vertical="center"
+        BinSheet.merge_range(
+            0,
+            0,
+            0,
+            5,
+            self._bin_banner,
+            self._theme.lookalike("title", wrap=True),
         )
+        BinSheet.set_row(0, BIN_BANNER_ROW_HEIGHT_PT)
         key = ReportSelection.Bin
         row = 2
         # hidden helper blocks (fixed far column) advance per chart so the
@@ -882,8 +927,9 @@ class ModernReportGenerator(reportGenerator):
             site_tag = "AllSites" if site == -1 else f"Site{site}"
 
             # KPI cards (label/value/subtitle, each with a dark accent
-            # outline) after ONE blank separator row — the head/site
-            # identification lives in the chart and table titles only
+            # outline riding the row-merge format) after ONE blank
+            # separator row — the head/site identification lives in the
+            # chart and table titles only
             row = write_kpi_cards(BinSheet, row + 1, kpi, n_files, self._theme)
 
             # "Bin Charts" headline (tenth wave rename) with a blank row
@@ -892,11 +938,11 @@ class ModernReportGenerator(reportGenerator):
             # at D{chart_row} (user ruling); empty bin lists leave the
             # band reserved, keeping the dashboard above intact
             row = write_merged_headline(
-                BinSheet, row + 1, BIN_CHARTS_HEADLINE, "Headline 1"
+                BinSheet, row + 1, BIN_CHARTS_HEADLINE, "headline1", self._theme
             )
             row += 1  # blank between the headline and the band
             chart_row = row
-            BinSheet.row_dimensions[chart_row].height = BIN_CHART_BAND_HEIGHT_PT
+            BinSheet.set_row(chart_row - 1, BIN_CHART_BAND_HEIGHT_PT)
             for (kind, _prefix, anchor_letter), bins in zip(
                 (("Hardware", "HB", "A"), ("Software", "SB", "D")), aggregated
             ):
@@ -905,6 +951,7 @@ class ModernReportGenerator(reportGenerator):
                     for bin_num, name, count in bins
                 ]
                 build_bin_donut(
+                    self._wb,
                     BinSheet,
                     f"{kind} Bin — Head{head} / {site_label}",
                     chart_bins,
@@ -919,7 +966,7 @@ class ModernReportGenerator(reportGenerator):
             # (tenth wave) — the HB and SW tables stack below with a
             # single blank row between them
             row = write_merged_headline(
-                BinSheet, chart_row + 2, BIN_CONTRIBUTION_HEADLINE, "Headline 1"
+                BinSheet, chart_row + 2, BIN_CONTRIBUTION_HEADLINE, "headline1", self._theme
             )
             row += 1  # blank below the contribution headline
             for index, (isHBIN, bins) in enumerate(zip((True, False), aggregated)):
@@ -943,26 +990,23 @@ class ModernReportGenerator(reportGenerator):
         self.sendProgress()
         # gridlines off (every other sheet's look; the chart sheets bypass
         # render_plain_table, which is where the plain sheets get it)
-        BinSheet.sheet_view.showGridLines = False
+        BinSheet.hide_gridlines(2)
+        BinSheet.set_footer(FOOTER_TEXT)
+        BinSheet.set_tab_color(f"#{TAB_COLOR_HEXES['bin']}")
         self._autofit_columns(BinSheet)
         # eighth wave (R2), tenth-wave width: the Bin sheet is a fixed
         # A:F page — all six columns share width 15 (KPI grid + tables;
-        # the 250 pt band charts overflow the grid on absolute anchors);
-        # the autofit keeps sizing only the hidden helper columns
+        # NOTE the Calibri-11 metric recalibration is a USER CHECKLIST item:
+        # xlsxwriter stores width + ~0.71 vs the openpyxl era)
         first_col, last_col = (
-            column_index_from_string(letter) for letter in BIN_PAGE_WIDTH_RANGE
+            xlutil.xl_cell_to_rowcol(f"{letter}1")[1] for letter in BIN_PAGE_WIDTH_RANGE
         )
-        for index in range(first_col, last_col + 1):
-            BinSheet.column_dimensions[
-                get_column_letter(index)
-            ].width = BIN_PAGE_COLUMN_WIDTH
+        BinSheet.set_column(first_col, last_col, BIN_PAGE_COLUMN_WIDTH)
         # eighth wave (R1): the Bin sheet prints on A4, fit to one page
         # wide with unlimited height (same fitToPage pattern as the DUT
         # Summary matrix setup in writer.py); other sheets are untouched
-        BinSheet.page_setup.paperSize = BinSheet.PAPERSIZE_A4
-        BinSheet.page_setup.fitToWidth = 1
-        BinSheet.page_setup.fitToHeight = 0
-        BinSheet.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+        BinSheet.set_paper(9)  # A4
+        BinSheet.fit_to_pages(1, 0)
 
     def writeWaferMap(self):
         WaferSheet = self.sheetDict.get(ReportSelection.Wafer, None)
@@ -996,6 +1040,9 @@ class ModernReportGenerator(reportGenerator):
             self.sendProgress()
         self._row[key] = row
         self._autofit_columns(WaferSheet)
+        WaferSheet.hide_gridlines(2)
+        WaferSheet.set_footer(FOOTER_TEXT)
+        WaferSheet.set_tab_color(f"#{TAB_COLOR_HEXES['wafer']}")
 
     def writeTrendPlot(self, testTuple: tuple, head: int, site: int):
         TrendSheet = self.sheetDict.get(ReportSelection.Trend, None)
@@ -1022,6 +1069,9 @@ class ModernReportGenerator(reportGenerator):
         self.loopCount += 1
         self.sendProgress()
         self._autofit_columns(TrendSheet)
+        TrendSheet.hide_gridlines(2)
+        TrendSheet.set_footer(FOOTER_TEXT)
+        TrendSheet.set_tab_color(f"#{TAB_COLOR_HEXES['trend']}")
 
     def writeHistogram(self, testTuple: tuple, head: int, site: int):
         HistoSheet = self.sheetDict.get(ReportSelection.Histo, None)
@@ -1046,14 +1096,22 @@ class ModernReportGenerator(reportGenerator):
         self.loopCount += 1
         self.sendProgress()
         self._autofit_columns(HistoSheet)
+        HistoSheet.hide_gridlines(2)
+        HistoSheet.set_footer(FOOTER_TEXT)
+        HistoSheet.set_tab_color(f"#{TAB_COLOR_HEXES['histo']}")
 
     # ----------------------------------------------------------------------
     # report assembly
     # ----------------------------------------------------------------------
 
     def report_core(self):
-        self._wb = Workbook()
-        set_workbook_default_font(self._wb)
+        # strings_to_urls MUST stay off: URL-looking strings (File Info
+        # paths) would silently become hyperlinks (xlsxwriter's default)
+        self._wb = xlsxwriter.Workbook(
+            self.reportPath, {"strings_to_urls": False, "in_memory": False}
+        )
+        self._theme = ModernTheme(self._wb)
+        reset_widths()
         self.sheetDict = {}
         self.loopCount = 0
         self._row = {}
@@ -1067,7 +1125,6 @@ class ModernReportGenerator(reportGenerator):
         # Stat-only selection leaves it empty (the Pattern-Name fallback
         # covers detection there)
         self._ftr_tests: set = set()
-        defaultSheet = self._wb.active
 
         # the try/finally mirrors the classic `with Workbook(...)` block:
         # the (partial) workbook is saved on forceQuit early-returns and on
@@ -1109,13 +1166,7 @@ class ModernReportGenerator(reportGenerator):
                 else:
                     sheetName = self.tr("Correlation")
                 if cont in self.selectedContents:
-                    self.sheetDict[cont] = self._wb.create_sheet(sheetName)
-
-            # openpyxl starts with a default sheet; drop it once the real
-            # sheets exist (keep it when nothing is selected so the save
-            # still yields a valid workbook)
-            if self.sheetDict and defaultSheet in self._wb.worksheets:
-                self._wb.remove(defaultSheet)
+                    self.sheetDict[cont] = self._wb.add_worksheet(sheetName)
 
             # ** write contents independent of test numbers
             # file info
@@ -1157,7 +1208,13 @@ class ModernReportGenerator(reportGenerator):
                 for key in (ReportSelection.Trend, ReportSelection.Histo):
                     self._row[key] = self._row.get(key, 0) + 2
         finally:
-            self._wb.save(self.reportPath)
             self._wb.close()
+            # xlsxwriter gap completion (charts.py): inject the data-label
+            # show* zeros + <c:plotVisOnly val="0"/> it cannot emit — run on
+            # every exit path so even a forceQuit partial file stays clean
+            try:
+                complete_chart_flags(self.reportPath)
+            except OSError:
+                pass  # a failed completion must not mask the report itself
 
         self.closeSignal.emit(True)

@@ -394,9 +394,10 @@ class TestPlainSheets:
         dims = wb["File Info"].column_dimensions
         # "DUTs Superseded: " (17 chars incl. trailing space) is the longest
         # label in column A -> 17 * 1.1
-        assert dims["A"].width == pytest.approx(17 * 1.1)
+        # xlsxwriter stores width + ~0.71 (max-digit-width compensation)
+        assert dims["A"].width == pytest.approx(17 * 1.1, abs=0.75)
         # 100-char value capped at 60
-        assert dims["B"].width == pytest.approx(60)
+        assert dims["B"].width == pytest.approx(60, abs=0.75)
 
     def test_gdr_dtr_strips_padding_newlines(self, generated):
         _, wb, _, _, _ = generated
@@ -1211,11 +1212,17 @@ class TestStatisticsSheet:
         # test-name column benefits; the Cp insert moved Max to Q)
         _, wb, _, _, _ = generated
         ws = wb["Test Statistics"]
+        from tests.exporter.test_writer import col_dim
+
         for letter in "GHIJKLMNOPQ":
-            assert ws.column_dimensions[letter].width == 8, letter
+            # xlsxwriter stores width + ~0.71; the G..Q run groups under G
+            assert col_dim(ws, letter).width == pytest.approx(8, abs=0.75), letter
         # autofit stays for A:F (E is the test-name column; longest cell is
-        # the 9-char header / "VCCC_ASIC" data)
-        assert ws.column_dimensions["E"].width == pytest.approx(len("Test Name") * 1.1)
+        # the 9-char header / "VCCC_ASIC" data) — plus xlsxwriter's stored
+        # width compensation
+        assert ws.column_dimensions["E"].width == pytest.approx(
+            len("Test Name") * 1.1, abs=0.75
+        )
 
 
 class TestStatOnlyFtrFallback:
@@ -1251,7 +1258,9 @@ class TestStatOnlyFtrFallback:
             ["AND(ISNUMBER(K2),K2>0)"],
             ["AND(ISNUMBER(K2),K2=0)"],
         ]
-        fills = [r.dxf.fill.fgColor.rgb for r in fail_rules]
+        from tests.exporter.test_writer import dxf_fill_hex
+
+        fills = [dxf_fill_hex(r) for r in fail_rules]
         assert fills == ["FFFFCCCC", "FFCCFFCC"]
         cp_rules = cf_block(ws, "L2:L3")
         assert [r.formula for r in cp_rules] == [
@@ -1366,3 +1375,101 @@ class TestFileInfoTemperatures:
     def test_translated_label_degrades_to_none(self):
         rows = [["試験温度: ", "25C"]]
         assert file_temperatures_from_file_info(rows, [0]) == {0: None}
+
+
+# --------------------------------------------------------------------------
+# xlsxwriter migration: workbook options, stat caches, sheet polish
+# --------------------------------------------------------------------------
+
+
+class TestXlsxwriterMigration:
+    def test_strings_to_urls_disabled(self, tmp_path, qapp):
+        # Review Focus 2: URL-looking strings must stay plain strings —
+        # xlsxwriter's default strings_to_urls=True would turn File Info
+        # values into hyperlinks
+        gen, wb, report_path, closed, errors = self._run(tmp_path, qapp, note="https://example.com/path")
+        ws = wb["File Info"]
+        row = None
+        for r in range(2, ws.max_row + 1):
+            if str(ws.cell(row=r, column=1).value) == "Note":
+                row = r
+                break
+        assert row is not None
+        cell = ws.cell(row=row, column=2)
+        assert cell.value == "https://example.com/path"
+        assert cell.hyperlink is None
+        # no hyperlink relationship parts in the package
+        import zipfile
+
+        with zipfile.ZipFile(report_path) as zf:
+            rels = [n for n in zf.namelist() if n.endswith("worksheet1.xml.rels")]
+        assert rels == [] or b"hyperlink" not in zipfile.ZipFile(report_path).read(rels[0])
+
+    def _run(self, tmp_path, qapp, note="N" * 100):
+        testTuples = [(10000, 0, "VCCC_ASIC")]
+        selectedFiles = [0]
+        selectedHeads = [1]
+        selectedSites = [-1]
+        reportPath = str(tmp_path / "report.xlsx")
+        reportInfo = (
+            [ReportSelection.FileInfo],
+            testTuples,
+            selectedFiles,
+            selectedHeads,
+            selectedSites,
+            reportPath,
+            [],
+            1,
+        )
+        sig = signals()
+        gen = ModernReportGenerator(
+            sig, QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, dataChannel()
+        )
+        file_info_table = [
+            ["File Name", "demo.stdf"],
+            ["Note", note],
+        ]
+        gen.waitForTableData = lambda isFileInfo: file_info_table
+        gen.waitForDataList = lambda *a, **k: [["", "T", "1"], ["1 / Head1 / All Sites", "x", "2"]]
+        closed, errors = [], []
+        sig.closeSignal.connect(closed.append)
+        sig.msgSignal.connect(errors.append)
+        gen.report_core()
+        wb = load_workbook(reportPath)
+        return gen, wb, reportPath, closed, errors
+
+    def test_tab_colors_wired(self, generated):
+        _, wb, _, _, _ = generated
+        assert wb["File Info"].sheet_properties.tabColor.rgb == "FF94A3B8"
+        assert wb["Test Statistics"].sheet_properties.tabColor.rgb == "FF1E40AF"
+
+    def test_footers_written(self, generated, report_path=None):
+        import zipfile
+
+        gen, _wb, report_path, _, _ = generated
+        with zipfile.ZipFile(report_path) as zf:
+            names = [n for n in zf.namelist() if n.startswith("xl/worksheets/sheet")]
+            xml = "".join(zf.read(n).decode() for n in names)
+        assert "&amp;CP of &amp;N" in xml  # "&CP of &N" escaped
+
+    def test_stat_cp_cpk_cached_values(self, generated):
+        # Review Focus 1 (Stat variant): Cp/Cpk formula cells carry their
+        # computed caches — never xlsxwriter's default 0
+        gen, wb, report_path, _, _ = generated
+        from openpyxl import load_workbook as lw
+
+        book = lw(report_path, data_only=True)
+        ws = book["Test Statistics"]
+        # the fixture row: limits 0.5/1.5, avg 1.000, std 0.010
+        # Cp = (1.5-0.5)/(6*0.010) = 16.667; Cpk = min((1.5-1.0)/(0.03), (1.0-0.5)/(0.03))
+        cp = ws["K2"].value
+        cpk = ws["L2"].value
+        assert cp == pytest.approx(16.6667, rel=1e-3)
+        assert cpk == pytest.approx(16.6667, rel=1e-3)
+        assert cp != 0 and cpk != 0
+
+    def test_plain_sheets_repeat_header_row(self, generated):
+        _, wb, _, _, _ = generated
+        assert wb["File Info"].print_title_rows == "$1:$1"
+        assert wb["GDR & DTR Summary"].print_title_rows == "$1:$1"
+        assert wb["Test Statistics"].print_title_rows == "$1:$1"
