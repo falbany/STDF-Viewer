@@ -142,8 +142,12 @@ User rulings, implemented verbatim:
 - One blank row between the "Bin Charts" headline and the charts band.
 - One blank row below the "Detailed Bin Contribution" headline.
 - Columns A:F width 15 (was 20.4).
-- The charts band collapses to ONE 250 pt row; both donuts are SQUARE,
-  sized to the line (250 pt ≈ 8.82 cm), pinned with absolute
-  `OneCellAnchor` extents (`band_anchor()` — HB from column A, SB one
-  chart width + 0.25 cm gap to the right). The charts intentionally
-  overflow the narrower grid; fitToWidth absorbs the difference.
+- The charts band collapses to ONE 250 pt row; both donuts are **8.5 cm
+  wide x the line tall (250 pt ≈ 8.82 cm)**, cell-anchored **A{row} /
+  D{row}** (user ruling). Caution learned en route: Excel measures
+  column widths with the Normal font's max-digit width AT THE APP'S
+  DPI — width 15 measures ≈ 2.78 cm per column on this machine (not
+  the 2.12 cm a 96-dpi MDW=5 assumption gives), so A..C ≈ 8.33 cm and
+  the 8.5 cm frames tile the grid edge-to-edge (1.65 mm kiss). Never
+  convert width units to cm with a pinned MDW — read the real geometry
+  back from Excel (COM `Range.Width` / `Shape.Left`).

@@ -33,15 +33,14 @@ from openpyxl.chart import DoughnutChart
 
 from deps.exporter.charts import (
     BIN_CHART_BAND_HEIGHT_PT,
-    BIN_CHART_SIZE_CM,
-    BIN_COL_EMU,
+    BIN_CHART_HEIGHT_CM,
+    BIN_CHART_WIDTH_CM,
     BIN_DONUT_HOLE_SIZE,
     BIN_PAGE_COLUMN_WIDTH,
     BIN_TABLE_HEADERS,
     aggregate_bin_counts,
     aggregate_kpi,
     apply_card_border,
-    band_anchor,
     bin_label,
     build_bin_donut,
     parse_bin_row,
@@ -589,29 +588,15 @@ class TestApplyCardBorder:
 
 class TestChartGeometry:
     def test_band_line_size_and_grid(self):
-        # tenth wave: the two donuts sit on ONE 250 pt band row, square-
-        # sized to the line (250 pt ≈ 8.82 cm); the A:F grid drops to
-        # width 15 (80 px per column at MDW=5 for TNR 8) and the charts
-        # overflow it on absolute anchors
+        # tenth wave: the two donuts sit on ONE 250 pt band row, 8.5 cm
+        # wide (user rulings) x the line tall; the A:F grid drops to
+        # width 15 and the charts are CELL-anchored A{row} / D{row} —
+        # Excel measures the width-15 columns ≈ 2.78 cm on this machine,
+        # so A..C ≈ 8.33 cm and the 8.5 cm frames tile it edge-to-edge
         assert BIN_CHART_BAND_HEIGHT_PT == 250
-        assert BIN_CHART_SIZE_CM == pytest.approx(250 * 2.54 / 72)
+        assert BIN_CHART_WIDTH_CM == 8.5
+        assert BIN_CHART_HEIGHT_CM == pytest.approx(250 * 2.54 / 72)
         assert BIN_PAGE_COLUMN_WIDTH == 15
-        assert BIN_COL_EMU == (15 * 5 + 5) * 9525  # 80 px -> EMU
-
-    def test_band_anchor_positions(self):
-        # HB pinned at column A of the band row, SB one chart-width +
-        # gap to the right (col E = 4 x 762000 EMU, plus a colOff), both
-        # 250 pt square (3175000 EMU) on 0-based row chart_row - 1
-        hb = band_anchor(9, 0.0)
-        assert (hb._from.row, hb._from.col, hb._from.colOff) == (8, 0, 0)
-        sb = band_anchor(9, BIN_CHART_SIZE_CM + 0.25)
-        assert sb._from.col == 4
-        assert sb._from.colOff > 0
-        for anchor in (hb, sb):
-            assert anchor.ext.cx == 250 * 12700
-            assert anchor.ext.cy == 250 * 12700
-        # the SB left edge clears the HB chart's right edge
-        assert sb._from.col * BIN_COL_EMU + sb._from.colOff >= 250 * 12700
 
 
 # --------------------------------------------------------------------------
@@ -661,8 +646,8 @@ class TestBuildBinDonut:
         assert chart.dataLabels.showBubbleSize is False
         # white bold label font — readable on the saturated slice colors
         assert chart.dataLabels.txPr is not None
-        assert chart.width == pytest.approx(BIN_CHART_SIZE_CM)  # 250 pt square
-        assert chart.height == pytest.approx(BIN_CHART_SIZE_CM)
+        assert chart.width == 8.5  # tenth wave: user ruling 8.5 cm wide
+        assert chart.height == pytest.approx(BIN_CHART_HEIGHT_CM)  # 250 pt line
         # mockup: donut hole (openpyxl 3.1.5 DoughnutChart.holeSize,
         # NestedMinMax 1..90 — the factory constant sits in the 50-60 band)
         assert chart.holeSize == BIN_DONUT_HOLE_SIZE

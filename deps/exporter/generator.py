@@ -46,7 +46,7 @@ Tenth wave (2026-11-10, layout compaction): the banner wraps in a 50 pt
 row 1, the per-block title row is gone (KPI cards one blank row under
 the banner), the "Bin Charts" headline carries a blank row on both
 sides, the contribution headline a blank row below, and the charts band
-is one 250 pt row with square ``band_anchor()``-pinned donuts.
+is one 250 pt row with 8.5 cm donuts cell-anchored A{row} / D{row}.
 
 Instance state (``self._wb``, ``self._theme``, ``self._row``) replaces the
 classic module-level ``sv`` statics, so several generators can coexist.
@@ -76,22 +76,23 @@ from deps.uic_stdExporter import (
 from deps.exporter.charts import (
     BIN_BANNER_ROW_HEIGHT_PT,
     BIN_CHART_BAND_HEIGHT_PT,
-    BIN_CHART_GAP_CM,
-    BIN_CHART_SIZE_CM,
     BIN_CHARTS_HEADLINE,
     BIN_CONTRIBUTION_HEADLINE,
     BIN_PAGE_COLUMN_WIDTH,
     BIN_PAGE_WIDTH_RANGE,
     aggregate_bin_counts,
     aggregate_kpi,
-    band_anchor,
     bin_label,
     build_bin_donut,
     write_bin_table,
     write_kpi_cards,
     write_merged_headline,
 )
-from deps.exporter.helpers import apply_cpk_formula, parse_temperature_text, split_test_name
+from deps.exporter.helpers import (
+    apply_cpk_formula,
+    parse_temperature_text,
+    split_test_name,
+)
 from deps.exporter.matrix import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
@@ -844,21 +845,17 @@ class ModernReportGenerator(reportGenerator):
 
             # "Bin Charts" headline (tenth wave rename) with a blank row
             # on BOTH sides, then the charts band: ONE 250 pt row with
-            # both donuts square-sized to the line (HB from column A, SB
-            # offset past the HB chart's right edge); empty bin lists
-            # leave the band reserved, keeping the dashboard above intact
+            # the 8.5 cm donuts cell-anchored HB at A{chart_row} and SB
+            # at D{chart_row} (user ruling); empty bin lists leave the
+            # band reserved, keeping the dashboard above intact
             row = write_merged_headline(
                 BinSheet, row + 1, BIN_CHARTS_HEADLINE, "Headline 1"
             )
             row += 1  # blank between the headline and the band
             chart_row = row
             BinSheet.row_dimensions[chart_row].height = BIN_CHART_BAND_HEIGHT_PT
-            for (kind, _prefix, offset_cm), bins in zip(
-                (
-                    ("Hardware", "HB", 0.0),
-                    ("Software", "SB", BIN_CHART_SIZE_CM + BIN_CHART_GAP_CM),
-                ),
-                aggregated,
+            for (kind, _prefix, anchor_letter), bins in zip(
+                (("Hardware", "HB", "A"), ("Software", "SB", "D")), aggregated
             ):
                 chart_bins = [
                     (bin_num, bin_label(bin_num, name), count)
@@ -868,7 +865,7 @@ class ModernReportGenerator(reportGenerator):
                     BinSheet,
                     f"{kind} Bin — Head{head} / {site_label}",
                     chart_bins,
-                    band_anchor(chart_row, offset_cm),
+                    f"{anchor_letter}{chart_row}",
                     BIN_HELPER_COL,
                     helper_row=helper_row,
                 )

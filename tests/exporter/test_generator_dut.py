@@ -104,6 +104,7 @@ def make_summary(tagged=True):
 
     `tagged` controls the _T<n>C temperature tag on the part IDs — the
     untagged variant exercises the MIR Test Temperature fallback."""
+
     def part_id(base, temp):
         return f"{base}_T{temp}C" if tagged else base
 
@@ -113,7 +114,10 @@ def make_summary(tagged=True):
             1,
             1,
             make_dut_info(
-                part_id=part_id("SN542", 25), sw_bin="Bin 3", xy=(4, -6), dut_flag="Failed"
+                part_id=part_id("SN542", 25),
+                sw_bin="Bin 3",
+                xy=(4, -6),
+                dut_flag="Failed",
             ),
         ),
         (1, 2, make_dut_info(part_id=part_id("SN543", 85))),
@@ -182,8 +186,12 @@ PNG_BYTES = png_bytes()
 
 
 def build_generated(
-    tmp_path, qapp, with_stat=False, with_file_info=False,
-    part_id_tagged=True, file_temperature=None,
+    tmp_path,
+    qapp,
+    with_stat=False,
+    with_file_info=False,
+    part_id_tagged=True,
+    file_temperature=None,
 ):
     """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus Stat when
     `with_stat`, FileInfo when `with_file_info`) and return (generator,
@@ -450,7 +458,9 @@ class TestDutTemperatureFallback:
     @pytest.fixture
     def generated_fallback(self, tmp_path, qapp):
         # part IDs carry no tag; the file records 85C
-        return build_generated(tmp_path, qapp, part_id_tagged=False, file_temperature="85C")
+        return build_generated(
+            tmp_path, qapp, part_id_tagged=False, file_temperature="85C"
+        )
 
     @pytest.fixture
     def generated_tagged(self, tmp_path, qapp):
@@ -576,9 +586,9 @@ class TestChartSheets:
     def test_bin_native_donut_charts(self, generated):
         # charts survive the save/reload round-trip (holeSize / legend
         # position included); tenth wave: both donuts sit on the ONE
-        # 250 pt band row 9 (0-based row 8) — HB from column A, SB
-        # offset past the HB chart's right edge (column E + colOff),
-        # each pinned to a 250 pt square extent (3175000 EMU)
+        # 250 pt band row 9 (0-based row 8) — cell-anchored HB at A9
+        # (col 0) and SB at D9 (col 3), zero offsets, extent 8.5 cm x
+        # 250 pt (3060000 x 3175000 EMU)
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
         charts = ws._charts
@@ -591,13 +601,11 @@ class TestChartSheets:
         ]
         assert [(c.anchor._from.row, c.anchor._from.col) for c in charts] == [
             (8, 0),
-            (8, 4),
+            (8, 3),
         ]
-        assert all(
-            c.anchor.ext.cx == 3175000 and c.anchor.ext.cy == 3175000 for c in charts
-        )
-        assert charts[0].anchor._from.colOff == 0
-        assert charts[1].anchor._from.colOff > 0  # gap past the HB frame
+        assert all(c.anchor._from.colOff == 0 for c in charts)
+        assert all(c.anchor.ext.cx == 3060000 for c in charts)  # 8.5 cm
+        assert all(c.anchor.ext.cy == 3175000 for c in charts)  # 250 pt
         assert ws.row_dimensions[9].height == 250  # the one band line
         # hidden helper columns must still be plotted (survives the
         # round-trip: plotVisOnly val="0")
@@ -616,14 +624,13 @@ class TestChartSheets:
     def test_bin_chart_construction_in_memory(self, generated):
         # in-memory-only attributes (style / size are defaults after a
         # reload): colorful palette 1 (ninth-wave fix — style id 2; id 1 is
-        # Excel's gray monochrome scheme), square 250 pt (≈ 8.82 cm)
-        # frames, percent labels
+        # Excel's gray monochrome scheme), 8.5 cm x 250 pt frames
+        # (tenth wave), percent labels
         gen, _, _, _, _ = generated
-        expected = pytest.approx(250 * 2.54 / 72)
         for chart in gen._wb["Bin Chart"]._charts:
             assert chart.style == 2
-            assert chart.width == expected
-            assert chart.height == expected
+            assert chart.width == 8.5
+            assert chart.height == pytest.approx(250 * 2.54 / 72)
             assert chart.dataLabels.showPercent is True
 
     def test_bin_charts_use_builtin_palette(self, generated):
