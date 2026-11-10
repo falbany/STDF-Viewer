@@ -58,6 +58,16 @@ def _argb(hex6: str) -> str:
     return "FF" + hex6
 
 
+def set_workbook_default_font(wb, name: str = FONT_NAME, size: int = FONT_SIZE) -> None:
+    """Point the workbook's built-in Normal (builtinId 0) style at the
+    theme font so unstyled cells — and Excel's column-width metrics —
+    follow the global default (ninth wave)."""
+    for style in wb._named_styles:
+        if style.name == "Normal":
+            style.font = Font(name=name, size=size)
+            return
+
+
 def number_format_from_settings(precision: int, notation: str) -> str:
     """Derive an Excel number-format string from exporter settings.
 

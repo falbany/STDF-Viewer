@@ -5,7 +5,7 @@
 # Author: falbany (fork)
 # Created Date: November 9th 2026
 # -----
-# Last Modified: Mon Nov 9 2026
+# Last Modified: Tue Nov 10 2026
 # Modified By: falbany (fork)
 # -----
 # Copyright (c) 2026 falbany (fork)
@@ -79,7 +79,7 @@ from deps.exporter.sheets import (
     insert_report_image,
     plain_table_spec,
 )
-from deps.exporter.theme import ModernTheme
+from deps.exporter.theme import ModernTheme, set_workbook_default_font
 from deps.exporter.writer import (
     render_matrix_sheet,
     render_plain_table,
@@ -886,6 +886,7 @@ class ModernReportGenerator(reportGenerator):
 
     def report_core(self):
         self._wb = Workbook()
+        set_workbook_default_font(self._wb)
         self.sheetDict = {}
         self.loopCount = 0
         self._row = {}

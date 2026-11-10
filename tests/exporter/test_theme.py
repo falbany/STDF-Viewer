@@ -140,3 +140,23 @@ class TestModernTheme:
         assert theme.header_fill is theme.header_fill
         assert theme.border is theme.border
         assert theme.body_alignment is theme.body_alignment
+
+
+class TestWorkbookDefaultFont:
+    @staticmethod
+    def normal_style(wb):
+        return next(s for s in wb._named_styles if s.name == "Normal")
+
+    def test_normal_style_font_set_and_survives_reload(self, tmp_path):
+        from openpyxl import Workbook, load_workbook
+
+        from deps.exporter.theme import set_workbook_default_font
+
+        wb = Workbook()
+        set_workbook_default_font(wb)
+        assert self.normal_style(wb).font.name == "Times New Roman"
+        assert self.normal_style(wb).font.size == 8
+        path = tmp_path / "normal.xlsx"
+        wb.save(path)
+        reloaded = load_workbook(path)
+        assert self.normal_style(reloaded).font.name == "Times New Roman"
