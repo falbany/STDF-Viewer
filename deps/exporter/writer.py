@@ -5,12 +5,13 @@
 # Author: falbany (fork)
 # Created Date: November 9th 2026
 # -----
-# Last Modified: Mon Nov 9 2026
+# Last Modified: Tue Nov 10 2026
 # Modified By: falbany (fork)
 # -----
 # Copyright (c) 2026 falbany (fork)
 # This program is free software: you can redistribute it and/or modify
-# it under the terms of the Free Software Foundation, either version 3 of the License, or
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 #
 # This program is distributed in the hope that it will be useful,
@@ -22,26 +23,27 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-openpyxl renderer: DUT Summary matrix sheets and plain tables.
+xlsxwriter renderer: DUT Summary matrix sheets and plain tables.
 
-Pure rendering of the spec dicts built by matrix.py (and later spec
-builders) — every data decision was made upstream. This module writes
-values (formulas verbatim, everything else through ``sanitize_cell``),
-styles, conditional formatting, the native AutoFilter, hidden mirror
-columns and print setup.
+Pure rendering of the spec dicts built by matrix.py — every data decision
+was made upstream. This module writes values (formulas verbatim with their
+cached results, everything else through ``sanitize_cell``), styles (through
+the theme's workbook-scoped format factory — formats are immutable, so
+per-cell styling composes at write time), conditional formatting, native
+AutoFilter, hidden mirror columns, sparklines and print setup. All
+xlsxwriter API indices are 0-based; spec letters stay 1-based Excel
+notation (helpers.get_column_letter / xl_cell_to_rowcol bridge the two).
 """
 
-from openpyxl.formatting.rule import ColorScaleRule, FormulaRule
-from openpyxl.styles import Alignment, Border, PatternFill, Side
-from openpyxl.utils import (
-    column_index_from_string,
-    get_column_letter,
-    range_boundaries,
-)
-from openpyxl.worksheet.properties import PageSetupProperties
-from openpyxl.worksheet.worksheet import Worksheet
+import xlsxwriter.utility as xlutil
 
 from deps.exporter.matrix import sanitize_cell
+from deps.exporter.theme import (
+    BANNER_FILL_HEX,
+    GROUP_FILL_HEX,
+    HEADER_FILL_HEX,
+    NEUTRAL_FILL_HEX,
+)
 
 # Sheet layout, mirroring matrix.py: banner 1, metadata 2..14 (13 rows),
 # header 15, data 16+.
@@ -54,7 +56,9 @@ BASE_COLUMN_COUNT = 12  # fixed A..L block
 ROW_HEIGHT = 22
 
 MIRROR_HEADER_TEXT = "flags (do not edit)"
-GROUP_BORDER_HEX = "FF94A3B8"  # heavier side color on workflow boundaries
+GROUP_BORDER_HEX = "94A3B8"  # heavier side color on workflow boundaries
+FOOTER_TEXT = "&CP of &N"  # centered page-number footer (migration upgrade 4; the &C section prefix keeps the string parseable by strict OOXML readers)
+DUT_TAB_HEX = "1E40AF"  # migration upgrade 5 (theme tab tokens)
 
 # Fixed column geometry (2026-11-10): A=Test#, B=Test (wide, right-aligned),
 # C=Param (left-aligned). The DUT-sheet widths are pinned — no autofit.
@@ -65,14 +69,10 @@ SPEC_MAX_COLUMN = 6  # F — static neutral yellow
 BASE_COLUMN_WIDTH = 8
 TEST_NAME_COLUMN_WIDTH = 30
 DIE_COLUMN_WIDTH = 8
-
-TEST_NAME_ALIGNMENT = Alignment(horizontal="right", vertical="center")
-PARAM_ALIGNMENT = Alignment(horizontal="left", vertical="center")
+TREND_COLUMN_WIDTH = 20  # sparkline column (migration upgrade 2)
 
 # spec["number_formats"] keys that target fixed (non-die) columns
-# (third wave: "STD"/"FAILS" renamed to "St. Dev."/"Fails" alongside the
-# BASE_HEADERS renames; ninth wave: J stopped being "St. Dev." — scientific —
-# and is "Cp" with "0.00", so J..K both read "0.00" through this map).
+# (third wave renames; ninth wave J..K read "0.00" through this map).
 FIXED_FORMAT_COLUMNS = {
     "Test#": 1,
     "SpecMin": 5,
@@ -87,70 +87,114 @@ FIXED_FORMAT_COLUMNS = {
 
 
 # --------------------------------------------------------------------------
+# width ledger (the autofit engine — xlsxwriter cells cannot be re-read,
+# so widths are noted at write time and applied once per sheet)
+# --------------------------------------------------------------------------
+
+_WIDTH_LEDGER: dict = {}
+
+
+def reset_widths() -> None:
+    """Clear the ledger between reports (one report = one workbook; the
+    generator calls this in report_core init)."""
+    _WIDTH_LEDGER.clear()
+
+
+def _note_width(ws, column: int, value) -> None:
+    """Record the longest written value per (sheet, 1-based column) — the
+    same ``len(str(value))`` metric the openpyxl-era autofit measured."""
+    if value is None:
+        return
+    ledger = _WIDTH_LEDGER.setdefault(ws.name, {})
+    length = len(str(value))
+    if length > ledger.get(column, 0):
+        ledger[column] = length
+
+
+def note_width(ws, column: int, value) -> None:
+    """Public ledger note for renderers that write without _write_cell
+    (the chart sheets' merged bands and helper blocks)."""
+    _note_width(ws, column, value)
+
+
+def apply_autofit(ws, factor: float = 1.1, cap: float = 60) -> None:
+    """Apply the sheet's ledger as ``min(max_len * factor, cap)`` column
+    widths (0-based set_column) and drop the entry."""
+    widths = _WIDTH_LEDGER.pop(ws.name, {})
+    for column, length in widths.items():
+        ws.set_column(column - 1, column - 1, min(length * factor, cap))
+
+
+# --------------------------------------------------------------------------
 # cell helpers
 # --------------------------------------------------------------------------
 
 
-def _write_cell(
-    ws, row, column, value, font, alignment, border=None, fill=None, number_format=None
-):
-    """Write one cell: formula strings verbatim, everything else sanitized."""
-    cell = ws.cell(row=row, column=column)
-    if isinstance(value, str) and value.startswith("="):
-        cell.value = value
-    else:
-        cell.value = sanitize_cell(value)
-    cell.font = font
-    cell.alignment = alignment
-    if border is not None:
-        cell.border = border
-    if fill is not None:
-        cell.fill = fill
-    if number_format is not None:
-        cell.number_format = number_format
-    return cell
+def _col0(letter: str) -> int:
+    """0-based column index from a 1-based Excel letter (A -> 0)."""
+    return xlutil.xl_cell_to_rowcol(f"{letter}1")[1]
 
 
-def _solid_fill(hex6):
-    """Solid PatternFill from a 6-digit palette hex (theme band colors)."""
-    argb = "FF" + hex6
-    return PatternFill(start_color=argb, end_color=argb, fill_type="solid")
-
-
-def _body_alignment(column: int, theme) -> Alignment:
-    """Body alignment with the 2026-11-10 column overrides: Test (B) right,
-    Param (C) left, everything else the theme's centered body alignment."""
+def _body_align_key(column: int) -> str:
+    """The 2026-11-10 column overrides: Test (B) right, Param (C) left,
+    everything else centered."""
     if column == TEST_NAME_COLUMN:
-        return TEST_NAME_ALIGNMENT
+        return "right"
     if column == PARAM_COLUMN:
-        return PARAM_ALIGNMENT
-    return theme.body_alignment
+        return "left"
+    return "center"
 
 
-def _add_rule(ws, cell_range, formula, fill, stop=True):
-    """Add one expression FormulaRule; insertion order sets the priority."""
-    rule = FormulaRule(formula=[formula], fill=fill, stopIfTrue=stop)
-    ws.conditional_formatting.add(cell_range, rule)
-    return rule
+def _write_cell(
+    ws,
+    row: int,
+    column: int,
+    value,
+    theme,
+    font: "str | None" = None,
+    align: "str | None" = None,
+    border: bool = True,
+    fill_hex: "str | None" = None,
+    num_fmt: "str | None" = None,
+    cached=None,
+    extra: "dict | None" = None,
+):
+    """Write one cell: formula strings verbatim (with their cached result —
+    EVERY write_formula passes an explicit value=; xlsxwriter's default
+    cached 0 would regress previews), everything else sanitized. All
+    styling composes into one workbook-scoped Format at write time."""
+    fmt = theme.cell_format(
+        font=font, align=align, border=border, fill_hex=fill_hex, num_fmt=num_fmt, extra=extra
+    )
+    _note_width(ws, column, value)
+    row0, col0 = row - 1, column - 1
+    if isinstance(value, str) and value.startswith("="):
+        ws.write_formula(row0, col0, value, fmt, "" if cached is None else cached)
+        return
+    value = sanitize_cell(value)
+    if value == "" and not isinstance(value, (int, float, bool)):
+        ws.write_blank(row0, col0, None, fmt)
+    else:
+        ws.write(row0, col0, value, fmt)
 
 
 def write_body_cell(
-    ws: Worksheet, row: int, column: int, value, theme, border: bool = True, fill=None
+    ws, row: int, column: int, value, theme, border: bool = True, fill=None
 ):
     """One themed body cell: body font + centered alignment, optional thin
-    border and band fill. Formula strings are written verbatim, everything
-    else is sanitized — the public cell-level counterpart of the internal
-    matrix renderers, for generator-written body rows (plain sheets, chart
-    stat rows)."""
+    border and band fill (a 6-digit hex string or None) — the public
+    cell-level counterpart of the internal matrix renderers, for
+    generator-written body rows (plain sheets, chart stat rows)."""
     return _write_cell(
         ws,
         row,
         column,
         value,
-        theme.body_font,
-        theme.body_alignment,
-        border=theme.border if border else None,
-        fill=fill,
+        theme,
+        font="body",
+        align="center",
+        border=border,
+        fill_hex=fill,
     )
 
 
@@ -160,49 +204,49 @@ def write_body_cell(
 
 
 def _render_banner(ws, spec, theme):
-    """Row 1: grey banner with the base labels + "DUT #n" per die column."""
+    """Row 1: grey banner with the base labels + "DUT #n" per die column
+    (+ the spacer/Trend tail)."""
     for column, value in enumerate(spec["headers"], start=1):
         _write_cell(
             ws,
             BANNER_ROW,
             column,
             value,
-            theme.banner_font,
-            theme.body_alignment,
-            fill=theme.banner_fill,
+            theme,
+            font="banner",
+            align="center",
+            border=False,
+            fill_hex=BANNER_FILL_HEX,
         )
-    ws.row_dimensions[BANNER_ROW].height = ROW_HEIGHT
+    ws.set_row(BANNER_ROW - 1, ROW_HEIGHT)
 
 
 def _render_metadata(ws, spec, theme):
     """Rows 2..14: label font on the METADATA/field-name cells, formulas
-    passed through, static neutral yellow on the SpecMin/SpecMax cells."""
+    passed through with their cached results, static neutral yellow on the
+    SpecMin/SpecMax cells."""
+    formula_values = spec.get("formula_values") or {}
+    neutral = NEUTRAL_FILL_HEX
     for offset, values in enumerate(spec["metadata_rows"]):
         row = METADATA_START + offset
         for column, value in enumerate(values, start=1):
-            font = (
-                theme.metadata_label_font
-                if column in (TEST_NAME_COLUMN, PARAM_COLUMN)
-                else theme.body_font
-            )
-            fill = (
-                theme.neutral_fill
-                if column in (SPEC_MIN_COLUMN, SPEC_MAX_COLUMN)
-                else None
-            )
+            font = "metadata" if column in (TEST_NAME_COLUMN, PARAM_COLUMN) else "body"
+            fill = neutral if column in (SPEC_MIN_COLUMN, SPEC_MAX_COLUMN) else None
+            cached = formula_values.get((row, column))
             _write_cell(
                 ws,
                 row,
                 column,
                 value,
-                font,
-                _body_alignment(column, theme),
-                border=theme.border,
-                fill=fill,
+                theme,
+                font=font,
+                align=_body_align_key(column),
+                border=True,
+                fill_hex=fill,
+                cached=cached,
             )
     for row in spec.get("masked_rows", []):
-        ws.row_dimensions[row].hidden = True
-        ws.row_dimensions[row].height = 0
+        ws.set_row(row - 1, None, None, {"hidden": True})
 
 
 def _render_header(ws, spec, theme):
@@ -213,12 +257,13 @@ def _render_header(ws, spec, theme):
             HEADER_ROW,
             column,
             value,
-            theme.header_font,
-            theme.header_alignment,
-            border=theme.border,
-            fill=theme.header_fill,
+            theme,
+            font="header",
+            align="center",
+            border=True,
+            fill_hex=HEADER_FILL_HEX,
         )
-    ws.row_dimensions[HEADER_ROW].height = ROW_HEIGHT
+    ws.set_row(HEADER_ROW - 1, ROW_HEIGHT)
 
 
 def _render_data_rows(ws, spec, theme):
@@ -234,14 +279,12 @@ def _render_data_rows(ws, spec, theme):
         for key, column in FIXED_FORMAT_COLUMNS.items()
         if key in formats
     }
+    formula_values = spec.get("formula_values") or {}
 
     boundaries = _group_boundary_offsets(spec)
     banded_offsets = _odd_group_offsets(spec)
-    thin = theme.border
-    group_side = Side(style="medium", color=GROUP_BORDER_HEX)
-    boundary_border = Border(
-        left=thin.left, right=thin.right, top=group_side, bottom=thin.bottom
-    )
+    neutral = NEUTRAL_FILL_HEX
+    group = GROUP_FILL_HEX
 
     for offset, values in enumerate(spec["rows"]):
         row = DATA_START + offset
@@ -253,26 +296,30 @@ def _render_data_rows(ws, spec, theme):
             if number_format is None:
                 die_index = column - 1 - BASE_COLUMN_COUNT
                 if 0 <= die_index < len(die_columns):
-                    number_format = (
-                        "0" if is_pf else formats.get(die_columns[die_index])
-                    )
+                    number_format = "0" if is_pf else formats.get(die_columns[die_index])
             fixed_column = column <= BASE_COLUMN_COUNT
             if column in (SPEC_MIN_COLUMN, SPEC_MAX_COLUMN):
-                fill = theme.neutral_fill
+                fill = neutral
             elif band and fixed_column:
-                fill = theme.group_fill
+                fill = group
             else:
                 fill = None
+            extra = (
+                {"top": 2, "top_color": f"#{GROUP_BORDER_HEX}"} if boundary and fixed_column else None
+            )
             _write_cell(
                 ws,
                 row,
                 column,
                 value,
-                theme.body_font,
-                _body_alignment(column, theme),
-                border=boundary_border if boundary and fixed_column else thin,
-                fill=fill,
-                number_format=number_format,
+                theme,
+                font="body",
+                align=_body_align_key(column),
+                border=True,
+                fill_hex=fill,
+                num_fmt=number_format,
+                cached=formula_values.get((row, column)),
+                extra=extra,
             )
 
 
@@ -300,39 +347,52 @@ def _odd_group_offsets(spec):
 # --------------------------------------------------------------------------
 
 
+def _add_rule(ws, cell_range, formula, fill, stop=True):
+    """Add one formula-rule CF; insertion order sets the priority."""
+    ws.conditional_format(
+        cell_range,
+        {
+            "type": "formula",
+            "criteria": formula,
+            "format": fill,
+            "stop_if_true": stop,
+        },
+    )
+
+
 def _add_die_rules(ws, die_rules, theme):
     """Five rules over the die range, priority order, all stopIfTrue.
 
-    Third wave: the P/F visible-flag rule (LEFT($D...,3)="P/F") is gone —
-    FTR rows now carry real limits (-0.999999 / 0.999999), so the limit
-    rules fire naturally on them (die cell 1 -> fail-high, 0 -> pass,
-    blank -> neutral). Remaining set: blank-neutral, fail-low, fail-high,
-    flag-mirror (no-limit parametric rows), pass. Formulas are written
-    relative to the range's top-left cell; openpyxl shifts them across the
-    range like Excel does.
-    """
+    Remaining set: blank-neutral, fail-low, fail-high, flag-mirror
+    (no-limit parametric rows), pass. Formulas are relative to the range's
+    top-left cell; Excel shifts them across the range."""
     cell_range = die_rules["range"]
-    min_col, min_row, _, _ = range_boundaries(cell_range)
-    die = get_column_letter(min_col)
-    mirror = get_column_letter(min_col + die_rules["flag_col_offset"])
-    row = min_row
-    _add_rule(ws, cell_range, f'{die}{row}=""', theme.neutral_fill)
+    first0, row0 = _col0(die_rules["first_die"]), _range_first_row(cell_range)
+    die = die_rules["first_die"]
+    mirror = die_rules["first_die"]
+    if die_rules["flag_col_offset"]:
+        mirror = xlutil.xl_col_to_name(first0 + die_rules["flag_col_offset"])
+    row = row0 + 1
+    _add_rule(ws, cell_range, f'{die}{row}=""', theme.cf_fill("FFF3CD"))
     _add_rule(
         ws,
         cell_range,
         f'AND({die}{row}<>"",$E{row}<>"",{die}{row}<$E{row})',
-        theme.fail_fill,
+        theme.cf_fill("FFCCCC"),
     )
     _add_rule(
         ws,
         cell_range,
         f'AND({die}{row}<>"",$F{row}<>"",{die}{row}>$F{row})',
-        theme.fail_fill,
+        theme.cf_fill("FFCCCC"),
     )
-    _add_rule(
-        ws, cell_range, f'AND({mirror}{row}=1,$E{row}="",$F{row}="")', theme.fail_fill
-    )
-    _add_rule(ws, cell_range, f'{die}{row}<>""', theme.pass_fill)
+    _add_rule(ws, cell_range, f'AND({mirror}{row}=1,$E{row}="",$F{row}="")', theme.cf_fill("FFCCCC"))
+    _add_rule(ws, cell_range, f'{die}{row}<>""', theme.cf_fill("CCFFCC"))
+
+
+def _range_first_row(cell_range: str) -> int:
+    """0-based first row of an A1 range (CF formulas anchor there)."""
+    return xlutil.xl_cell_to_rowcol(cell_range.split(":")[0])[0]
 
 
 def _add_cpk_rules(ws, cell_range, theme):
@@ -340,16 +400,11 @@ def _add_cpk_rules(ws, cell_range, theme):
 
     Every band is ISNUMBER-guarded: the Cpk formula yields "" on error
     (zero STD), and in Excel text compares above any number, so an
-    unguarded "">=1.33 would color blank Cpk cells (design §7: blank
-    stays unstyled). Text sentinels ("∞", "N/A") are equally excluded.
-
-    SHARED builder (fourth wave): called from BOTH the matrix CF path
-    (``render_matrix_sheet``) and the plain-table CF path
-    (``render_plain_table``) — the Test Statistics Cpk column gets the
-    identical rule set.
-    """
-    min_col, min_row, _, _ = range_boundaries(cell_range)
-    cell = f"{get_column_letter(min_col)}{min_row}"
+    unguarded "">=1.33 would color blank Cpk cells. SHARED builder: called
+    from BOTH the matrix CF path and the plain-table CF path."""
+    row0 = _range_first_row(cell_range)
+    col0 = _col0(cell_range.split(":")[0].rstrip("0123456789"))
+    cell = f"{xlutil.xl_col_to_name(col0)}{row0 + 1}"
     bands = (
         (f"AND(ISNUMBER({cell}),{cell}>=1.67)", True),
         (f"AND(ISNUMBER({cell}),{cell}>=1.33)", True),
@@ -357,87 +412,103 @@ def _add_cpk_rules(ws, cell_range, theme):
         (f"AND(ISNUMBER({cell}),{cell}<1)", False),
     )
     for (formula, stop), hex6 in zip(bands, theme.cpk_band_fills()):
-        _add_rule(ws, cell_range, formula, _solid_fill(hex6), stop=stop)
+        _add_rule(ws, cell_range, formula, theme.cf_fill(hex6), stop=stop)
 
 
 def _add_fail_num_rules(ws, cell_range, theme):
-    """Binary Fail Num rules over a plain-table data range (fourth wave,
-    controller ruling — NOT a color scale, because no per-row DUT total
-    exists to scale against): numeric >0 -> fail red, numeric =0 -> pass
-    green. ISNUMBER-guarded so the upstream sentinels ("N/A", "∞") and
-    blank cells stay unstyled; both rules stop the chain."""
-    min_col, min_row, _, _ = range_boundaries(cell_range)
-    cell = f"{get_column_letter(min_col)}{min_row}"
-    _add_rule(ws, cell_range, f"AND(ISNUMBER({cell}),{cell}>0)", theme.fail_fill)
-    _add_rule(ws, cell_range, f"AND(ISNUMBER({cell}),{cell}=0)", theme.pass_fill)
+    """Binary Fail Num rules over a plain-table data range: numeric >0 ->
+    fail red, numeric =0 -> pass green. ISNUMBER-guarded so the upstream
+    sentinels ("N/A", "∞") and blank cells stay unstyled; both stop."""
+    row0 = _range_first_row(cell_range)
+    col0 = _col0(cell_range.split(":")[0].rstrip("0123456789"))
+    cell = f"{xlutil.xl_col_to_name(col0)}{row0 + 1}"
+    _add_rule(ws, cell_range, f"AND(ISNUMBER({cell}),{cell}>0)", theme.cf_fill("FFCCCC"))
+    _add_rule(ws, cell_range, f"AND(ISNUMBER({cell}),{cell}=0)", theme.cf_fill("CCFFCC"))
 
 
 def _add_fails_scale(ws, cf):
     """FAILS heat: 0 -> green end of the scale, fails_max -> red end."""
-    ws.conditional_formatting.add(
+    ws.conditional_format(
         cf["fails_range"],
-        ColorScaleRule(
-            start_type="num",
-            start_value=0,
-            start_color="CCFFCC",
-            end_type="num",
-            end_value=cf["fails_max"],
-            end_color="FFCCCC",
-        ),
+        {
+            "type": "2_color_scale",
+            "min_type": "num",
+            "min_value": 0,
+            "min_color": "#CCFFCC",
+            "max_type": "num",
+            "max_value": cf["fails_max"],
+            "max_color": "#FFCCCC",
+        },
     )
 
 
 def _add_dut_flag_status_rules(ws, cell_range, theme):
-    """Three status rules on the DUT Flag metadata row's DIE cells (fourth
-    wave). Case-insensitive SEARCH substring matches — upstream values are
+    """Three status rules on the DUT Flag metadata row's DIE cells.
+    Case-insensitive SEARCH substring matches — upstream values are
     "Passed - 0xNN" / "Failed - 0xNN" / "Superseded - 0xNN" / "Unknown -
     0xNN", so "Fail" hits the fail variants and blanks / "Unknown" stay
-    unstyled (SEARCH on a blank errors, ISNUMBER swallows it). All rules
-    stopIfTrue; colors reuse the theme's neutral/pass/fail fills."""
-    min_col, min_row, _, _ = range_boundaries(cell_range)
-    cell = f"{get_column_letter(min_col)}{min_row}"
-    for needle, fill in (
-        ("Superseded", theme.neutral_fill),
-        ("Fail", theme.fail_fill),
-        ("Pass", theme.pass_fill),
+    unstyled. All rules stopIfTrue."""
+    row0 = _range_first_row(cell_range)
+    col0 = _col0(cell_range.split(":")[0].rstrip("0123456789"))
+    cell = f"{xlutil.xl_col_to_name(col0)}{row0 + 1}"
+    for needle, hex6 in (
+        ("Superseded", "FFF3CD"),
+        ("Fail", "FFCCCC"),
+        ("Pass", "CCFFCC"),
     ):
-        _add_rule(ws, cell_range, f'ISNUMBER(SEARCH("{needle}",{cell}))', fill)
+        _add_rule(ws, cell_range, f'ISNUMBER(SEARCH("{needle}",{cell}))', theme.cf_fill(hex6))
 
 
 # --------------------------------------------------------------------------
-# hidden mirror columns
+# hidden mirror columns + sparklines
 # --------------------------------------------------------------------------
 
 
 def _hide_mirror_columns(ws, spec, theme):
     """Hide the flag mirror columns; grey marker header outside the AutoFilter."""
-    first = column_index_from_string(spec["flag_first_col"])
-    for offset in range(len(spec["die_columns"])):
-        column = first + offset
-        ws.column_dimensions[get_column_letter(column)].hidden = True
+    first = spec["flag_first_col"]
+    count = len(spec["die_columns"])
+    if count > 0:
+        first0 = _col0(first)
+        ws.set_column(first0, first0 + count - 1, None, None, {"hidden": True})
+    for offset in range(count):
         _write_cell(
             ws,
             HEADER_ROW,
-            column,
+            _col0(first) + offset + 1,
             MIRROR_HEADER_TEXT,
-            theme.banner_font,
-            theme.body_alignment,
-            fill=theme.banner_fill,
+            theme,
+            font="banner",
+            align="center",
+            border=False,
+            fill_hex=BANNER_FILL_HEX,
         )
 
 
-# --------------------------------------------------------------------------
-# native AutoFilter (fix wave 2: replaces the Excel Table)
-# --------------------------------------------------------------------------
-
-
-def _set_auto_filter(ws, spec):
-    """Native AutoFilter over the spec ref (duplicated header text is legal
-    — nothing for Excel to repair, unlike the removed Table whose
-    tableColumn names had to equal the header-cell text)."""
-    ref = (spec.get("auto_filter") or {}).get("ref")
-    if ref:
-        ws.auto_filter.ref = ref
+def _add_sparklines(ws, spec):
+    """Trend sparklines (migration upgrade 2): one per spec entry, ranges
+    qualified with the sheet name (chunk sheets qualify their own name).
+    Visual tokens per the user ruling: theme-blue line, green high / red
+    low points, blank die cells as gaps; FTR rows use column type."""
+    trend_col = spec.get("trend_col")
+    if not trend_col:
+        return
+    qualified = f"{xlutil.quote_sheetname(ws.name)}!"
+    for spark in spec.get("sparklines") or []:
+        ws.add_sparkline(
+            spark["row"] - 1,
+            _col0(trend_col),
+            {
+                "range": f"{qualified}{spark['range']}",
+                "type": spark["type"],
+                "series_color": "#1E40AF",
+                "high_point": True,
+                "low_point": True,
+                "high_color": "#16A34A",
+                "low_color": "#DC2626",
+                "empty_cells": "gap",
+            },
+        )
 
 
 # --------------------------------------------------------------------------
@@ -447,14 +518,15 @@ def _set_auto_filter(ws, spec):
 
 def _set_column_widths(ws, spec):
     """Pin the DUT-sheet widths (2026-11-10): A=8, B=30 (Test name),
-    C..L=8, die columns=8. Replaces the base-column autofit the generator
-    used to run; hidden mirror columns stay untouched."""
-    ws.column_dimensions["A"].width = BASE_COLUMN_WIDTH
-    ws.column_dimensions["B"].width = TEST_NAME_COLUMN_WIDTH
-    for index in range(3, BASE_COLUMN_COUNT + 1):
-        ws.column_dimensions[get_column_letter(index)].width = BASE_COLUMN_WIDTH
+    C..L=8, die columns=8, Trend=20 (migration)."""
+    ws.set_column(0, 0, BASE_COLUMN_WIDTH)
+    ws.set_column(1, 1, TEST_NAME_COLUMN_WIDTH)
+    ws.set_column(2, BASE_COLUMN_COUNT - 1, BASE_COLUMN_WIDTH)
     for letter in spec.get("die_columns") or []:
-        ws.column_dimensions[letter].width = DIE_COLUMN_WIDTH
+        ws.set_column(_col0(letter), _col0(letter), DIE_COLUMN_WIDTH)
+    trend_col = spec.get("trend_col")
+    if trend_col:
+        ws.set_column(_col0(trend_col), _col0(trend_col), TREND_COLUMN_WIDTH)
 
 
 # --------------------------------------------------------------------------
@@ -462,11 +534,12 @@ def _set_column_widths(ws, spec):
 # --------------------------------------------------------------------------
 
 
-def render_matrix_sheet(ws: Worksheet, spec: dict, theme) -> None:
+def render_matrix_sheet(ws, spec: dict, theme) -> None:
     """Render one DUT Summary spec dict onto ``ws`` (banner, metadata block,
     repeated header, data rows, live conditional formatting, native
-    AutoFilter, hidden flag mirrors, pinned column widths, freeze /
-    gridlines / print setup)."""
+    AutoFilter, hidden flag mirrors, Trend sparklines with cached formula
+    values, pinned column widths, freeze / gridlines / print / tab / footer
+    polish)."""
     _render_banner(ws, spec, theme)
     _render_metadata(ws, spec, theme)
     _render_header(ws, spec, theme)
@@ -486,76 +559,97 @@ def render_matrix_sheet(ws: Worksheet, spec: dict, theme) -> None:
         _add_dut_flag_status_rules(ws, dut_flag_range, theme)
 
     _hide_mirror_columns(ws, spec, theme)
-    _set_auto_filter(ws, spec)
+    _add_sparklines(ws, spec)
 
-    ws.freeze_panes = spec["freeze_panes"]
-    ws.sheet_view.showGridLines = False
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    ref = (spec.get("auto_filter") or {}).get("ref")
+    if ref:
+        first0, last0 = ref.split(":")
+        r0, c0 = xlutil.xl_cell_to_rowcol(first0)
+        r1, c1 = xlutil.xl_cell_to_rowcol(last0)
+        ws.autofilter(r0, c0, r1, c1)
+
+    r0, c0 = xlutil.xl_cell_to_rowcol(spec["freeze_panes"])
+    ws.freeze_panes(r0, c0)
+    ws.hide_gridlines(2)  # screen + printed, matching showGridLines=False
+    ws.set_footer(FOOTER_TEXT)
+    ws.set_tab_color(f"#{DUT_TAB_HEX}")
+    ws.set_paper(9)  # A4
+    ws.fit_to_pages(1, 0)
+    ws.repeat_rows(HEADER_ROW - 1, HEADER_ROW - 1)
 
 
 def write_plain_row(
-    ws: Worksheet,
+    ws,
     row: int,
     values: list,
     theme,
     band=None,
-    number_formats: dict | None = None,
-    column_fills: dict | None = None,
+    number_formats: "dict | None" = None,
+    column_fills: "dict | None" = None,
+    formula_values: "dict | None" = None,
 ) -> None:
     """One plain-table data row: themed body cells with thin borders, the
-    band fill, letter-keyed per-column number formats, and static column
-    fills (``{column_letter: hex6}``) that override the banding — the
-    plain-table counterpart of the DUT Summary's static yellow SpecMin/
-    SpecMax (third wave). Rows shorter than a fill column simply never
-    reach it (no phantom filled cells). Shared by ``render_plain_table``
-    and the generator's per-row loops (Test Statistics keeps its classic
-    per-row progress cadence, so its rows bypass the spec's ``rows``)."""
+    band fill (a 6-digit hex string or None), letter-keyed per-column
+    number formats, static column fills (``{column_letter: hex6}``) that
+    override the banding, and per-cell cached formula results
+    (``{col_1based: value}`` — every formula cell caches explicitly).
+    Rows shorter than a fill column simply never reach it."""
     formats = number_formats or {}
     fills = column_fills or {}
+    caches = formula_values or {}
     for column, value in enumerate(values, start=1):
-        letter = get_column_letter(column)
+        letter = xlutil.xl_col_to_name(column - 1)
         hex6 = fills.get(letter)
-        fill = _solid_fill(hex6) if hex6 else band
+        fill = hex6 if hex6 else band
+        cached = caches.get(column)
         _write_cell(
             ws,
             row,
             column,
             value,
-            theme.body_font,
-            theme.body_alignment,
-            border=theme.border,
-            fill=fill,
-            number_format=formats.get(letter),
+            theme,
+            font="body",
+            align="center",
+            border=True,
+            fill_hex=fill,
+            num_fmt=formats.get(letter),
+            cached=cached,
         )
 
 
-def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
+def render_plain_table(ws, spec: dict, theme) -> None:
     """Render a plain table spec ``{"name","headers","rows",
     "number_formats"?,"cell_number_formats"?,"column_fills"?,
-    "conditional_formatting"?}``: styled header row, thin borders,
-    alternating banding, auto-filter, frozen header, gridlines off.
+    "conditional_formatting"?,"tab_color"?,"repeat_header_row"?}``: styled
+    header row, thin borders, alternating banding, auto-filter, frozen
+    header, gridlines off, page-number footer (upgrade 4 — every sheet
+    gets one), optional tab color + repeated header row (upgrades 4-5).
     ``number_formats`` keys are column letters; ``cell_number_formats``
-    (fix wave 2) maps ``(row_index, col_index)`` — 0-based over the data
-    grid EXCLUDING the header row — to a per-cell number format applied
-    after writing; ``column_fills`` (third wave) maps a column letter to a
-    static data-cell fill hex that wins over the banding (headers
-    untouched); ``conditional_formatting`` (fourth wave, ``cp_range``
-    ninth wave) carries the optional ``"cpk_range"`` / ``"cp_range"`` /
-    ``"fail_num_range"`` strings spanning the DATA rows only (header
-    excluded) — the Cpk AND Cp columns reuse the matrix sheet's shared
-    band builder (identical four ISNUMBER-guarded rules, parameterized
-    range), the Fail Num rules are binary (>0 red, =0 green)."""
+    maps ``(row_index, col_index)`` — 0-based over the data grid EXCLUDING
+    the header row — composed into the cell format at WRITE time (xlsxwriter
+    formats are immutable); ``column_fills`` maps a column letter to a
+    static data-cell fill hex that wins over the banding;
+    ``conditional_formatting`` carries the optional ``"cpk_range"`` /
+    ``"cp_range"`` / ``"fail_num_range"`` strings spanning the DATA rows
+    only — the Cpk AND Cp columns reuse the matrix sheet's shared band
+    builder, the Fail Num rules are binary (>0 red, =0 green)."""
     headers = spec["headers"]
     rows = spec.get("rows") or []
     formats = spec.get("number_formats") or {}
     column_fills = spec.get("column_fills") or {}
+    cell_formats = spec.get("cell_number_formats") or {}
+
+    ws.hide_gridlines(2)
+    ws.set_footer(FOOTER_TEXT)
+    if spec.get("tab_color"):
+        ws.set_tab_color(f"#{spec['tab_color']}")
+    if spec.get("repeat_header_row"):
+        first = spec["repeat_header_row"]
+        ws.repeat_rows(first - 1, first - 1)
 
     if not headers and not rows:
         # degenerate all-empty table: nothing to draw — return before the
-        # zero-width auto-filter would call get_column_letter(0)
-        ws.sheet_view.showGridLines = False
+        # zero-width auto-filter would compute an invalid range
         return
 
     for column, value in enumerate(headers, start=1):
@@ -564,34 +658,35 @@ def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
             1,
             column,
             value,
-            theme.header_font,
-            theme.header_alignment,
-            border=theme.border,
-            fill=theme.header_fill,
+            theme,
+            font="header",
+            align="center",
+            border=True,
+            fill_hex=HEADER_FILL_HEX,
         )
-    ws.row_dimensions[1].height = ROW_HEIGHT
+    ws.set_row(0, ROW_HEIGHT)
 
     for offset, values in enumerate(rows):
-        band = theme.group_fill if offset % 2 == 0 else None
+        band = GROUP_FILL_HEX if offset % 2 == 0 else None
+        # per-cell number formats (fix wave 2) compose at write time: the
+        # overrides for THIS data row join the letter-keyed formats
+        row_formats = dict(formats)
+        for (row_index, col_index), fmt in cell_formats.items():
+            if row_index == offset:
+                letter = xlutil.xl_col_to_name(col_index)
+                row_formats[letter] = fmt
         write_plain_row(
             ws,
             2 + offset,
             values,
             theme,
             band=band,
-            number_formats=formats,
+            number_formats=row_formats,
             column_fills=column_fills,
         )
 
-    # per-cell formats after the cells exist (0-based data grid -> Excel)
-    for (row_index, col_index), fmt in (spec.get("cell_number_formats") or {}).items():
-        ws.cell(row=2 + row_index, column=1 + col_index).number_format = fmt
-
-    # conditional formatting (fourth wave): optional ranges over the data
-    # rows — the shared Cpk band builder + the binary Fail Num rules.
-    # Ninth wave: "cp_range" gets the IDENTICAL four bands through the same
-    # shared builder (user asked Cpk-style CF for the Test Statistics Cp
-    # column; the DUT Summary Cp column stays unbanded).
+    # conditional formatting: optional ranges over the data rows — the
+    # shared Cpk band builder + the binary Fail Num rules
     cf = spec.get("conditional_formatting") or {}
     if cf.get("cpk_range"):
         _add_cpk_rules(ws, cf["cpk_range"], theme)
@@ -601,6 +696,5 @@ def render_plain_table(ws: Worksheet, spec: dict, theme) -> None:
         _add_fail_num_rules(ws, cf["fail_num_range"], theme)
 
     width = max([len(headers)] + [len(values) for values in rows])
-    ws.auto_filter.ref = f"A1:{get_column_letter(width)}{1 + len(rows)}"
-    ws.freeze_panes = "A2"
-    ws.sheet_view.showGridLines = False
+    ws.autofilter(0, 0, 1 + len(rows) - 1, width - 1)
+    ws.freeze_panes(1, 0)
