@@ -1,4 +1,4 @@
-"""Tests for deps/modernExporter/sheets.py: plain-table spec builder + image embedding.
+"""Tests for deps/exporter/sheets.py: plain-table spec builder + image embedding.
 
 plain_table_spec is checked pure (headers translated, rows sanitized,
 generators materialized); insert_report_image is checked on a fresh
@@ -12,7 +12,7 @@ import math
 from openpyxl import Workbook
 from PIL import Image as PILImage
 
-from deps.modernExporter.sheets import insert_report_image, plain_table_spec
+from deps.exporter.sheets import insert_report_image, plain_table_spec
 
 # Minimal 1x1 grayscale PNG (69 bytes), inlined so the fixture needs no file.
 PNG_1X1 = bytes.fromhex(

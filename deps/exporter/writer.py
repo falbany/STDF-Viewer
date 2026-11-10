@@ -1,6 +1,6 @@
 """
 #
-# writer.py - modernExporter package - STDF Viewer
+# writer.py - exporter package - STDF Viewer
 #
 # Author: falbany (fork)
 # Created Date: November 9th 2026
@@ -42,7 +42,7 @@ from openpyxl.utils import (
 from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.worksheet import Worksheet
 
-from deps.modernExporter.matrix import sanitize_cell
+from deps.exporter.matrix import sanitize_cell
 
 # Sheet layout, mirroring matrix.py: banner 1, metadata 2..14 (13 rows),
 # header 15, data 16+.

@@ -1,4 +1,4 @@
-"""Tests for deps/modernExporter/writer.py: openpyxl renderer (matrix + plain tables).
+"""Tests for deps/exporter/writer.py: openpyxl renderer (matrix + plain tables).
 
 Round-trip style: render on a fresh Workbook, save to BytesIO, load_workbook,
 assert on the reloaded sheet so every check proves the artifact really survives.
@@ -9,8 +9,8 @@ import io
 import pytest
 from openpyxl import Workbook, load_workbook
 
-from deps.modernExporter.theme import ModernTheme
-from deps.modernExporter.writer import render_matrix_sheet, render_plain_table
+from deps.exporter.theme import ModernTheme
+from deps.exporter.writer import render_matrix_sheet, render_plain_table
 
 BASE_HEADERS = ["Test#", "Test Name", "Param", "Unit", "SpecMin", "SpecMax",
                 "Min", "Max", "Mean", "St. Dev.", "Cpk", "Fails"]
@@ -745,7 +745,7 @@ class TestPlainTableConditionalFormatting:
 
 class TestRealSpecIntegration:
     def test_real_matrix_spec_renders_and_reloads(self):
-        from tests.modernExporter.test_matrix import base_duts, base_tests, build
+        from tests.exporter.test_matrix import base_duts, base_tests, build
         spec = build(base_tests(), base_duts())[0]
         wb = render(spec)
         # masked rows of the real fixture: File ID 2, Wafer 8, X 9, Y 10,

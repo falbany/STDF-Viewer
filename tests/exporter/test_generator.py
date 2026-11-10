@@ -1,4 +1,4 @@
-"""Tests for deps/modernExporter/generator.py: ModernReportGenerator skeleton.
+"""Tests for deps/exporter/generator.py: ModernReportGenerator skeleton.
 
 Integration smoke: build the classic threading plumbing (signals/dataChannel/
 mutex/condWait), a reportInfo tuple mirroring stdfExporter.start() for
@@ -11,7 +11,7 @@ import pytest
 from openpyxl import load_workbook
 from PyQt5 import QtCore
 
-from deps.modernExporter.generator import (
+from deps.exporter.generator import (
     ModernReportGenerator,
     apply_ftr_pseudo_limits,
     numericize_value,

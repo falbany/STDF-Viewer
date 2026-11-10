@@ -1,4 +1,4 @@
-"""Tests for deps/modernExporter/generator.py: DUT Summary + chart sheets.
+"""Tests for deps/exporter/generator.py: DUT Summary + chart sheets.
 
 Task 8 integration: selectedContents={DUT, Trend, Bin, Wafer} (Histogram
 deliberately NOT selected), two test items (one parametric with limits, one
@@ -21,8 +21,8 @@ from PIL import Image as PILImage
 from PyQt5 import QtCore
 
 from deps.SharedSrc import REC, getSetting, tab
-from deps.modernExporter.generator import ModernReportGenerator
-from deps.modernExporter.theme import number_format_from_settings
+from deps.exporter.generator import ModernReportGenerator
+from deps.exporter.theme import number_format_from_settings
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
 
 
@@ -288,20 +288,6 @@ class TestDutSummarySheet:
 # --------------------------------------------------------------------------
 
 class TestChartSheets:
-    @pytest.fixture(autouse=True)
-    def seed_bin_colors(self):
-        """The global bin-color dicts are empty until a STDF loads
-        (setSettingDefaultColor); seed both so the pies carry per-slice
-        DataPoint colors, restored afterwards."""
-        settings = getSetting()
-        seeded = {1: "#00CC00", 3: "#CC0000"}
-        settings.color.hbin_colors.update(seeded)
-        settings.color.sbin_colors.update(seeded)
-        yield
-        for key in seeded:
-            settings.color.hbin_colors.pop(key, None)
-            settings.color.sbin_colors.pop(key, None)
-
     def test_images_embedded(self, generated):
         # fifth wave: Wafer/Trend keep the embedded PNGs — Bin no longer
         # calls waitForImage at all
@@ -313,9 +299,57 @@ class TestChartSheets:
         gen, _, _, _, _ = generated
         assert len(gen._wb["Bin Chart"]._images) == 0
 
+    # -- dashboard header (seventh wave) ------------------------------------
+
+    def test_bin_block_title_row_one(self, generated):
+        # R1: row 1 = "Bin Chart — Head{h} / {site}", 14pt bold theme-primary
+        _, wb, _, _, _ = generated
+        cell = wb["Bin Chart"]["A1"]
+        assert cell.value == "Bin Chart — Head1 / All Sites"
+        assert cell.font.size == 14
+        assert cell.font.bold is True
+        assert cell.font.color.rgb.endswith("1E40AF")
+        assert wb["Bin Chart"]["A2"].value is None          # row 2 blank
+
+    def test_bin_kpi_cards_written(self, generated):
+        # R2: three cards on rows 3-5 (label/value/subtitle in A, C, E),
+        # aggregated from the one-file HB row list
+        _, wb, _, _, _ = generated
+        ws = wb["Bin Chart"]
+        assert ws["A3"].value == "Yield"
+        assert ws["A4"].value == pytest.approx(0.9)         # float, wave-3
+        assert isinstance(ws["A4"].value, float)
+        assert ws["A4"].number_format == "0.00%"
+        assert ws["A5"].value == "9 pass / 10 total parts"
+        assert ws["C3"].value == "Fails"
+        assert ws["C4"].value == 1
+        assert ws["C5"].value == "0 unknown · 0 superseded"
+        assert ws["E3"].value == "Total Parts"
+        assert ws["E4"].value == 10
+        assert ws["E5"].value == "across 1 file(s)"
+        assert ws["B6"].value is None                       # row 6 blank
+
+    def test_bin_kpi_card_fills_and_merges(self, generated):
+        # card fills on the anchor cells (openpyxl's READER recreates
+        # merged non-anchor cells without styles, but the styles are in
+        # the saved XML); every card row merged across its 2 columns
+        _, wb, _, _, _ = generated
+        ws = wb["Bin Chart"]
+        for anchor, hex6 in (("A3", "FFF3CD"), ("C3", "FFCCCC"),
+                             ("E3", "E9EEF6")):
+            assert ws[anchor].fill.fgColor.rgb.endswith(hex6), anchor
+        ranges = {str(r) for r in ws.merged_cells.ranges}
+        for span in ("A3:B3", "A4:B4", "A5:B5",
+                     "C3:D3", "C4:D4", "C5:D5",
+                     "E3:F3", "E4:F4", "E5:F5"):
+            assert span in ranges, span
+
+    # -- donuts right of their tables (R5/R6) --------------------------------
+
     def test_bin_native_donut_charts(self, generated):
-        # sixth wave: the fifth-wave pies become doughnuts — charts survive
-        # the save/reload round-trip (holeSize / legend position included)
+        # charts survive the save/reload round-trip (holeSize / legend
+        # position included); anchors: HB donut at G8 (right of the HB
+        # table), SB donut at G24 — 0-based rows 7 / 23, col 6
         _, wb, _, _, _ = generated
         charts = wb["Bin Chart"]._charts
         assert len(charts) == 2
@@ -323,9 +357,8 @@ class TestChartSheets:
         titles = [chart_title_text(c) for c in charts]
         assert titles == ["Hardware Bin — Head1 / All Sites",
                           "Software Bin — Head1 / All Sites"]
-        # side-by-side anchors: HB at A1 (row 0 / col 0), SB at H1 (col 7)
         assert [(c.anchor._from.row, c.anchor._from.col) for c in charts] == [
-            (0, 0), (0, 7)]
+            (7, 6), (23, 6)]
         # hidden helper columns must still be plotted (survives the
         # round-trip: plotVisOnly val="0")
         assert all(c.visible_cells_only is False for c in charts)
@@ -336,27 +369,22 @@ class TestChartSheets:
 
     def test_bin_chart_construction_in_memory(self, generated):
         # in-memory-only attributes (style / size are defaults after a
-        # reload): built-in style 10, 9x7 cm, percent data labels
+        # reload): built-in style 6 (first Excel palette, "Couleur 1"),
+        # 9x7 cm, percent data labels
         gen, _, _, _, _ = generated
         for chart in gen._wb["Bin Chart"]._charts:
-            assert chart.style == 10
+            assert chart.style == 6
             assert chart.width == 9
             assert chart.height == 7
             assert chart.dataLabels.showPercent is True
 
-    def test_bin_slice_colors_from_settings(self, generated):
-        # per-slice DataPoint colors from the settings bin-color dicts,
-        # 6-digit hex without the leading "#"
+    def test_bin_charts_use_builtin_palette(self, generated):
+        # seventh wave (ruled consequence): no per-slice DataPoint fills —
+        # the settings bin-color dicts no longer reach the Bin sheet, the
+        # built-in style-6 palette colors the slices
         gen, _, _, _, _ = generated
-        settings = getSetting()
-        for chart, color_dict in (
-                (gen._wb["Bin Chart"]._charts[0], settings.color.hbin_colors),
-                (gen._wb["Bin Chart"]._charts[1], settings.color.sbin_colors)):
-            points = chart.series[0].data_points
-            assert [p.idx for p in points] == [0, 1]
-            assert [p.graphicalProperties.solidFill.srgbClr for p in points] \
-                == [color_dict[1].lstrip("#")[:6],
-                    color_dict[3].lstrip("#")[:6]]
+        for chart in gen._wb["Bin Chart"]._charts:
+            assert not chart.series[0].data_points
 
     def test_bin_helper_block_hidden_columns(self, generated):
         # helper data in fixed far columns BJ/BK, header "Bin"/"Count" +
@@ -377,34 +405,46 @@ class TestChartSheets:
         for letter in ("BJ", "BK"):
             assert ws.column_dimensions[letter].hidden is True
 
+    # -- structured tables after the KPIs (R3/R4) ----------------------------
+
     def test_bin_structured_tables_written(self, generated):
-        # sixth wave: structured HB/SB tables replace the classic text rows
-        # (first block: charts consume 15 rows = ceil(7cm/0.21in) + 1 gap;
-        # HB section rows 15-19, one-row gap, SB section rows 21-25)
+        # layout per block: title 1, blank 2, KPIs 3-5, blank 6, HB section
+        # title 7 + header 8 + 2 data rows 9-10 + Total 11; section height
+        # = max(table 5, donut 15) + 1 blank -> SB section title 23
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        # HB section: title, blue header, two data rows, bold Total
-        assert ws["A15"].value == "Hardware Bins — Head1 / All Sites"
-        assert [ws.cell(row=16, column=c).value for c in range(1, 5)] == [
+        # HB section: Output-styled title band, blue header, two data rows,
+        # bold Total
+        assert ws["A7"].value == "Hardware Bins — Head1 / All Sites"
+        assert ws["A7"].style == "Output"
+        assert [ws.cell(row=8, column=c).value for c in range(1, 5)] == [
             "Bin", "Value", "Count", "Distribution"]
-        assert [ws[cell].value for cell in ("A17", "B17", "C17")] == [
+        assert [ws[cell].value for cell in ("A9", "B9", "C9")] == [
             "PASS_BIN", 1, 9]
-        assert ws["D17"].value == pytest.approx(0.9)
-        assert ws["D17"].number_format == "0.00%"
-        assert ws["D18"].value == pytest.approx(0.1)
-        assert ws["A19"].value == "Total"
-        assert ws["C19"].value == 10
-        assert isinstance(ws["C19"].value, int)
-        assert ws["D19"].value == 1.0
-        assert ws["D19"].number_format == "0.00%"
-        # the classic raw upstream rows are gone (old B15 "Yield: 90.00%")
-        assert ws["B15"].value is None
-        # SB section: title at 21 (19 total + 1-row gap -> title 21)
-        assert ws["A21"].value == "Software Bins — Head1 / All Sites"
-        assert [ws.cell(row=22, column=c).value for c in range(1, 5)] == [
+        assert ws["D9"].value == pytest.approx(0.9)
+        assert ws["D9"].number_format == "0.00%"
+        assert ws["D10"].value == pytest.approx(0.1)
+        assert ws["A11"].value == "Total"
+        assert ws["C11"].value == 10
+        assert isinstance(ws["C11"].value, int)
+        assert ws["D11"].value == 1.0
+        assert ws["D11"].number_format == "0.00%"
+        # SB section starts BELOW the HB donut's bottom edge (donut spans
+        # rows 8..22 at 7cm): title 23, header 24, data 25-26, Total 27
+        assert ws["A23"].value == "Software Bins — Head1 / All Sites"
+        assert ws["A23"].style == "Output"
+        assert [ws.cell(row=24, column=c).value for c in range(1, 5)] == [
             "Bin", "Value", "Count", "Distribution"]
-        assert ws["A25"].value == "Total"
-        assert ws["C25"].value == 10
+        assert ws["A27"].value == "Total"
+        assert ws["C27"].value == 10
+
+    def test_bin_section_title_band_spans_table(self, generated):
+        # R4: the Output band is merged across the table width A:D
+        _, wb, _, _, _ = generated
+        ws = wb["Bin Chart"]
+        ranges = {str(r) for r in ws.merged_cells.ranges}
+        assert "A7:D7" in ranges
+        assert "A23:D23" in ranges
 
     def test_bin_tables_autofilter_on_both(self, generated):
         # ruled: filter arrows on BOTH tables (mockup shows the SB arrows;
@@ -414,9 +454,9 @@ class TestChartSheets:
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
         assert sorted(ws.tables) == ["HB_Head1_AllSites", "SB_Head1_AllSites"]
-        # header..last-data rows; Total rows (19 / 25) outside the ranges
-        assert ws.tables["HB_Head1_AllSites"].ref == "A16:D18"
-        assert ws.tables["SB_Head1_AllSites"].ref == "A22:D24"
+        # header..last-data rows; Total rows (11 / 27) outside the ranges
+        assert ws.tables["HB_Head1_AllSites"].ref == "A8:D10"
+        assert ws.tables["SB_Head1_AllSites"].ref == "A24:D26"
         for name in ("HB_Head1_AllSites", "SB_Head1_AllSites"):
             table = ws.tables[name]
             assert table.autoFilter is not None
@@ -428,7 +468,7 @@ class TestChartSheets:
         # one DataBarRule per table over the Distribution DATA rows only
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        for data_range in ("D17:D18", "D23:D24"):
+        for data_range in ("D9:D10", "D25:D26"):
             (rule,) = [r for cf in ws.conditional_formatting
                        for r in cf.rules if str(cf.sqref) == data_range]
             assert rule.type == "dataBar"

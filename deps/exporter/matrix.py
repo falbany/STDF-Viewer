@@ -1,6 +1,6 @@
 """
 #
-# matrix.py - modernExporter package - STDF Viewer
+# matrix.py - exporter package - STDF Viewer
 #
 # Author: falbany (fork)
 # Created Date: November 9th 2026
@@ -36,7 +36,7 @@ import numpy as np
 from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 
 from deps.SharedSrc import REC
-from deps.modernExporter.helpers import (
+from deps.exporter.helpers import (
     DUT_CHUNK_CAP,
     cpk_formula,
     die_col,

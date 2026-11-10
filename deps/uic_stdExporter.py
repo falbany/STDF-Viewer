@@ -1206,7 +1206,7 @@ class stdfExporter(QtWidgets.QDialog):
                     
         # fork(falbany): select report generator
         if getSetting().gen.modern_export:
-            from .modernExporter.generator import ModernReportGenerator  # lazy: avoids hard dep at import time
+            from .exporter.generator import ModernReportGenerator  # lazy: avoids hard dep at import time
             gen_class = ModernReportGenerator
         else:
             gen_class = reportGenerator

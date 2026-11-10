@@ -1,11 +1,11 @@
-"""Tests for deps/modernExporter/matrix.py: DUT Summary spec builder."""
+"""Tests for deps/exporter/matrix.py: DUT Summary spec builder."""
 
 import numpy as np
 from openpyxl.utils import column_index_from_string
 
 from deps.SharedSrc import REC
-from deps.modernExporter.helpers import DUT_CHUNK_CAP, die_col
-from deps.modernExporter.matrix import (
+from deps.exporter.helpers import DUT_CHUNK_CAP, die_col
+from deps.exporter.matrix import (
     METADATA_ROWS,
     build_dut_summary_spec,
     sanitize_cell,

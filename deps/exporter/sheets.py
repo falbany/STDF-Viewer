@@ -1,6 +1,6 @@
 """
 #
-# sheets.py - modernExporter package - STDF Viewer
+# sheets.py - exporter package - STDF Viewer
 #
 # Author: falbany (fork)
 # Created Date: November 9th 2026
@@ -39,7 +39,7 @@ from math import ceil
 from openpyxl.drawing.image import Image
 from openpyxl.worksheet.worksheet import Worksheet
 
-from deps.modernExporter.matrix import sanitize_cell
+from deps.exporter.matrix import sanitize_cell
 
 PX_PER_INCH = 96
 ROW_HEIGHT_IN = 0.21  # one default Excel row ≈ 0.21 inch (classic spacing math)

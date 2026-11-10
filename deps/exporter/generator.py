@@ -1,6 +1,6 @@
 """
 #
-# generator.py - modernExporter package - STDF Viewer
+# generator.py - exporter package - STDF Viewer
 #
 # Author: falbany (fork)
 # Created Date: November 9th 2026
@@ -32,7 +32,7 @@
 ``deps.uic_stdExporter`` and keeps its threading contract verbatim — the
 inherited ``generate_report`` slot, the ``waitFor*`` data handshake, the
 ``forceQuit`` early-exits and the ``loopCount`` / ``sendProgress`` cadence —
-while writing the workbook with openpyxl through the modernExporter theme and
+while writing the workbook with openpyxl through the exporter theme and
 renderers instead of xlsxwriter.
 
 Instance state (``self._wb``, ``self._theme``, ``self._row``) replaces the
@@ -45,41 +45,41 @@ mirroring the classic cursor gaps and progress cadence.
 """
 
 from itertools import product
-from math import ceil
 import re
 
 from openpyxl import Workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
 from PyQt5 import QtCore
 
-from deps.SharedSrc import REC, getSetting, tab
+from deps.SharedSrc import REC, tab
 from deps.uic_stdExporter import (
     ReportSelection,
     dataChannel,
     reportGenerator,
     signals,
 )
-from deps.modernExporter.charts import (
-    BIN_CHART_HEIGHT_CM,
+from deps.exporter.charts import (
+    BIN_CHART_ROW_SPAN,
     BIN_TABLE_COLUMN_WIDTHS,
     aggregate_bin_counts,
+    aggregate_kpi,
     bin_label,
     build_bin_donut,
     write_bin_table,
+    write_kpi_cards,
 )
-from deps.modernExporter.helpers import apply_cpk_formula, split_test_name
-from deps.modernExporter.matrix import (
+from deps.exporter.helpers import apply_cpk_formula, split_test_name
+from deps.exporter.matrix import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
     build_dut_summary_spec,
 )
-from deps.modernExporter.sheets import (
-    ROW_HEIGHT_IN,
+from deps.exporter.sheets import (
     insert_report_image,
     plain_table_spec,
 )
-from deps.modernExporter.theme import ModernTheme
-from deps.modernExporter.writer import (
+from deps.exporter.theme import ModernTheme
+from deps.exporter.writer import (
     render_matrix_sheet,
     render_plain_table,
     write_body_cell,
@@ -662,7 +662,6 @@ class ModernReportGenerator(reportGenerator):
 
         key = ReportSelection.Bin
         row = self._row.get(key, 0)
-        settings = getSetting()
         # hidden helper blocks (fixed far column) advance per chart so the
         # series references of earlier blocks stay intact
         helper_row = 1
@@ -671,43 +670,54 @@ class ModernReportGenerator(reportGenerator):
                 return
             # get hard bin list, then soft bin list — the same
             # waitForDataList calls as before; each table feeds BOTH the
-            # donut chart and the structured table below it
+            # donut chart and the structured table; the HB row list also
+            # feeds the KPI cards (upstream writes the SAME summary cells
+            # into the SB rows — aggregating one list avoids double-count)
             tables = [self.waitForDataList([head], [site],
                                            self.selectedFiles, tab.Bin,
                                            {"isHBIN": isHBIN})
                       for isHBIN in (True, False)]
             aggregated = [aggregate_bin_counts(dataTable)
                           for dataTable in tables]
+            kpi = aggregate_kpi(tables[0])
+            n_files = len(tables[0])
             site_label = "All Sites" if site == -1 else f"Site{site}"
             site_tag = "AllSites" if site == -1 else f"Site{site}"
-            # native donuts (sixth wave; pies in the fifth): HB anchored
-            # at column A, SB at H; rows consumed mirror
-            # insert_report_image's spacing math (chart height + 1 gap)
+
+            # dashboard header (seventh wave): block title row, blank row,
+            # KPI cards (label/value/subtitle), blank separator row
+            row += 1
+            title_cell = BinSheet.cell(row=row, column=1,
+                                       value=(f"Bin Chart — Head{head} / "
+                                              f"{site_label}"))
+            title_cell.font = self._theme.block_title_font
+            row = write_kpi_cards(BinSheet, row + 2, kpi, n_files,
+                                  self._theme) + 1
+
+            # HB section then SB section (seventh wave): the table sits at
+            # A:D with its section title above; the donut sits RIGHT of it
+            # (anchor column G at the table-header row); the next section
+            # starts BELOW the taller of table and donut (+ 1 blank row).
+            # The geometry is fixed per section (donut ~15 rows at 7 cm),
+            # so empty bin lists leave their band reserved — the KPI
+            # dashboard above stays intact.
             for isHBIN, bins in zip((True, False), aggregated):
-                title = ("Hardware Bin" if isHBIN else "Software Bin")
-                colors = (settings.color.hbin_colors if isHBIN
-                          else settings.color.sbin_colors)
+                kind = "Hardware" if isHBIN else "Software"
+                prefix = "HB" if isHBIN else "SB"
+                title_row = row
                 chart_bins = [(bin_num, bin_label(bin_num, name), count)
                               for bin_num, name, count in bins]
-                anchor = f"{'A' if isHBIN else 'H'}{row + 1}"
+                write_bin_table(BinSheet, title_row, bins, self._theme,
+                                f"{kind} Bins — Head{head} / {site_label}",
+                                f"{prefix}_Head{head}_{site_tag}")
                 build_bin_donut(BinSheet,
-                                f"{title} — Head{head} / {site_label}",
-                                chart_bins, colors, anchor, BIN_HELPER_COL,
-                                helper_row=helper_row)
+                                f"{kind} Bin — Head{head} / {site_label}",
+                                chart_bins, f"G{title_row + 1}",
+                                BIN_HELPER_COL, helper_row=helper_row)
                 helper_row += 2 + len(chart_bins)  # header + data rows + gap
-            row += ceil((BIN_CHART_HEIGHT_CM / 2.54) / ROW_HEIGHT_IN) + 1
-            # structured bin tables (sixth wave) replace the classic raw
-            # text rows: HB section, small gap, SB section
-            hb_bins, sb_bins = aggregated
-            row = write_bin_table(BinSheet, row, hb_bins, self._theme,
-                                  f"Hardware Bins — Head{head} / {site_label}",
-                                  f"HB_Head{head}_{site_tag}")
-            row += 1   # small gap between the two sections
-            row = write_bin_table(BinSheet, row, sb_bins, self._theme,
-                                  f"Software Bins — Head{head} / {site_label}",
-                                  f"SB_Head{head}_{site_tag}")
-            # gap between head/site blocks
-            row += 3
+                row += max(len(bins) + 3, BIN_CHART_ROW_SPAN) + 1
+            # the stacking blank row after the SB donut separates the
+            # blocks — no extra gap anymore (the old +3 chart-band cadence)
         self._row[key] = row
 
         self.loopCount += 1

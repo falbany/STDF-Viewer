@@ -1,8 +1,13 @@
-"""Tests for deps/modernExporter/theme.py: style factory + number-format derivation."""
+"""Tests for deps/exporter/theme.py: style factory + number-format derivation."""
 
 import pytest
 
-from deps.modernExporter.theme import ModernTheme, number_format_from_settings
+from deps.exporter.theme import (
+    KPI_LABEL_HEX,
+    KPI_SUB_HEX,
+    ModernTheme,
+    number_format_from_settings,
+)
 
 
 class TestNumberFormatFromSettings:
@@ -60,6 +65,34 @@ class TestModernTheme:
         font = theme.metadata_label_font
         assert font.bold is True
         assert font.color.rgb.endswith("3B82F6")
+
+    def test_kpi_grey_tokens(self):
+        # seventh wave: the two KPI-card grey constants (dashboard mockup)
+        assert KPI_LABEL_HEX == "64748B"
+        assert KPI_SUB_HEX == "94A3B8"
+
+    def test_block_title_font(self, theme):
+        # Bin-sheet block title: 14pt bold theme-primary blue
+        font = theme.block_title_font
+        assert font.name == "Aptos"
+        assert font.size == 14
+        assert font.bold is True
+        assert font.color.rgb.endswith("1E40AF")
+
+    def test_kpi_card_fonts(self, theme):
+        label = theme.kpi_label_font
+        assert label.size == 9
+        assert label.bold is True
+        assert label.italic is not True
+        assert label.color.rgb.endswith("64748B")
+        value = theme.kpi_value_font
+        assert value.size == 16
+        assert value.bold is True
+        assert value.color.rgb.endswith("1F2937")   # banner dark
+        sub = theme.kpi_sub_font
+        assert sub.size == 9
+        assert sub.italic is True
+        assert sub.color.rgb.endswith("94A3B8")
 
     def test_body_font_and_alignment(self, theme):
         assert theme.body_font.name == "Aptos"

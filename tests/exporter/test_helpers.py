@@ -1,10 +1,10 @@
-"""Tests for deps/modernExporter/helpers.py: parsing, chunking, formula builders."""
+"""Tests for deps/exporter/helpers.py: parsing, chunking, formula builders."""
 
 import re
 
 import pytest
 
-from deps.modernExporter.helpers import (
+from deps.exporter.helpers import (
     DEFAULT_PARAM_PATTERN,
     DUT_CHUNK_CAP,
     TEMPERATURE_RE,
@@ -213,7 +213,7 @@ class TestFailsFormulas:
     def test_ftr_variant_removed(self):
         # third wave: FTR rows carry real limits and use the limits variant;
         # the FTR-specific formula was removed from helpers (grep: no refs)
-        import deps.modernExporter.helpers as helpers_module
+        import deps.exporter.helpers as helpers_module
 
         assert not hasattr(helpers_module, "fails_formula_ftr")
 

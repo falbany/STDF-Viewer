@@ -1,36 +1,43 @@
-"""Tests for deps/modernExporter/charts.py: Bin-row parsers, count
-aggregation, the native openpyxl donut-chart factory and the structured
-bin-table renderer (sixth wave — the fifth-wave PieCharts become
-DoughnutCharts and the classic text tables become structured tables with
-data bars, an Excel Table filter on each and a bold Total row).
+"""Tests for deps/exporter/charts.py: Bin-row parsers, count and
+KPI aggregation, the native openpyxl donut-chart factory, the structured
+bin-table renderer and the dashboard KPI cards (seventh wave — per-block
+dashboard header: title row, stylized KPI cards; tables use Excel's
+built-in "Output" style; charts drop the per-slice color overrides for
+the built-in palette).
 
 Data shapes confirmed upstream (DataInterface.py:596-608 +
 STDF-Viewer.py:1600-1604): one waitForDataList(tab.Bin) row PER FILE,
 all strings — [VHeader, "Yield: {pct}%", "Total: {n}", "Pass: {c}",
 "Failed: {c}", "Unknown: {c}", "Superseded: {c}", then one cell per
 non-zero bin: '"{BIN_NAME}"\\nBin {num}: {pct}%']. Percentages carry ONE
-decimal (upstream ``{:.1f}%`` formatting).
+decimal (upstream ``{:.1f}%`` formatting). The HB and SB lists carry
+IDENTICAL summary cells (both derive from getDUTCountOnConditions).
 
 Chart assertions run on in-memory openpyxl objects (charts survive a
 save/reload, but the in-memory object is the artifact under test here);
 table assertions cover both the in-memory styling and the save/reload
-round-trip where Excel Tables are concerned.
+round-trip where Excel Tables are concerned. Merged-cell styling is
+asserted IN MEMORY only — openpyxl's reader recreates MergedCell objects
+without styles, though the styles themselves are in the saved XML.
 """
 
 import pytest
 from openpyxl import Workbook, load_workbook
 from openpyxl.chart import DoughnutChart
 
-from deps.modernExporter.charts import (
+from deps.exporter.charts import (
     BIN_DONUT_HOLE_SIZE,
     BIN_TABLE_HEADERS,
     aggregate_bin_counts,
+    aggregate_kpi,
     bin_label,
     build_bin_donut,
     parse_bin_row,
+    parse_kpi_row,
     write_bin_table,
+    write_kpi_cards,
 )
-from deps.modernExporter.theme import ModernTheme
+from deps.exporter.theme import ModernTheme
 
 
 def bin_row(vheader="Hardware Bin / Head1 / All Sites", total=10,
@@ -43,7 +50,6 @@ def bin_row(vheader="Hardware Bin / Head1 / All Sites", total=10,
 
 BINS = [(1, "Bin 1 - PASS_BIN", 9), (3, "Bin 3 - FAIL_BIN", 1)]
 AGG_BINS = [(1, "PASS_BIN", 9), (3, "FAIL_BIN", 1)]   # raw names from the rows
-COLORS = {1: "#00CC00", 3: "#CC0000"}
 
 
 # --------------------------------------------------------------------------
@@ -152,6 +158,201 @@ class TestAggregateBinCounts:
 
 
 # --------------------------------------------------------------------------
+# parse_kpi_row + aggregate_kpi (seventh wave: dashboard KPI cards)
+# --------------------------------------------------------------------------
+
+class TestParseKpiRow:
+    def test_classic_row(self):
+        parsed = parse_kpi_row(bin_row())
+        assert parsed == {"total": 10, "pass": 9, "failed": 1,
+                          "unknown": 0, "superseded": 0}
+
+    def test_only_recognized_labels(self):
+        # the VHeader and the "Yield: ..%" cell must not contribute keys
+        parsed = parse_kpi_row(bin_row())
+        assert set(parsed) == {"total", "pass", "failed",
+                               "unknown", "superseded"}
+
+    def test_partial_row_keeps_found_keys_only(self):
+        parsed = parse_kpi_row(["VHeader", "Yield: nan%", "Total: 7"])
+        assert parsed == {"total": 7}
+
+    def test_unparseable_counts_skipped(self):
+        # "Pass: ?" / "Failed: nan" (no DUTs) — skipped, never raises
+        parsed = parse_kpi_row(["Total: 3", "Pass: ?", "Failed: nan"])
+        assert parsed == {"total": 3}
+
+    def test_non_string_cells_ignored(self):
+        assert parse_kpi_row([10, None, 4.5, True]) == {}
+
+    def test_empty_row(self):
+        assert parse_kpi_row([]) == {}
+
+    def test_zero_counts_parse(self):
+        # "Total: 0" (no DUTs) parses; the aggregation layer decides yield
+        parsed = parse_kpi_row(["Total: 0", "Pass: 0", "Failed: 0"])
+        assert parsed == {"total": 0, "pass": 0, "failed": 0}
+
+    def test_tolerates_surrounding_whitespace(self):
+        assert parse_kpi_row(["  Total:   12  "]) == {"total": 12}
+
+    def test_values_are_ints(self):
+        parsed = parse_kpi_row(bin_row())
+        assert all(isinstance(v, int) for v in parsed.values())
+
+
+class TestAggregateKpi:
+    def test_single_row(self):
+        kpi = aggregate_kpi([bin_row()])
+        assert kpi == {"total": 10, "pass": 9, "failed": 1, "unknown": 0,
+                       "superseded": 0, "yield": 0.9}
+        assert isinstance(kpi["yield"], float)
+
+    def test_rows_summed_across_files(self):
+        first = bin_row(vheader="Hardware Bin / Head1 / All Sites / File0",
+                        total=10)
+        second = bin_row(vheader="Hardware Bin / Head1 / All Sites / File2",
+                         total=20)
+        kpi = aggregate_kpi([first, second])
+        assert kpi["total"] == 30
+        assert kpi["pass"] == 18
+        assert kpi["failed"] == 2
+        assert kpi["yield"] == pytest.approx(18 / 30)
+
+    def test_missing_keys_default_zero(self):
+        # a file whose cells failed to parse contributes nothing, not NaN
+        kpi = aggregate_kpi([bin_row(), ["VHeader", "Yield: nan%"]])
+        assert kpi["total"] == 10
+        assert kpi["pass"] == 9
+
+    def test_empty_rows_give_zeros_and_no_yield(self):
+        assert aggregate_kpi([]) == {"total": 0, "pass": 0, "failed": 0,
+                                     "unknown": 0, "superseded": 0,
+                                     "yield": None}
+
+    def test_zero_total_gives_yield_none(self):
+        kpi = aggregate_kpi([bin_row(total=0)])
+        assert kpi["total"] == 0
+        assert kpi["yield"] is None
+
+    def test_yield_computed_from_summed_pass_and_total(self):
+        first = bin_row(total=10)                     # 9 pass
+        second = bin_row(total=5, bins=(("A", 1, 100.0),))
+        second[3] = "Pass: 5"                          # all 5 pass
+        second[4] = "Failed: 0"
+        kpi = aggregate_kpi([first, second])
+        assert kpi["yield"] == pytest.approx(14 / 15)
+
+
+# --------------------------------------------------------------------------
+# write_kpi_cards (seventh wave: stylized dashboard cards, rows 3-5)
+# --------------------------------------------------------------------------
+
+KPI = {"total": 10, "pass": 9, "failed": 1, "unknown": 2, "superseded": 3,
+       "yield": 0.9}
+
+
+class TestWriteKpiCards:
+    @pytest.fixture
+    def ws(self):
+        return Workbook().active
+
+    @pytest.fixture
+    def theme(self):
+        return ModernTheme()
+
+    def written(self, ws, theme, kpi=KPI, n_files=4, start_row=3):
+        return write_kpi_cards(ws, start_row, kpi, n_files, theme)
+
+    # card content -----------------------------------------------------------
+
+    def test_next_row_returned(self, ws, theme):
+        # label 3 + value 4 + subtitle 5 -> 6
+        assert self.written(ws, theme) == 6
+
+    def test_card1_yield_label_value_subtitle(self, ws, theme):
+        self.written(ws, theme)
+        assert ws["A3"].value == "Yield"
+        assert ws["A4"].value == pytest.approx(0.9)
+        assert isinstance(ws["A4"].value, float)
+        assert ws["A4"].number_format == "0.00%"   # numeric, wave-3 spirit
+        assert ws["A5"].value == "9 pass / 10 total parts"
+
+    def test_card2_fails(self, ws, theme):
+        self.written(ws, theme)
+        assert ws["C3"].value == "Fails"
+        assert ws["C4"].value == 1
+        assert isinstance(ws["C4"].value, int)
+        assert ws["C5"].value == "2 unknown · 3 superseded"
+
+    def test_card3_total_parts(self, ws, theme):
+        self.written(ws, theme)
+        assert ws["E3"].value == "Total Parts"
+        assert ws["E4"].value == 10
+        assert isinstance(ws["E4"].value, int)
+        assert ws["E5"].value == "across 4 file(s)"
+
+    def test_zero_total_yield_cell_is_dash(self, ws, theme):
+        kpi = dict(KPI, total=0, **{"pass": 0, "yield": None})
+        self.written(ws, theme, kpi=kpi)
+        assert ws["A4"].value == "-"
+
+    # fonts ------------------------------------------------------------------
+
+    def test_label_font(self, ws, theme):
+        self.written(ws, theme)
+        font = ws["A3"].font
+        assert font.bold is True
+        assert font.size == 9
+        assert font.color.rgb.endswith("64748B")
+        assert font.name == "Aptos"
+
+    def test_value_font(self, ws, theme):
+        self.written(ws, theme)
+        for coordinate in ("A4", "C4", "E4"):
+            font = ws[coordinate].font
+            assert font.bold is True
+            assert font.size == 16
+            assert font.color.rgb.endswith("1F2937")
+
+    def test_subtitle_font(self, ws, theme):
+        self.written(ws, theme)
+        for coordinate in ("A5", "C5", "E5"):
+            font = ws[coordinate].font
+            assert font.italic is True
+            assert font.size == 9
+            assert font.color.rgb.endswith("94A3B8")
+
+    # fills (every cell of each 3x2 card block) ------------------------------
+
+    def test_card_fills_on_every_cell(self, ws, theme):
+        # Yield = neutral yellow, Fails = fail red, Total = group blue-grey;
+        # merge FIRST then style — openpyxl's merge wipes styles set before
+        self.written(ws, theme)
+        expected = {"A": "FFF3CD", "C": "FFCCCC", "E": "E9EEF6"}
+        for letter, hex6 in expected.items():
+            for row in (3, 4, 5):
+                for column in (letter, chr(ord(letter) + 1)):
+                    cell = ws[f"{column}{row}"]
+                    assert cell.fill.fgColor.rgb.endswith(hex6), \
+                        f"{column}{row}"
+                    assert cell.fill.fill_type == "solid"
+
+    def test_cards_merged_in_three_stacked_rows(self, ws, theme):
+        self.written(ws, theme)
+        ranges = {str(r) for r in ws.merged_cells.ranges}
+        for span in ("A3:B3", "A4:B4", "A5:B5",
+                     "C3:D3", "C4:D4", "C5:D5",
+                     "E3:F3", "E4:F4", "E5:F5"):
+            assert span in ranges, span
+
+    def test_card_text_centered(self, ws, theme):
+        self.written(ws, theme)
+        for coordinate in ("A3", "A4", "A5"):
+            assert ws[coordinate].alignment.horizontal == "center"
+
+
+# --------------------------------------------------------------------------
 # bin_label
 # --------------------------------------------------------------------------
 
@@ -164,7 +365,9 @@ class TestBinLabel:
 
 
 # --------------------------------------------------------------------------
-# build_bin_donut (sixth wave: the fifth-wave pie factory becomes a donut)
+# build_bin_donut (sixth wave donut; seventh wave: built-in style 6 with
+# the FIRST Excel palette — per-slice color overrides REMOVED, bins are
+# distinguished by labels/legend only; revert = re-add the DataPoint loop)
 # --------------------------------------------------------------------------
 
 class TestBuildBinDonut:
@@ -173,14 +376,14 @@ class TestBuildBinDonut:
         return Workbook().active
 
     def test_chart_added_and_configured(self, ws):
-        build_bin_donut(ws, "Hardware Bin — Head1 / All Sites", BINS, COLORS,
+        build_bin_donut(ws, "Hardware Bin — Head1 / All Sites", BINS,
                         "A6", 62)
         assert len(ws._charts) == 1
         chart = ws._charts[0]
         assert isinstance(chart, DoughnutChart)
         assert chart.anchor == "A6"
         assert chart.title is not None
-        assert chart.style == 10
+        assert chart.style == 6
         assert chart.dataLabels.showPercent is True
         assert chart.width == 9
         assert chart.height == 7
@@ -195,7 +398,7 @@ class TestBuildBinDonut:
         assert chart.visible_cells_only is False
 
     def test_helper_block_written_from_anchor_row(self, ws):
-        build_bin_donut(ws, "t", BINS, COLORS, "A6", 62)
+        build_bin_donut(ws, "t", BINS, "A6", 62)
         # header row + one row per bin, derived from the anchor's row
         assert ws.cell(row=6, column=62).value == "Bin"
         assert ws.cell(row=6, column=63).value == "Count"
@@ -208,19 +411,19 @@ class TestBuildBinDonut:
     def test_explicit_helper_row_overrides_anchor_derivation(self, ws):
         # the generator gives the two charts of one block distinct helper
         # row ranges (both anchors sit on the same visible row)
-        build_bin_donut(ws, "t", BINS, COLORS, "A6", 62, helper_row=20)
+        build_bin_donut(ws, "t", BINS, "A6", 62, helper_row=20)
         assert ws.cell(row=20, column=62).value == "Bin"
         assert ws.cell(row=21, column=63).value == 9
         assert ws.cell(row=22, column=63).value == 1
         assert ws.cell(row=6, column=62).value is None
 
     def test_helper_columns_hidden(self, ws):
-        build_bin_donut(ws, "t", BINS, COLORS, "A6", 62)
+        build_bin_donut(ws, "t", BINS, "A6", 62)
         assert ws.column_dimensions["BJ"].hidden is True
         assert ws.column_dimensions["BK"].hidden is True
 
     def test_series_references(self, ws):
-        build_bin_donut(ws, "t", BINS, COLORS, "A6", 62)
+        build_bin_donut(ws, "t", BINS, "A6", 62)
         series = ws._charts[0].series[0]
         # counts column (incl. the "Count" header via titles_from_data=True
         # for a series name) + categories over the labels column
@@ -231,32 +434,16 @@ class TestBuildBinDonut:
         # convention; Excel resolves it against the string cells)
         assert series.cat.numRef.f == "'Sheet'!$BJ$7:$BJ$8"
 
-    def test_per_slice_colors_from_settings_dict(self, ws):
-        build_bin_donut(ws, "t", BINS, COLORS, "A6", 62)
-        points = ws._charts[0].series[0].data_points
-        assert [p.idx for p in points] == [0, 1]
-        assert points[0].graphicalProperties.solidFill.srgbClr == "00CC00"
-        assert points[1].graphicalProperties.solidFill.srgbClr == "CC0000"
-
-    def test_bins_missing_from_colors_keep_theme_palette(self, ws):
-        # no DataPoint -> Excel falls back to the default slice colors
-        build_bin_donut(ws, "t", BINS, {}, "A6", 62)
-        assert ws._charts[0].series[0].data_points in ([], None)
-
-    def test_partial_color_dict(self, ws):
-        build_bin_donut(ws, "t", BINS, {3: "#CC0000"}, "A6", 62)
-        points = ws._charts[0].series[0].data_points
-        assert [p.idx for p in points] == [1]
-        assert points[0].graphicalProperties.solidFill.srgbClr == "CC0000"
-
-    def test_alpha_hex_truncated_to_six_digits(self, ws):
-        # isHexColor accepts #RRGGBB[AA]; srgbClr takes exactly six digits
-        build_bin_donut(ws, "t", BINS, {1: "#00CC00FF"}, "A6", 62)
-        points = ws._charts[0].series[0].data_points
-        assert points[0].graphicalProperties.solidFill.srgbClr == "00CC00"
+    def test_no_per_slice_data_points_builtin_palette(self, ws):
+        # seventh wave (ruled consequence): the per-slice DataPoint fills
+        # from the settings bin-color dicts are REMOVED so Excel's built-in
+        # style-6 palette (first gallery scheme) colors the slices; bins
+        # are distinguished by labels/legend only
+        build_bin_donut(ws, "t", BINS, "A6", 62)
+        assert not ws._charts[0].series[0].data_points
 
     def test_empty_bins_noop(self, ws):
-        build_bin_donut(ws, "t", [], COLORS, "A6", 62)
+        build_bin_donut(ws, "t", [], "A6", 62)
         assert ws._charts == []
         assert ws.cell(row=6, column=62).value is None
         assert ws.column_dimensions["BJ"].hidden is not True
@@ -290,13 +477,40 @@ class TestWriteBinTable:
         # title 15 + header 16 + 2 data rows (17, 18) + total 19 -> 20
         assert self.written(ws, theme) == 20
 
-    def test_section_title_plain_bold_blue(self, ws, theme):
+    def test_section_title_uses_builtin_output_style(self, ws, theme):
+        # seventh wave (R4): the section title band carries Excel's BUILT-IN
+        # "Output" cell style (openpyxl 3.1.5 registers it with
+        # builtinId=21, so Excel's gallery shows it as the built-in style
+        # in the Data and Model group); the band spans the table width
         self.written(ws, theme)
-        cell = ws["A15"]
-        assert cell.value == TABLE_TITLE
-        assert cell.font.bold is True
-        assert cell.font.color.rgb == "FF3B82F6"   # theme metadata-label blue
-        assert cell.fill.fill_type is None         # no fill (mockup: plain)
+        assert ws["A15"].style == "Output"
+        assert ws["A15"].value == TABLE_TITLE
+        # resolved look of the builtin style (openpyxl's builtins.py
+        # definition): bold dark font on the light grey band
+        assert ws["A15"].font.b is True
+        assert ws["A15"].fill.fgColor.rgb == "FFF2F2F2"
+
+    def test_section_title_band_merged_and_styled_across_table(self, ws, theme):
+        # merge A15:D15 and style EVERY cell of the band (fills apply
+        # per-cell; styles must be applied AFTER merging — openpyxl's
+        # merge_cells wipes styles set before it)
+        self.written(ws, theme)
+        ranges = {str(r) for r in ws.merged_cells.ranges}
+        assert "A15:D15" in ranges
+        for column in range(1, 5):
+            assert ws.cell(row=15, column=column).style == "Output"
+
+    def test_section_title_output_style_round_trip(self, ws, theme,
+                                                   tmp_path):
+        # the named style carries builtinId=21 into styles.xml and the
+        # assignment survives a save/reload
+        self.written(ws, theme)
+        path = tmp_path / "out.xlsx"
+        ws.parent.save(path)
+        reloaded = load_workbook(path)["Sheet"]
+        assert reloaded["A15"].style == "Output"
+        named = {s.name: s for s in reloaded.parent._named_styles}
+        assert named["Output"].builtinId == 21
 
     def test_header_row_blue_with_white_bold_centered(self, ws, theme):
         self.written(ws, theme)

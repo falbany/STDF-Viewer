@@ -1,6 +1,6 @@
 """
 #
-# __init__.py - modernExporter package - STDF Viewer
+# __init__.py - exporter package - STDF Viewer
 # 
 # Author: falbany (fork)
 # Created Date: November 9th 2026

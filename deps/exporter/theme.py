@@ -1,6 +1,6 @@
 """
 #
-# theme.py - modernExporter package - STDF Viewer
+# theme.py - exporter package - STDF Viewer
 #
 # Author: falbany (fork)
 # Created Date: November 9th 2026
@@ -41,6 +41,10 @@ GROUP_FILL_HEX = "E9EEF6"
 PASS_FILL_HEX = "CCFFCC"
 FAIL_FILL_HEX = "FFCCCC"
 NEUTRAL_FILL_HEX = "FFF3CD"
+# Bin-sheet KPI cards (seventh wave, dashboard mockup): card label grey
+# and card subtitle grey.
+KPI_LABEL_HEX = "64748B"
+KPI_SUB_HEX = "94A3B8"
 CPK_BAND_HEXES = ("A7F3D0", "D1FAE5", "FEF3C7", "FECACA")
 
 
@@ -125,6 +129,46 @@ class ModernTheme:
             size=FONT_SIZE,
             bold=True,
             color=_argb(METADATA_LABEL_HEX),
+        )
+
+    # Bin-sheet block title (seventh wave dashboard): 14pt bold on the
+    # theme primary blue (HEADER_FILL_HEX used as a font color).
+    @cached_property
+    def block_title_font(self) -> Font:
+        return Font(
+            name=FONT_NAME,
+            size=14,
+            bold=True,
+            color=_argb(HEADER_FILL_HEX),
+        )
+
+    # KPI card faces (seventh wave dashboard mockup): label bold 9 grey,
+    # value bold 16 dark, subtitle italic 9 light grey.
+    @cached_property
+    def kpi_label_font(self) -> Font:
+        return Font(
+            name=FONT_NAME,
+            size=9,
+            bold=True,
+            color=_argb(KPI_LABEL_HEX),
+        )
+
+    @cached_property
+    def kpi_value_font(self) -> Font:
+        return Font(
+            name=FONT_NAME,
+            size=16,
+            bold=True,
+            color=_argb(BANNER_FONT_HEX),
+        )
+
+    @cached_property
+    def kpi_sub_font(self) -> Font:
+        return Font(
+            name=FONT_NAME,
+            size=9,
+            italic=True,
+            color=_argb(KPI_SUB_HEX),
         )
 
     # Body cells.
