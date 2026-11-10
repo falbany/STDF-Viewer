@@ -25,18 +25,18 @@
 
 Plain-table spec builders and scaled image embedding.
 
-``plain_table_spec`` is pure spec construction for the Task 5 renderer's
-``render_plain_table`` (headers translated, every cell sanitized, generator
-rows materialized); ``insert_report_image`` embeds a chart PNG scaled to a
-target print width and returns the sheet rows it spans, mirroring the
-classic exporter's spacing math (uic_stdExporter.py).
+``plain_table_spec`` is pure spec construction for ``render_plain_table``
+(headers translated, every cell sanitized, generator rows materialized);
+``insert_report_image`` embeds a chart PNG through xlsxwriter (Pillow probes
+the pixel size, the scale reaches insert_image), scaled to a target print
+width and returns the sheet rows it spans, mirroring the classic exporter's
+spacing math (uic_stdExporter.py).
 """
 
 from io import BytesIO
 from math import ceil
 
-from openpyxl.drawing.image import Image
-from openpyxl.worksheet.worksheet import Worksheet
+from PIL import Image as PILImage
 
 from deps.exporter.matrix import sanitize_cell
 
@@ -72,20 +72,29 @@ def plain_table_spec(
     }
 
 
-def insert_report_image(
-    ws: Worksheet, image_io: BytesIO, row: int, target_width_in: float = 12.0
-) -> int:
+def insert_report_image(ws, image_io: BytesIO, row: int, target_width_in: float = 12.0) -> int:
     """Embed ``image_io`` (PNG) at column A of 0-based ``row``, scaled to
     ``target_width_in`` inches wide with the aspect ratio preserved.
+
+    The pixel dimensions are probed with Pillow and the scale factors are
+    passed to xlsxwriter's ``insert_image`` (xlsxwriter stores the original
+    image + x/y scale). ``image_io`` is rewound before probing and before
+    the insert — a BytesIO is consumed by reading.
 
     Returns the number of sheet rows the scaled image spans —
     ``ceil((scaled_height_px / 96) / 0.21)`` — mirroring the classic
     exporter's post-image row advance so following content clears the image.
     """
-    image = Image(image_io)
-    scale = (target_width_in * PX_PER_INCH) / image.width
-    image.width = int(target_width_in * PX_PER_INCH)
-    image.height = int(image.height * scale)
-    image.anchor = f"A{row + 1}"  # 0-based row -> 1-based Excel anchor
-    ws.add_image(image)
-    return ceil((image.height / PX_PER_INCH) / ROW_HEIGHT_IN)
+    image_io.seek(0)
+    with PILImage.open(image_io) as probe:
+        width_px, height_px = probe.size
+    scale = (target_width_in * PX_PER_INCH) / width_px
+    scaled_h = int(height_px * scale)
+    image_io.seek(0)
+    ws.insert_image(
+        row,
+        0,
+        "report.png",
+        {"image_data": image_io, "x_scale": scale, "y_scale": scale},
+    )
+    return ceil((scaled_h / PX_PER_INCH) / ROW_HEIGHT_IN)

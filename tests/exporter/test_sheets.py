@@ -10,9 +10,13 @@ import io
 import math
 
 from openpyxl import Workbook
+import re
+import zipfile
+
 from PIL import Image as PILImage
 
 from deps.exporter.sheets import insert_report_image, plain_table_spec
+from tests.exporter.conftest import load_workbook_bytes, read_xml, render_workbook
 
 # Minimal 1x1 grayscale PNG (69 bytes), inlined so the fixture needs no file.
 PNG_1X1 = bytes.fromhex(
@@ -87,33 +91,46 @@ class TestPlainTableSpec:
 
 
 class TestInsertReportImage:
-    def ws(self):
-        return Workbook().active
+    """xlsxwriter era: the image lands in xl/media/ and the drawing XML
+    carries the anchor + scaled extent (EMU = px * 9525) — assert on the
+    saved bytes, not on writer internals."""
+
+    def insert(self, image_io, row=0, target_width_in=12.0, sheet_name="Sheet"):
+        def build(wb, ws_by_name):
+            self.consumed = insert_report_image(
+                ws_by_name[sheet_name], image_io, row=row, target_width_in=target_width_in
+            )
+
+        book = render_workbook([sheet_name], build)
+        return read_xml(book, f"xl/drawings/drawing1.xml"), load_workbook_bytes(book)[sheet_name], book
 
     def test_minimal_png_embedded(self):
-        ws = self.ws()
-        consumed = insert_report_image(ws, io.BytesIO(PNG_1X1), row=0)
-        assert len(ws._images) == 1
-        assert consumed >= 1
+        drawing, _ws, book = self.insert(io.BytesIO(PNG_1X1), row=0)
+        with zipfile.ZipFile(io.BytesIO(book)) as zf:
+            names = zf.namelist()
+        media = [n for n in names if n.startswith("xl/media/")]
+        assert len(media) == 1
+        with zipfile.ZipFile(io.BytesIO(book)) as zf:
+            assert zf.read(media[0]).startswith(b"\x89PNG")
+        assert self.consumed >= 1
 
     def test_anchor_converts_zero_based_row_to_one_based(self):
-        ws = self.ws()
-        insert_report_image(ws, io.BytesIO(PNG_1X1), row=0)
-        assert ws._images[0].anchor == "A1"
-        ws = self.ws()
-        insert_report_image(ws, io.BytesIO(PNG_1X1), row=5)
-        assert ws._images[0].anchor == "A6"
+        drawing, _ws, _book = self.insert(io.BytesIO(PNG_1X1), row=0)
+        assert "<xdr:row>0</xdr:row>" in drawing
+        drawing, _ws, _book = self.insert(io.BytesIO(PNG_1X1), row=5)
+        assert "<xdr:row>5</xdr:row>" in drawing
 
     def test_scales_to_target_width_preserving_aspect(self):
         # 96x192 px -> 12 in wide: factor 12 -> 1152x2304 px.
-        ws = self.ws()
-        consumed = insert_report_image(
-            ws, io.BytesIO(png_bytes(96, 192)), row=0, target_width_in=12.0
+        drawing, _ws, _book = self.insert(
+            io.BytesIO(png_bytes(96, 192)), row=0, target_width_in=12.0
         )
-        image = ws._images[0]
-        assert image.width == 1152
-        assert image.height == 2304
-        assert image.height / image.width == 2.0  # aspect preserved
+        ext = re.search(r'<a:ext cx="(\d+)" cy="(\d+)"/>', drawing)
+        assert ext is not None
+        cx, cy = int(ext.group(1)), int(ext.group(2))
+        EMU_PER_PX = 9525
+        assert cx == 1152 * EMU_PER_PX
+        assert cy == 2304 * EMU_PER_PX  # aspect preserved
         # classic spacing math: rows = ceil((scaled_h / 96) / 0.21) = ceil(24/0.21)
-        assert consumed == math.ceil((2304 / PX_PER_INCH) / ROW_HEIGHT_IN)
-        assert consumed == 115
+        assert self.consumed == math.ceil((2304 / PX_PER_INCH) / ROW_HEIGHT_IN)
+        assert self.consumed == 115
