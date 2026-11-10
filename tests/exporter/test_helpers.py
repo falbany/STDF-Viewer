@@ -213,10 +213,11 @@ class TestSplitDutChunks:
     def test_cap_derivation_fits_excel_column_limit_with_mirrors(self):
         # A chunk sheet is 13 base columns + n dies + 1 spacer + n hidden
         # mirrors, all within Excel's 16384-column cap:
-        # 13 + n + 1 + n <= 16384  ->  n <= (16384 - 13 - 1) // 2 = 8185.
-        assert DUT_CHUNK_CAP == (16384 - 13 - 1) // 2 == 8185
+        # 13 + n + 3 + n <= 16384  ->  n <= (16384 - 13 - 3) // 2 = 8184
+        # (Trend sparkline column + second spacer, xlsxwriter migration).
+        assert DUT_CHUNK_CAP == (16384 - 13 - 3) // 2 == 8184
         # the arithmetic boundary: one DUT over the cap spills to chunk 2
-        assert [len(c) for c in split_dut_chunks(list(range(8186)))] == [8185, 1]
+        assert [len(c) for c in split_dut_chunks(list(range(8185)))] == [8184, 1]
 
 
 class TestColumns:

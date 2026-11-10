@@ -1,11 +1,15 @@
 """Tests for deps/exporter/matrix.py: DUT Summary spec builder."""
 
+import pytest
+
 import numpy as np
 from openpyxl.utils import column_index_from_string
 
 from deps.SharedSrc import REC
-from deps.exporter.helpers import DUT_CHUNK_CAP, die_col
+from deps.exporter.helpers import DUT_CHUNK_CAP, cp_cached, cpk_cached, die_col
 from deps.exporter.matrix import (
+    FTR_SPEC_MAX,
+    FTR_SPEC_MIN,
     METADATA_ROWS,
     build_dut_summary_spec,
     sanitize_cell,
@@ -39,7 +43,7 @@ FAILS_LIMITS_16 = (
 FAILS_LIMITS_18 = (
     '=SUMPRODUCT((M18:O18<>"")*((E18<>"")*(M18:O18<E18)+(F18<>"")*(M18:O18>F18)))'
 )
-FAILS_FLAGS_17 = '=SUMPRODUCT((Q17:S17<>"")*(Q17:S17=1))'
+FAILS_FLAGS_17 = '=SUMPRODUCT((S17:U17<>"")*(S17:U17=1))'
 
 BASE_HEADERS = [
     "Test#",
@@ -616,6 +620,8 @@ class TestRows:
             1.2,
             "",
             "",
+            "",
+            "",
             0,
             0,
             "",
@@ -639,6 +645,8 @@ class TestRows:
             2.0,
             0.1,
             3.0,
+            "",
+            "",
             "",
             0,
             1,
@@ -670,6 +678,8 @@ class TestRows:
             0,
             1,
             0,
+            "",
+            "",
             "",
             0,
             1,
@@ -703,10 +713,14 @@ class TestRows:
         )
 
     def test_row_length_layout(self):
-        # 12 base cells + n die cells + 1 spacer + n mirror cells
+        # 12 base + n die cells + spacer + Trend + spacer + n mirror cells
+        # (xlsxwriter migration: the Trend sparkline column sits after the
+        # dies with a blank spacer on each side)
         for row in self.spec()["rows"]:
-            assert len(row) == 12 + 3 + 1 + 3
+            assert len(row) == 12 + 3 + 3 + 3
             assert row[15] == ""  # spacer after die cells M..O
+            assert row[16] == ""  # Trend cell (sparkline overlays it)
+            assert row[17] == ""  # spacer before the mirrors
 
     def test_die_cells_are_python_floats(self):
         die_cells = self.spec()["rows"][0][12:15]
@@ -728,14 +742,16 @@ class TestStructure:
         # banner row 1: base labels + plain numeric DUT indices (fix wave 2)
         spec = self.spec()
         assert spec["name"] == "DUT Summary"
-        assert spec["headers"] == BASE_HEADERS + [1, 2, 3]
-        assert all(isinstance(v, int) for v in spec["headers"][12:])
+        assert spec["headers"] == BASE_HEADERS + [1, 2, 3, "", "Trend"]
+        assert all(isinstance(v, int) for v in spec["headers"][12:15])
 
     def test_secondary_header_part_id_base(self):
         assert self.spec()["secondary_header"] == BASE_HEADERS + [
             "SN541",
             "SN542",
             "SN543",
+            "",
+            "Trend",
         ]
 
     def test_formula_columns(self):
@@ -767,8 +783,8 @@ class TestStructure:
     def test_die_columns_and_flag_first_col(self):
         spec = self.spec()
         assert spec["die_columns"] == ["M", "N", "O"]
-        # die M..O, spacer P, mirror Q..S
-        assert spec["flag_first_col"] == "Q"
+        # die M..O, spacer P, Trend Q, spacer R, mirror S..U
+        assert spec["flag_first_col"] == "S"
 
     def test_row_groups_on_workflow_changes(self):
         assert self.spec()["row_groups"] == [0, 1, 2]
@@ -817,7 +833,7 @@ class TestStructure:
         assert cf["die_rules"] == {
             "range": "M16:O18",
             "first_die": "M",
-            "flag_col_offset": 4,
+            "flag_col_offset": 6,
         }
         assert cf["cp_range"] == "J16:J18"
         assert cf["cpk_range"] == "K16:K18"
@@ -832,8 +848,8 @@ class TestStructure:
         spec = build(base_tests(), base_duts(), tr=str.upper)[0]
         assert spec["headers"][:12] == [h.upper() for h in BASE_HEADERS]
         # numeric banner labels are not translated (ints, fix wave 2)
-        assert spec["headers"][12:] == [1, 2, 3]
-        assert spec["secondary_header"][12:] == ["SN541", "SN542", "SN543"]
+        assert spec["headers"][12:] == [1, 2, 3, "", "TREND"]
+        assert spec["secondary_header"][12:] == ["SN541", "SN542", "SN543", "", "TREND"]
         # metadata field names are not translated
         assert spec["metadata_rows"][0][2] == "File ID"
 
@@ -858,8 +874,8 @@ class TestChunking:
 
     def test_chunk_one_layout(self):
         spec = self.specs()[0]
-        assert spec["headers"][12:] == [1, 2]
-        assert spec["flag_first_col"] == "P"  # die M..N, spacer O, mirror P..Q
+        assert spec["headers"][12:] == [1, 2, "", "Trend"]
+        assert spec["flag_first_col"] == "R"  # die M..N, spacer O, Trend P, spacer Q, mirror R..S
         assert spec["rows"][0][6] == "=MIN(M16:N16)"
         assert spec["rows"][0][12:14] == [1.0, 1.2]
         assert spec["metadata_rows"][0][6] == "=MIN(M2:N2)"
@@ -867,12 +883,12 @@ class TestChunking:
 
     def test_chunk_two_references_own_columns(self):
         spec = self.specs()[1]
-        assert spec["headers"][12:] == [3]  # global banner numbering (int)
+        assert spec["headers"][12:] == [3, "", "Trend"]  # global numbering + Trend tail
         assert spec["rows"][0][6] == "=MIN(M16:M16)"
-        assert spec["rows"][0][12:] == ["", "", ""]  # nan value, spacer, blank mirror
+        assert spec["rows"][0][12:] == ["", "", "", "", ""]  # nan die, spacer, Trend, spacer, blank mirror
         assert spec["metadata_rows"][0][6] == "=MIN(M2:M2)"
         assert spec["auto_filter"]["ref"] == "A15:M18"
-        assert spec["conditional_formatting"]["die_rules"]["flag_col_offset"] == 2
+        assert spec["conditional_formatting"]["die_rules"]["flag_col_offset"] == 4
         assert spec["conditional_formatting"]["fails_max"] == 0.2 * 1
         # DUT Flag CF range follows the chunk's own die span
         assert spec["conditional_formatting"]["dut_flag_range"] == "M14:M14"
@@ -885,7 +901,7 @@ class TestChunking:
 
 class TestColumnCapBoundaries:
     """A chunk sheet is 13 base columns + n dies + 1 spacer + n hidden flag
-    mirrors, so the real per-sheet capacity is (16384 - 13 - 1) // 2 = 8185
+    mirrors, so the real per-sheet capacity is (16384 - 13 - 3) // 2 = 8184
     DUTs — not 16384 - 13 - 1. Chunks wider than that push mirror columns
     past XFD and kill the export (get_column_letter ValueError at 2n+14)."""
 
@@ -896,7 +912,7 @@ class TestColumnCapBoundaries:
         return build_dut_summary_spec(summary, test_tuples, [], dut_ids, "DUT Summary")
 
     def test_spec_at_true_cap_fits_excel_columns(self):
-        # 8185 dies with the default die_cap: exactly one chunk whose last
+        # 8184 dies with the default die_cap: exactly one chunk whose last
         # mirror column lands at/before XFD (16384)
         specs = self.build_ids_spec(
             [f"DUT #{i}" for i in range(DUT_CHUNK_CAP)], test_tuples=[(10, 0, "0_T/v")]
@@ -905,7 +921,7 @@ class TestColumnCapBoundaries:
         spec = specs[0]
         assert len(spec["die_columns"]) == DUT_CHUNK_CAP
         mirror_first = column_index_from_string(spec["flag_first_col"])
-        assert mirror_first == 13 + DUT_CHUNK_CAP + 1  # dies + spacer
+        assert mirror_first == 13 + DUT_CHUNK_CAP + 3  # dies + spacer + Trend + spacer
         assert mirror_first + DUT_CHUNK_CAP - 1 <= 16384  # last mirror <= XFD
         # formulas build against the full-width ranges
         last_die = die_col(DUT_CHUNK_CAP - 1)
@@ -931,9 +947,9 @@ class TestColumnCapBoundaries:
             assert spec["die_columns"][0] == "M"  # per-chunk restart
         # per-chunk banner labels continue the global DUT numbering (ints)
         assert specs[0]["headers"][12] == 1
-        assert specs[0]["headers"][-1] == DUT_CHUNK_CAP
+        assert specs[0]["headers"][-3] == DUT_CHUNK_CAP
         assert specs[1]["headers"][12] == DUT_CHUNK_CAP + 1
-        assert specs[1]["headers"][-1] == 16301
+        assert specs[1]["headers"][-3] == 16301
 
 
 # --------------------------------------------------------------------------
@@ -953,7 +969,7 @@ class TestZeroDutChunk:
         assert spec["flag_first_col"] == "M"  # no mirrors past a zero-width die span
         assert "auto_filter" not in spec
         assert "table" not in spec
-        assert spec["headers"] == BASE_HEADERS
+        assert spec["headers"] == BASE_HEADERS + ["", "Trend"]
         assert spec["freeze_panes"] == "M16"
         # metadata formulas stay well-formed (M2:M2, not the inverted N2:M2);
         # third wave: the File ID row carries MIN/MAX and a dash Mean
@@ -988,7 +1004,7 @@ class TestEdgeCases:
         assert "auto_filter" not in spec
         assert "table" not in spec
         assert len(spec["metadata_rows"]) == 13
-        assert spec["headers"] == BASE_HEADERS + [1, 2, 3]
+        assert spec["headers"] == BASE_HEADERS + [1, 2, 3, "", "Trend"]
         assert spec["freeze_panes"] == "M16"
         assert spec["row_groups"] == []
 
@@ -1010,8 +1026,8 @@ class TestEdgeCases:
         ]
         spec = build(tests, duts)[0]
         # banner labels are plain ints; secondary header keeps the part ID base
-        assert spec["headers"][12:] == [1, 2]
-        assert spec["secondary_header"][12:] == ["SN1", "DUT #2"]
+        assert spec["headers"][12:] == [1, 2, "", "Trend"]
+        assert spec["secondary_header"][12:] == ["SN1", "DUT #2", "", "Trend"]
         rows = spec["metadata_rows"]
         assert rows[1][12:] == ["SN1_T25C", ""]  # Part ID: raw, blank stays blank
         assert rows[3][12:] == [25.0, ""]  # Temperature from raw part ID
@@ -1149,11 +1165,235 @@ class TestParamPrecedence:
             0.5,
             "",
             "",
+            "",
+            "",
             0,
             "",
-        ]  # value, blank die, spacer, mirror flags
+        ]  # value, blank die, spacer, Trend, spacer, mirror flags
         assert spec_names(build(tests, duts)) == ["DUT Summary"]
 
 
 def spec_names(specs):
     return [s["name"] for s in specs]
+
+
+# --------------------------------------------------------------------------
+# xlsxwriter migration: Trend column, formula_values, sparklines
+# --------------------------------------------------------------------------
+
+
+class TestTrendGeometry:
+    def spec(self):
+        return build(base_tests(), base_duts())[0]
+
+    def test_trend_col_after_spacer(self):
+        # die M..O, spacer P, Trend Q (user ruling: last_die + 2)
+        assert self.spec()["trend_col"] == "Q"
+
+    def test_headers_carry_spacer_and_trend(self):
+        spec = self.spec()
+        assert spec["headers"][-2:] == ["", "Trend"]
+        assert spec["secondary_header"][-2:] == ["", "Trend"]
+
+    def test_row_shape_carries_trend_slot(self):
+        for row in self.spec()["rows"]:
+            assert row[16] == ""  # trend cell (blank; the sparkline overlays it)
+
+    def test_zero_die_chunk_still_names_trend(self):
+        spec = build([], [])[0]
+        assert spec["trend_col"] == "N"  # spacer M, Trend N
+        assert spec["sparklines"] == []
+
+    def test_tr_translates_trend_label(self):
+        spec = build(base_tests(), base_duts(), tr=str.upper)[0]
+        assert spec["headers"][-1] == "TREND"
+
+
+class TestFormulaValues:
+    """Cached formula results keyed by (absolute Excel row, 1-based col).
+
+    Ruling: the plan sketched (row_offset, col) with the fixture (0, 7) —
+    ambiguous between the metadata and data row lists (both start at
+    offset 0). Absolute rows are unambiguous and are what the writer
+    looks up while rendering; the plan's (0, 7) maps to (16, 7)."""
+
+    def spec(self):
+        return build(base_tests(), base_duts())[0]
+
+    def test_limits_row_caches(self):
+        fv = self.spec()["formula_values"]
+        # dies [1.0, 1.2, blank]
+        assert fv[(16, 7)] == 1.0  # MIN
+        assert fv[(16, 8)] == 1.2  # MAX
+        assert fv[(16, 9)] == pytest.approx(1.1)  # AVERAGE
+        assert fv[(16, 10)] == pytest.approx(
+            cp_cached(0.5, 1.5, [1.0, 1.2])
+        )  # Cp
+        assert fv[(16, 11)] == pytest.approx(
+            cpk_cached(0.5, 1.5, [1.0, 1.2])
+        )  # Cpk
+        assert fv[(16, 12)] == 0  # FAILS (all inside limits)
+
+    def test_no_limit_row_uses_flag_cache(self):
+        fv = self.spec()["formula_values"]
+        # dies [2.0, 0.1, 3.0]; limits blank -> flag path (one 0x80 flag)
+        assert fv[(17, 10)] == ""  # Cp uncomputable without limits
+        assert fv[(17, 11)] == ""
+        assert fv[(17, 12)] == 1
+        # stats still compute over the die values
+        assert fv[(17, 7)] == 0.1
+        assert fv[(17, 9)] == pytest.approx(1.7)
+
+    def test_ftr_row_caches_from_synthetic_limits(self):
+        fv = self.spec()["formula_values"]
+        # dies [0, 1, 0]: 1 fails the ±0.999999 window; Cp/Cpk compute
+        assert fv[(18, 12)] == 1
+        assert fv[(18, 10)] == pytest.approx(
+            cp_cached(FTR_SPEC_MIN, FTR_SPEC_MAX, [0.0, 1.0, 0.0])
+        )
+        assert fv[(18, 11)] == pytest.approx(
+            cpk_cached(FTR_SPEC_MIN, FTR_SPEC_MAX, [0.0, 1.0, 0.0])
+        )
+
+    def test_metadata_row_caches(self):
+        fv = self.spec()["formula_values"]
+        # File ID row (row 2, numeric, no mean/std): values [1, 1, 1]
+        assert fv[(2, 7)] == 1
+        assert fv[(2, 8)] == 1
+        assert (2, 9) not in fv  # mean=False -> no cache
+        # Temperature row (row 5, mean=True): [25.0, 25.0, 85.0]
+        assert fv[(5, 7)] == 25.0
+        assert fv[(5, 8)] == 85.0
+        assert fv[(5, 9)] == pytest.approx(45.0)
+        # Test Time row (row 13, mean+std): [123, 123, 123] — the BARE
+        # STDEV formula computes 0 for identical values, so 0 is faithful
+        assert fv[(13, 7)] == 123
+        assert fv[(13, 10)] == 0
+
+    def test_all_blank_die_row_caches_blank(self):
+        # the fid-1-only test leaves die 3 blank — but not ALL blank. A
+        # fully blank row: no data at all for the test.
+        tests = [
+            dict(
+                name="0_T/v",
+                num=10,
+                unit="V",
+                llimit=0.0,
+                hlimit=1.0,
+                rec=REC.PTR,
+                data={},
+            )
+        ]
+        spec = build(tests, base_duts())[0]
+        fv = spec["formula_values"]
+        for col in (7, 8, 9, 10, 11):
+            assert fv[(16, col)] == ""
+        # FAILS is a bare SUMPRODUCT: Excel computes 0 for a blank range
+        assert fv[(16, 12)] == 0
+
+    def test_single_die_cpk_blank(self):
+        tests = [
+            dict(
+                name="0_T/v",
+                num=10,
+                unit="V",
+                llimit=0.0,
+                hlimit=1.0,
+                rec=REC.PTR,
+                data={1: ([0.5], [0])},
+            )
+        ]
+        spec = build(tests, [(1, 0, make_dut_info(part_id="D0"))])[0]
+        fv = spec["formula_values"]
+        assert fv[(16, 7)] == 0.5  # MIN computes
+        assert fv[(16, 10)] == ""  # Cp needs sigma (n<2)
+        assert fv[(16, 11)] == ""
+
+
+class TestSparklines:
+    def spec(self):
+        return build(base_tests(), base_duts())[0]
+
+    def test_one_entry_per_numeric_die_row(self):
+        sparks = self.spec()["sparklines"]
+        assert [s["row"] for s in sparks] == [16, 17, 18]
+
+    def test_parametric_rows_line_type_local_range(self):
+        sparks = self.spec()["sparklines"]
+        assert sparks[0] == {"row": 16, "type": "line", "range": "M16:O16"}
+        assert sparks[1]["type"] == "line"
+        assert sparks[1]["range"] == "M17:O17"
+
+    def test_ftr_row_column_type(self):
+        assert self.spec()["sparklines"][2] == {
+            "row": 18,
+            "type": "column",
+            "range": "M18:O18",
+        }
+
+    def test_all_blank_die_row_no_sparkline(self):
+        tests = [
+            dict(
+                name="0_T/v",
+                num=10,
+                unit="V",
+                llimit=0.0,
+                hlimit=1.0,
+                rec=REC.PTR,
+                data={},
+            )
+        ]
+        assert build(tests, base_duts())[0]["sparklines"] == []
+
+    def test_partially_blank_row_still_sparked(self):
+        # row 16's die 3 is blank (nan) but 1.0/1.2 are numeric
+        assert self.spec()["sparklines"][0]["range"] == "M16:O16"
+
+
+class TestTrendChunking:
+    def specs(self):
+        ids = [f"DUT #{i}" for i in range(12)]
+        tests = [
+            dict(
+                name="0_T/v",
+                num=10,
+                unit="V",
+                llimit=0.0,
+                hlimit=1.0,
+                rec=REC.PTR,
+                data={1: ([float(i) for i in range(12)], [0] * 12)},
+            )
+        ]
+        summary = make_summary(tests, [(1, i, make_dut_info(fid=1, part_id=f"D{i}")) for i in range(12)])
+        test_tuples = [(10, 0, "0_T/v")]
+        return build_dut_summary_spec(
+            summary,
+            test_tuples,
+            make_order([(1, i, make_dut_info(fid=1, part_id=f"D{i}")) for i in range(12)]),
+            [f"D{i}" for i in range(12)],
+            "DUT Summary",
+            die_cap=5,
+        )
+
+    def test_three_chunks(self):
+        specs = self.specs()
+        assert [len(s["die_columns"]) for s in specs] == [5, 5, 2]
+
+    def test_each_chunk_has_own_trend_and_mirror(self):
+        specs = self.specs()
+        # chunk 0: dies M..Q, spacer R, Trend S, spacer T, mirrors U..Y
+        assert specs[0]["trend_col"] == "S"
+        assert specs[0]["flag_first_col"] == "U"
+        # chunk 1: same geometry (per-chunk restart)
+        assert specs[1]["trend_col"] == "S"
+        assert specs[1]["flag_first_col"] == "U"
+        # chunk 2: dies M..N, spacer O, Trend P, spacer Q, mirrors R..S
+        assert specs[2]["trend_col"] == "P"
+        assert specs[2]["flag_first_col"] == "R"
+
+    def test_sparkline_ranges_span_only_chunk_dies(self):
+        specs = self.specs()
+        assert specs[0]["sparklines"][0]["range"] == "M16:Q16"
+        assert specs[1]["sparklines"][0]["range"] == "M16:Q16"
+        assert specs[2]["sparklines"][0]["range"] == "M16:N16"
+        assert all(s["row"] == 16 for s in specs[2]["sparklines"])

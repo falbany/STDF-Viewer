@@ -430,10 +430,13 @@ class TestDutSummarySheet:
         assert ws["N17"].value == 1
 
     def test_mirror_columns_hidden_after_spacer(self, generated):
+        # xlsxwriter migration: spacer P, Trend Q (visible), spacer R, then
+        # the hidden flag mirrors S..U
         _, wb, _, _, _ = generated
         dims = wb["DUT Summary"].column_dimensions
-        assert not dims["P"].hidden  # spacer stays visible
-        for letter in ("Q", "R", "S"):
+        for letter in ("P", "Q", "R"):
+            assert not dims[letter].hidden
+        for letter in ("S", "T", "U"):
             assert dims[letter].hidden is True
 
     def test_fixed_column_widths_no_autofit(self, generated):

@@ -58,10 +58,11 @@ _FIRST_FLOAT_RE = re.compile(r"-?\d+(?:\.\d+)?")
 DEFAULT_PARAM_PATTERN = re.compile(r"^(?P<test>.+)/(?P<param>[^/]+)$")
 
 # Excel hard limit is 16384 columns per sheet. A DUT Summary chunk sheet is
-# 13 fixed columns (A..L base block) + n visible die columns + 1 spacer + n
-# hidden flag mirrors, so a chunk fits only while 13 + n + 1 + n <= 16384,
-# i.e. n <= (16384 - 13 - 1) // 2 = 8185 DUTs per sheet.
-DUT_CHUNK_CAP = 8185
+# 13 fixed columns (A..L base block) + n visible die columns + 1 spacer +
+# 1 Trend sparkline column + 1 spacer + n hidden flag mirrors, so a chunk
+# fits only while 13 + n + 3 + n <= 16384, i.e.
+# n <= (16384 - 13 - 3) // 2 = 8184 DUTs per sheet.
+DUT_CHUNK_CAP = 8184
 
 
 def parse_temperature(part_id: str | None) -> float | None:

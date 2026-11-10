@@ -36,12 +36,17 @@ import numpy as np
 from deps.SharedSrc import REC
 from deps.exporter.helpers import (
     DUT_CHUNK_CAP,
+    cp_cached,
     cp_formula,
+    cpk_cached,
     cpk_formula,
     die_col,
+    fails_cached_flags,
+    fails_cached_limits,
     fails_formula_flags,
     fails_formula_limits,
     flag_value,
+    has_numeric,
     metadata_stat_formulas,
     parse_bin,
     parse_temperature,
@@ -49,6 +54,7 @@ from deps.exporter.helpers import (
     part_id_base,
     split_dut_chunks,
     split_test_name,
+    stat_cached,
     stat_formula,
     workflow_key,
 )
@@ -306,6 +312,7 @@ def build_dut_summary_spec(
         for i, dut_id in enumerate(dut_ids)
     ]
     base_labels = [tr(label) for label in BASE_HEADERS]
+    trend_label = tr("Trend")
     tests = [_resolve_test(summaryTable, test_tuple) for test_tuple in testTuples]
     chunks = split_dut_chunks(dut_ids, die_cap)
 
@@ -322,6 +329,7 @@ def build_dut_summary_spec(
                 display_ids=display_ids[chunk_start : chunk_start + len(chunk_ids)],
                 sheet_name=sheet_name,
                 base_labels=base_labels,
+                trend_label=trend_label,
                 chunk_index=chunk_index,
                 file_temperatures=file_temperatures,
             )
@@ -523,9 +531,14 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die, file_tempera
     first:
     [test#, "METADATA", name, unit, "-", "-", MIN, MAX, MEAN-or-"-",
      STD-or-"-", "-", "-"].
+
+    Also emits the cached results of those stat formulas into
+    ``formula_values`` (keyed (absolute row, 1-based col)) — same values,
+    same gating (sigma 0 / too-few values cache blank).
     """
     rows = []
     masked_rows = []
+    formula_values = {}
     for position, meta in enumerate(METADATA_ROWS):
         excel_row = METADATA_START + position
         values = [
@@ -550,12 +563,22 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die, file_tempera
             )
             dashes = 4 - int(meta["mean"]) - int(meta["std"])
             prefix.extend(["-"] * dashes)
+            # cached stat results beside the formulas (xlsxwriter migration)
+            for col, stat_name in ((7, "MIN"), (8, "MAX")):
+                cached = stat_cached(stat_name, values)
+                formula_values[(excel_row, col)] = "" if cached is None else cached
+            if meta["mean"]:
+                cached = stat_cached("AVERAGE", values)
+                formula_values[(excel_row, 9)] = "" if cached is None else cached
+            if meta["std"]:
+                cached = stat_cached("STDEV", values)
+                formula_values[(excel_row, 10)] = "" if cached is None else cached
         else:
             prefix.extend(["-"] * 6)
         rows.append(prefix + values)
         if _is_masked(meta, values):
             masked_rows.append(excel_row)
-    return rows, masked_rows
+    return rows, masked_rows, formula_values
 
 
 # --------------------------------------------------------------------------
@@ -567,6 +590,8 @@ def _test_rows(
     summaryTable, tests, chunk_cells, first_die, last_die, mirror_first, mirror_last
 ):
     rows = []
+    formula_values = {}
+    sparklines = []
     for offset, test in enumerate(tests):
         row_index = DATA_START + offset
         die_cells = []
@@ -597,6 +622,41 @@ def _test_rows(
         else:
             spec_min = spec_max = ""
             fails = fails_formula_flags(row_index, mirror_first, mirror_last)
+
+        # cached formula results (xlsxwriter migration, spec §7.5): the same
+        # values the formulas compute, keyed (absolute row, 1-based col) —
+        # None caches as "" so previews never show a stray 0. The FAILS
+        # cache follows the same branch selection as the formula.
+        lo = spec_min if spec_min != "" else None
+        hi = spec_max if spec_max != "" else None
+        fails_cache = (
+            fails_cached_limits(die_cells, lo, hi)
+            if lo is not None and hi is not None
+            else fails_cached_flags(mirror_cells)
+        )
+        for col, cached in (
+            (7, stat_cached("MIN", die_cells)),
+            (8, stat_cached("MAX", die_cells)),
+            (9, stat_cached("AVERAGE", die_cells)),
+            (10, cp_cached(lo, hi, die_cells)),
+            (11, cpk_cached(lo, hi, die_cells)),
+            (12, fails_cache),
+        ):
+            formula_values[(row_index, col)] = "" if cached is None else cached
+
+        # Trend sparkline per data row with numeric die values (FTR rows
+        # spark as columns — the 0=pass encoding would render passes as
+        # win/loss "losses"); local unqualified die range, the writer
+        # qualifies it with the sheet name
+        if has_numeric(die_cells):
+            sparklines.append(
+                {
+                    "row": row_index,
+                    "type": "column" if test["is_ftr"] else "line",
+                    "range": f"{first_die}{row_index}:{last_die}{row_index}",
+                }
+            )
+
         rows.append(
             [
                 test["num"],
@@ -615,10 +675,11 @@ def _test_rows(
                 fails,
             ]
             + die_cells
-            + [""]
+            # spacer, Trend cell (blank — the sparkline overlays it), spacer
+            + ["", "", ""]
             + mirror_cells
         )
-    return rows
+    return rows, formula_values, sparklines
 
 
 def _row_groups(tests):
@@ -644,6 +705,7 @@ def _build_chunk(
     display_ids,
     sheet_name,
     base_labels,
+    trend_label,
     chunk_index,
     file_temperatures=None,
 ):
@@ -658,22 +720,28 @@ def _build_chunk(
 
     first_die = die_col(0)
     last_die = die_col(die_count - 1) if die_count > 0 else first_die
+    # Trend sparkline column (xlsxwriter migration, user ruling): one blank
+    # spacer after the dies, the Trend column (width 20, always visible —
+    # Ctrl+Shift+Right selects dies without sweeping it), one more spacer,
+    # then the hidden flag mirrors.
+    trend_col = die_col(die_count + 1)
     if die_count > 0:
-        # Mirror columns follow the dies plus one spacer column.
-        mirror_first = die_col(die_count + 1)
-        mirror_last = die_col(2 * die_count)
+        # Mirrors follow the dies + spacer + Trend + spacer.
+        mirror_first = die_col(die_count + 3)
+        mirror_last = die_col(2 * die_count + 2)
     else:
         # Zero-DUT chunk: no mirrors exist; point the mirror range at the
         # empty visible range so no-limit FAILS formulas stay well-formed
         # (the naive die_col(0)/die_col(1) pair would invert to N:M).
         mirror_first = mirror_last = first_die
 
-    metadata_rows, masked_rows = _metadata_block(
+    metadata_rows, masked_rows, metadata_formula_values = _metadata_block(
         summaryTable, chunk_cells, first_die, last_die, file_temperatures
     )
-    rows = _test_rows(
+    rows, formula_values, sparklines = _test_rows(
         summaryTable, tests, chunk_cells, first_die, last_die, mirror_first, mirror_last
     )
+    formula_values.update(metadata_formula_values)
     last_data_row = DATA_START + len(rows) - 1 if rows else DATA_START
 
     spec = {
@@ -681,13 +749,22 @@ def _build_chunk(
         # banner row 1: base labels + plain numeric DUT indices (fix wave
         # 2 — cell value is the int 1, 2, 3…; chunk-global numbering, so
         # chunk 2 starts at its global offset; the raw part IDs stay on
-        # the repeated header and the Part ID row)
-        "headers": list(base_labels) + [chunk_start + i + 1 for i in range(die_count)],
+        # the repeated header and the Part ID row) + the spacer/Trend tail
+        "headers": list(base_labels)
+        + [chunk_start + i + 1 for i in range(die_count)]
+        + ["", trend_label],
         "metadata_rows": metadata_rows,
         "masked_rows": masked_rows,
-        "secondary_header": list(base_labels) + [part_id_base(d) for d in display_ids],
+        "secondary_header": list(base_labels)
+        + [part_id_base(d) for d in display_ids]
+        + ["", trend_label],
         "rows": rows,
         "formula_columns": list(FORMULA_COLUMNS),
+        # cached formula results + sparkline definitions (xlsxwriter
+        # migration, spec §7.5 upgrades 1-2)
+        "formula_values": formula_values,
+        "sparklines": sparklines,
+        "trend_col": trend_col,
         "number_formats": {
             "SpecMin": SCIENTIFIC_FORMAT,
             "SpecMax": SCIENTIFIC_FORMAT,
@@ -708,7 +785,8 @@ def _build_chunk(
             "die_rules": {
                 "range": f"{first_die}{DATA_START}:{last_die}{last_data_row}",
                 "first_die": first_die,
-                "flag_col_offset": die_count + 1,
+                # first die -> hidden flag mirror: +spacer +Trend +spacer
+                "flag_col_offset": die_count + 3 if die_count > 0 else 0,
             },
             "cp_range": f"J{DATA_START}:J{last_data_row}",
             "cpk_range": f"K{DATA_START}:K{last_data_row}",
