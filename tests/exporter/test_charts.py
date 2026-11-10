@@ -369,7 +369,7 @@ class TestWriteKpiCards:
         assert font.bold is True
         assert font.size == 9
         assert font.color.rgb.endswith("64748B")
-        assert font.name == "Aptos"
+        assert font.name == "Times New Roman"
 
     def test_value_font(self, ws, theme):
         self.written(ws, theme)

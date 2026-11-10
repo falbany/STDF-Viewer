@@ -5,7 +5,7 @@
 # Author: falbany (fork)
 # Created Date: November 9th 2026
 # -----
-# Last Modified: Mon Nov 9 2026
+# Last Modified: Tue Nov 10 2026
 # Modified By: falbany (fork)
 # -----
 # Copyright (c) 2026 falbany (fork)
@@ -29,8 +29,8 @@ from functools import cached_property
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 # Palette / style constants (spec section 7 / STDFx).
-FONT_NAME = "Aptos"
-FONT_SIZE = 10
+FONT_NAME = "Times New Roman"
+FONT_SIZE = 8
 HEADER_FILL_HEX = "1E40AF"
 HEADER_FONT_HEX = "FFFFFF"
 BANNER_FILL_HEX = "CBD5E1"
@@ -45,6 +45,11 @@ NEUTRAL_FILL_HEX = "FFF3CD"
 # and card subtitle grey.
 KPI_LABEL_HEX = "64748B"
 KPI_SUB_HEX = "94A3B8"
+# Ninth wave (design goal 5): dark KPI border accents — dark yellow for
+# the Yield card, dark red for Fails, dark blue for Total Parts.
+KPI_BORDER_DARK_YELLOW = "9C6500"
+KPI_BORDER_DARK_RED = "9C0006"
+KPI_BORDER_DARK_BLUE = "1E40AF"
 CPK_BAND_HEXES = ("A7F3D0", "D1FAE5", "FEF3C7", "FECACA")
 
 

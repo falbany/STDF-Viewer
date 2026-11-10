@@ -51,8 +51,8 @@ class TestModernTheme:
 
     def test_header_font(self, theme):
         font = theme.header_font
-        assert font.name == "Aptos"
-        assert font.size == 10
+        assert font.name == "Times New Roman"
+        assert font.size == 8
         assert font.bold is True
         assert font.color.rgb.endswith("FFFFFF")
 
@@ -71,10 +71,27 @@ class TestModernTheme:
         assert KPI_LABEL_HEX == "64748B"
         assert KPI_SUB_HEX == "94A3B8"
 
+    def test_font_tokens(self):
+        from deps.exporter.theme import FONT_NAME, FONT_SIZE
+
+        assert FONT_NAME == "Times New Roman"
+        assert FONT_SIZE == 8
+
+    def test_kpi_border_tokens(self):
+        from deps.exporter.theme import (
+            KPI_BORDER_DARK_BLUE,
+            KPI_BORDER_DARK_RED,
+            KPI_BORDER_DARK_YELLOW,
+        )
+
+        assert KPI_BORDER_DARK_YELLOW == "9C6500"
+        assert KPI_BORDER_DARK_RED == "9C0006"
+        assert KPI_BORDER_DARK_BLUE == "1E40AF"
+
     def test_block_title_font(self, theme):
         # Bin-sheet block title: 14pt bold theme-primary blue
         font = theme.block_title_font
-        assert font.name == "Aptos"
+        assert font.name == "Times New Roman"
         assert font.size == 14
         assert font.bold is True
         assert font.color.rgb.endswith("1E40AF")
@@ -95,8 +112,8 @@ class TestModernTheme:
         assert sub.color.rgb.endswith("94A3B8")
 
     def test_body_font_and_alignment(self, theme):
-        assert theme.body_font.name == "Aptos"
-        assert theme.body_font.size == 10
+        assert theme.body_font.name == "Times New Roman"
+        assert theme.body_font.size == 8
         alignment = theme.body_alignment
         assert alignment.horizontal == "center"
         assert alignment.vertical == "center"
