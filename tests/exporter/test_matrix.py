@@ -1402,3 +1402,29 @@ class TestTrendChunking:
         assert specs[1]["sparklines"][0]["range"] == "M16:Q16"
         assert specs[2]["sparklines"][0]["range"] == "M16:N16"
         assert all(s["row"] == 16 for s in specs[2]["sparklines"])
+
+
+class TestOneSidedLimitRow:
+    """Final-review fix 2 (matrix level): has_limits is OR semantics — a
+    LL-only row takes the limits-variant FAILS formula (each side guarded
+    by (E<>\"\")/(F<>\"\")), so the CACHE must count the present side, not
+    fall back to flags."""
+
+    def test_low_limit_only_fails_cache_matches_formula(self):
+        tests = [
+            dict(
+                name="0_T/v",
+                num=10,
+                unit="V",
+                llimit=1.0,
+                hlimit=np.nan,  # one-sided: no high limit
+                rec=REC.PTR,
+                data={1: ([0.5, 2.0], [0, 0])},  # flags all pass
+            )
+        ]
+        spec = build(tests, [(1, 0, make_dut_info(part_id="D0"))])[0]
+        row = spec["rows"][0]
+        # formula: SUMPRODUCT guards the blank HL side — 0.5 fails low -> 1
+        assert '(F16<>"")' in row[11] and (row[5] == "")
+        fv = spec["formula_values"]
+        assert fv[(16, 12)] == 1  # flags alone would say 0 — cache matches formula

@@ -495,8 +495,24 @@ def cpk_cached(spec_min, spec_max, values) -> "float | None":
 def fails_cached_limits(values, lo, hi) -> int:
     """Count of numeric values strictly outside (lo, hi) — the same
     exclusive comparison the SUMPRODUCT fail formulas encode
-    (rng<lo or rng>hi); blank/non-numeric cells never count."""
+    (rng<lo or rng>hi); blank/non-numeric cells never count. Both limits
+    must be present (the both-limits branch)."""
     return sum(1 for v in numeric_values(values) if v < lo or v > hi)
+
+
+def fails_cached_limits_one_sided(values, lo, hi) -> int:
+    """Count of numeric values failing a ONE-SIDED window — the faithful
+    cache for `has_limits` rows (OR semantics): each SUMPRODUCT side is
+    guarded by ``(E16<>"")*(rng<E16)`` / ``(F16<>"")*(rng>F16)``, so a
+    missing side never fails. Mirrors exactly that: below a PRESENT lo,
+    or above a PRESENT hi. The matrix layer falls back to the flag cache
+    only when BOTH sides are missing (the formula uses the flag mirror
+    there)."""
+    fails = 0
+    for v in numeric_values(values):
+        if (lo is not None and v < lo) or (hi is not None and v > hi):
+            fails += 1
+    return fails
 
 
 def fails_cached_flags(flags) -> int:

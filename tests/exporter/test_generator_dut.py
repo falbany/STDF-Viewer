@@ -590,7 +590,7 @@ class TestChartSheets:
         assert "A1:F1" in {str(r) for r in ws.merged_cells.ranges}
         assert ws.row_dimensions[1].height == pytest.approx(50, abs=0.3)
         assert ws["A1"].alignment.wrap_text is True
-        assert ws["A1"].alignment.vertical == "top"  # the wrap variant
+        assert ws["A1"].alignment.vertical == "center"  # baseline parity
         assert ws["A2"].value is None  # row 2 blank separator
         assert ws["A3"].value == "Yield"  # KPI cards directly below
 

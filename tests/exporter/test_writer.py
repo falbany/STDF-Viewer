@@ -335,6 +335,12 @@ class TestMatrixLayout:
         assert ws.freeze_panes == "M16"
         assert ws.sheet_view.showGridLines is False
 
+    def test_repeat_rows_header_row(self):
+        # final-review fix 5: the blue header (row 15) repeats on every
+        # printed page (spec §10 repeat_rows read-back)
+        ws = self.wb()["DUT Summary"]
+        assert ws.print_title_rows == "$15:$15"
+
     def test_print_setup_fit_to_page(self):
         # xlsxwriter writes fitToHeight=0 + <pageSetUpPr fitToPage="1"/>;
         # fitToWidth=1 is the OOXML default and is omitted (openpyxl: None)
@@ -1073,7 +1079,9 @@ class TestPlainSheetPolish:
     def test_footer_written(self):
         book = render_plain_table_bytes(self.spec(), "File Info")
         xml = read_xml(book, "xl/worksheets/sheet1.xml")
-        assert "&amp;CP of &amp;N" in xml  # centered "&CP of &N" escaped
+        # "&C&P of &N" — the &C opens the center section; &P (page number)
+        # must be its own token or Excel renders the literal "P of N"
+        assert "&amp;C&amp;P of &amp;N" in xml
 
     def test_tab_color_readback(self):
         book = render_plain_table_bytes(self.spec(), "File Info")

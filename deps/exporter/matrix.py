@@ -42,7 +42,7 @@ from deps.exporter.helpers import (
     cpk_formula,
     die_col,
     fails_cached_flags,
-    fails_cached_limits,
+    fails_cached_limits_one_sided,
     fails_formula_flags,
     fails_formula_limits,
     flag_value,
@@ -634,11 +634,14 @@ def _test_rows(
         # cache follows the same branch selection as the formula.
         lo = spec_min if spec_min != "" else None
         hi = spec_max if spec_max != "" else None
-        fails_cache = (
-            fails_cached_limits(die_cells, lo, hi)
-            if lo is not None and hi is not None
-            else fails_cached_flags(mirror_cells)
-        )
+        # has_limits is OR semantics: the limits-path SUMPRODUCT guards each
+        # side with (E<>"")/(F<>"") — the cache mirrors that per-side
+        # behavior for one-sided rows; the flag cache applies only when
+        # BOTH sides are missing (the formula switches to the mirror there)
+        if lo is not None or hi is not None:
+            fails_cache = fails_cached_limits_one_sided(die_cells, lo, hi)
+        else:
+            fails_cache = fails_cached_flags(mirror_cells)
         for col, cached in (
             (7, stat_cached("MIN", die_cells)),
             (8, stat_cached("MAX", die_cells)),

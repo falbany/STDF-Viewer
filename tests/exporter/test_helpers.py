@@ -12,6 +12,7 @@ from deps.exporter.helpers import (
     cpk_cached,
     fails_cached_flags,
     fails_cached_limits,
+    fails_cached_limits_one_sided,
     get_column_letter,
     has_numeric,
     numeric_values,
@@ -671,3 +672,26 @@ class TestHasNumeric:
     def test_true_and_false(self):
         assert has_numeric([None, "", 5]) is True
         assert has_numeric(["", None]) is False
+
+
+class TestOneSidedFailsCache:
+    """Final-review fix 2: a one-sided-limit row (has_limits is OR-semantics;
+    the SUMPRODUCT guards each side with (E<>\"\")/(F<>\"\")) counts fails
+    on the PRESENT side only — the cache must mirror that, not require both
+    limits."""
+
+    def test_low_limit_only_counts_below(self):
+        # LL=1.0, no HL; dies [0.5, 2.0] -> 0.5 fails low; 2.0 has no HL to breach
+        assert fails_cached_limits_one_sided([0.5, 2.0], 1.0, None) == 1
+
+    def test_high_limit_only_counts_above(self):
+        assert fails_cached_limits_one_sided([0.5, 2.0], None, 1.0) == 1
+
+    def test_both_limits_present_same_as_before(self):
+        assert fails_cached_limits_one_sided([0.5, 1.2, ""], 0.0, 0.999999) == 1
+
+    def test_no_limits_falls_back_to_flags(self):
+        # the matrix layer passes None/None -> the caller uses flags; the
+        # helper itself reports everything inside an empty window (0 fails
+        # on limits) so the CALLER decides the fallback
+        assert fails_cached_limits_one_sided([0.5], None, None) == 0

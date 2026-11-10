@@ -1457,7 +1457,7 @@ class TestXlsxwriterMigration:
         with zipfile.ZipFile(report_path) as zf:
             names = [n for n in zf.namelist() if n.startswith("xl/worksheets/sheet")]
             xml = "".join(zf.read(n).decode() for n in names)
-        assert "&amp;CP of &amp;N" in xml  # "&CP of &N" escaped
+        assert "&amp;C&amp;P of &amp;N" in xml  # "&C&P of &N" escaped
 
     def test_stat_cp_cpk_cached_values(self, generated):
         # Review Focus 1 (Stat variant): Cp/Cpk formula cells carry their

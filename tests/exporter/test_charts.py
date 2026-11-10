@@ -887,12 +887,22 @@ class TestWriteBinTable:
     @pytest.mark.filterwarnings("ignore:Unknown extension")
     def test_data_bar_solid_with_border_in_x14_extension(self, env):
         # upgrade 3: bar_solid + bar_border_color ride the x14 extension —
-        # assert the raw sheet XML (openpyxl drops unsupported extensions)
+        # assert the raw sheet XML (openpyxl drops unsupported extensions).
+        # The SOLID marker is gradient="0" on <x14:dataBar>; xlsxwriter
+        # emits the border element even WITHOUT bar_solid, and the word
+        # "border" appears elsewhere in sheet XML — both weak signals the
+        # final review flagged, so pin the exact attributes.
         self.written(env)
         env["reload"]()  # close -> bytes
         sheet = read_xml(env["book"], "xl/worksheets/sheet1.xml")
-        assert "x14:dataBar" in sheet
-        assert "border" in sheet or "borderColor" in sheet
+        import re as _re
+
+        match = _re.search(r"<x14:dataBar[^>]*>", sheet)
+        assert match is not None, "no x14:dataBar extension"
+        attrs = match.group(0)
+        assert 'gradient="0"' in attrs  # the solid-fill marker
+        assert 'border="1"' in attrs
+        assert 'rgb="FF2E75B6"' in sheet  # the darker border blue
 
     # Excel Table (filter arrows; wave-2 F5 repair rule respected) ----------
 

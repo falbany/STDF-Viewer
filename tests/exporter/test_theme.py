@@ -308,7 +308,10 @@ class TestLookalike:
         assert wrapped is not plain
         assert wrapped.text_wrap is True
         cell = roundtrip_cell(theme, wrapped)
-        assert cell.alignment.vertical == "top"
+        # final-review fix 7: the baseline banner carried vertical="center"
+        # with wrap — the wrap lookalike keeps center (top would sit a
+        # single-line banner at the top of the 50 pt row)
+        assert cell.alignment.vertical == "center"
         assert cell.alignment.wrap_text is True
 
 

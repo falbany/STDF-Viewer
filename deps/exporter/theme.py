@@ -241,11 +241,15 @@ class ModernTheme:
     def lookalike(self, key: str, wrap: bool = False):
         """Built-in named style lookalike (Title / Headline 1 / Headline 2 —
         definitions in LOOKALIKE_DEFS); ``wrap`` adds text wrapping and a
-        top valign (the Bin banner row wraps in its 50 pt row)."""
+        centered valign (the Bin banner row wraps in its 50 pt row — the
+        baseline banner carried vertical="center")."""
         kwargs = dict(LOOKALIKE_DEFS[key])
         if wrap:
             kwargs["text_wrap"] = True
-            kwargs["valign"] = "top"
+            # vertical center — the baseline banner carried
+            # Alignment(wrap_text=True, vertical="center"); xlsxwriter's
+            # valign token for centered is "vcenter" ("center" is dropped)
+            kwargs["valign"] = "vcenter"
         return self._format(kwargs)
 
     # ------------------------------------------------------------------

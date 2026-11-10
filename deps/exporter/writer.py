@@ -57,7 +57,7 @@ ROW_HEIGHT = 22
 
 MIRROR_HEADER_TEXT = "flags (do not edit)"
 GROUP_BORDER_HEX = "94A3B8"  # heavier side color on workflow boundaries
-FOOTER_TEXT = "&CP of &N"  # centered page-number footer (migration upgrade 4; the &C section prefix keeps the string parseable by strict OOXML readers)
+FOOTER_TEXT = "&C&P of &N"  # centered page-number footer (upgrade 4): &C opens the center section, &P is the page-number TOKEN (bare "P" would print literally), &N the page count
 DUT_TAB_HEX = "1E40AF"  # migration upgrade 5 (theme tab tokens)
 
 # Fixed column geometry (2026-11-10): A=Test#, B=Test (wide, right-aligned),
