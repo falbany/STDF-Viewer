@@ -258,14 +258,13 @@ class TestCpkFormula:
 
     def test_spec_string_row_17(self):
         assert cpk_formula(17, "M", "AZ") == (
-            '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:AZ17)),'
+            "=IFERROR(MIN((F17-I17)/(3*STDEV(M17:AZ17)),"
             '(I17-E17)/(3*STDEV(M17:AZ17))),"")'
         )
 
     def test_other_row_and_range(self):
         assert cpk_formula(5, "M", "N") == (
-            '=IFERROR(MIN((F5-I5)/(3*STDEV(M5:N5)),'
-            '(I5-E5)/(3*STDEV(M5:N5))),"")'
+            '=IFERROR(MIN((F5-I5)/(3*STDEV(M5:N5)),(I5-E5)/(3*STDEV(M5:N5))),"")'
         )
 
     def test_sigma_from_range_not_cell(self):
@@ -596,7 +595,7 @@ class TestStatCached:
         assert stat_cached("AVERAGE", [1, 2, 3]) == 2.0
 
     def test_stdev_sample_semantics(self):
-        assert stat_cached("STDEV", [1.0, 3.0]) == pytest.approx(2.0 ** 0.5)
+        assert stat_cached("STDEV", [1.0, 3.0]) == pytest.approx(2.0**0.5)
 
     def test_stdev_needs_two_values(self):
         assert stat_cached("STDEV", [2.0]) is None
@@ -613,12 +612,12 @@ class TestCpCpkCached:
     def test_cp_symmetric_limits(self):
         # limits (0, 1) over [0.25, 0.75]: mu=0.5, sigma=sqrt(0.125)
         values = [0.25, 0.75]
-        sigma = 0.125 ** 0.5
+        sigma = 0.125**0.5
         assert cp_cached(0.0, 1.0, values) == pytest.approx(1.0 / (6 * sigma))
 
     def test_cpk_symmetric_limits_both_ratios_equal(self):
         # limits (-1, 1) over [-1, 1]: mu=0, sigma=sqrt(2); both ratios equal
-        sigma = 2.0 ** 0.5
+        sigma = 2.0**0.5
         expected = 1.0 / (3 * sigma)
         assert cpk_cached(-1.0, 1.0, [-1.0, 1.0]) == pytest.approx(expected)
         # and equals cp for the symmetric case
@@ -627,7 +626,7 @@ class TestCpCpkCached:
     def test_cpk_takes_worse_side(self):
         # limits (0, 2) over [1.9, 2.1]: mu=2.0, sigma=sqrt(0.02)/... worse at max
         values = [1.9, 2.1]
-        sigma = 0.02 ** 0.5
+        sigma = 0.02**0.5
         mu = 2.0
         expected = min((2.0 - mu) / (3 * sigma), (mu - 0.0) / (3 * sigma))
         assert cpk_cached(0.0, 2.0, values) == pytest.approx(expected)

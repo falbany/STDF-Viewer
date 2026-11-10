@@ -28,15 +28,9 @@ SCIENTIFIC = "0.00E+00"
 CP_16 = '=IFERROR((F16-E16)/(6*STDEV(M16:O16)),"")'
 CP_17 = '=IFERROR((F17-E17)/(6*STDEV(M17:O17)),"")'
 CP_18 = '=IFERROR((F18-E18)/(6*STDEV(M18:O18)),"")'
-CPK_16 = (
-    '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:O16)),(I16-E16)/(3*STDEV(M16:O16))),"")'
-)
-CPK_17 = (
-    '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:O17)),(I17-E17)/(3*STDEV(M17:O17))),"")'
-)
-CPK_18 = (
-    '=IFERROR(MIN((F18-I18)/(3*STDEV(M18:O18)),(I18-E18)/(3*STDEV(M18:O18))),"")'
-)
+CPK_16 = '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:O16)),(I16-E16)/(3*STDEV(M16:O16))),"")'
+CPK_17 = '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:O17)),(I17-E17)/(3*STDEV(M17:O17))),"")'
+CPK_18 = '=IFERROR(MIN((F18-I18)/(3*STDEV(M18:O18)),(I18-E18)/(3*STDEV(M18:O18))),"")'
 FAILS_LIMITS_16 = (
     '=SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16)))'
 )
@@ -200,7 +194,11 @@ def base_tests():
 
 
 def build(
-    tests, duts, sheet_name="DUT Summary", die_cap=DUT_CHUNK_CAP, tr=None,
+    tests,
+    duts,
+    sheet_name="DUT Summary",
+    die_cap=DUT_CHUNK_CAP,
+    tr=None,
     file_temperatures=None,
 ):
     summary = make_summary(tests, duts)
@@ -875,7 +873,9 @@ class TestChunking:
     def test_chunk_one_layout(self):
         spec = self.specs()[0]
         assert spec["headers"][12:] == [1, 2, "", "Trend"]
-        assert spec["flag_first_col"] == "R"  # die M..N, spacer O, Trend P, spacer Q, mirror R..S
+        assert (
+            spec["flag_first_col"] == "R"
+        )  # die M..N, spacer O, Trend P, spacer Q, mirror R..S
         assert spec["rows"][0][6] == "=MIN(M16:N16)"
         assert spec["rows"][0][12:14] == [1.0, 1.2]
         assert spec["metadata_rows"][0][6] == "=MIN(M2:N2)"
@@ -885,7 +885,13 @@ class TestChunking:
         spec = self.specs()[1]
         assert spec["headers"][12:] == [3, "", "Trend"]  # global numbering + Trend tail
         assert spec["rows"][0][6] == "=MIN(M16:M16)"
-        assert spec["rows"][0][12:] == ["", "", "", "", ""]  # nan die, spacer, Trend, spacer, blank mirror
+        assert spec["rows"][0][12:] == [
+            "",
+            "",
+            "",
+            "",
+            "",
+        ]  # nan die, spacer, Trend, spacer, blank mirror
         assert spec["metadata_rows"][0][6] == "=MIN(M2:M2)"
         assert spec["auto_filter"]["ref"] == "A15:M18"
         assert spec["conditional_formatting"]["die_rules"]["flag_col_offset"] == 4
@@ -1226,12 +1232,8 @@ class TestFormulaValues:
         assert fv[(16, 7)] == 1.0  # MIN
         assert fv[(16, 8)] == 1.2  # MAX
         assert fv[(16, 9)] == pytest.approx(1.1)  # AVERAGE
-        assert fv[(16, 10)] == pytest.approx(
-            cp_cached(0.5, 1.5, [1.0, 1.2])
-        )  # Cp
-        assert fv[(16, 11)] == pytest.approx(
-            cpk_cached(0.5, 1.5, [1.0, 1.2])
-        )  # Cpk
+        assert fv[(16, 10)] == pytest.approx(cp_cached(0.5, 1.5, [1.0, 1.2]))  # Cp
+        assert fv[(16, 11)] == pytest.approx(cpk_cached(0.5, 1.5, [1.0, 1.2]))  # Cpk
         assert fv[(16, 12)] == 0  # FAILS (all inside limits)
 
     def test_no_limit_row_uses_flag_cache(self):
@@ -1352,7 +1354,6 @@ class TestSparklines:
 
 class TestTrendChunking:
     def specs(self):
-        ids = [f"DUT #{i}" for i in range(12)]
         tests = [
             dict(
                 name="0_T/v",
@@ -1364,12 +1365,16 @@ class TestTrendChunking:
                 data={1: ([float(i) for i in range(12)], [0] * 12)},
             )
         ]
-        summary = make_summary(tests, [(1, i, make_dut_info(fid=1, part_id=f"D{i}")) for i in range(12)])
+        summary = make_summary(
+            tests, [(1, i, make_dut_info(fid=1, part_id=f"D{i}")) for i in range(12)]
+        )
         test_tuples = [(10, 0, "0_T/v")]
         return build_dut_summary_spec(
             summary,
             test_tuples,
-            make_order([(1, i, make_dut_info(fid=1, part_id=f"D{i}")) for i in range(12)]),
+            make_order(
+                [(1, i, make_dut_info(fid=1, part_id=f"D{i}")) for i in range(12)]
+            ),
             [f"D{i}" for i in range(12)],
             "DUT Summary",
             die_cap=5,

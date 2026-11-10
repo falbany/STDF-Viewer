@@ -164,7 +164,12 @@ def _write_cell(
     cached 0 would regress previews), everything else sanitized. All
     styling composes into one workbook-scoped Format at write time."""
     fmt = theme.cell_format(
-        font=font, align=align, border=border, fill_hex=fill_hex, num_fmt=num_fmt, extra=extra
+        font=font,
+        align=align,
+        border=border,
+        fill_hex=fill_hex,
+        num_fmt=num_fmt,
+        extra=extra,
     )
     _note_width(ws, column, value)
     row0, col0 = row - 1, column - 1
@@ -296,7 +301,9 @@ def _render_data_rows(ws, spec, theme):
             if number_format is None:
                 die_index = column - 1 - BASE_COLUMN_COUNT
                 if 0 <= die_index < len(die_columns):
-                    number_format = "0" if is_pf else formats.get(die_columns[die_index])
+                    number_format = (
+                        "0" if is_pf else formats.get(die_columns[die_index])
+                    )
             fixed_column = column <= BASE_COLUMN_COUNT
             if column in (SPEC_MIN_COLUMN, SPEC_MAX_COLUMN):
                 fill = neutral
@@ -305,7 +312,9 @@ def _render_data_rows(ws, spec, theme):
             else:
                 fill = None
             extra = (
-                {"top": 2, "top_color": f"#{GROUP_BORDER_HEX}"} if boundary and fixed_column else None
+                {"top": 2, "top_color": f"#{GROUP_BORDER_HEX}"}
+                if boundary and fixed_column
+                else None
             )
             _write_cell(
                 ws,
@@ -386,7 +395,12 @@ def _add_die_rules(ws, die_rules, theme):
         f'AND({die}{row}<>"",$F{row}<>"",{die}{row}>$F{row})',
         theme.cf_fill("FFCCCC"),
     )
-    _add_rule(ws, cell_range, f'AND({mirror}{row}=1,$E{row}="",$F{row}="")', theme.cf_fill("FFCCCC"))
+    _add_rule(
+        ws,
+        cell_range,
+        f'AND({mirror}{row}=1,$E{row}="",$F{row}="")',
+        theme.cf_fill("FFCCCC"),
+    )
     _add_rule(ws, cell_range, f'{die}{row}<>""', theme.cf_fill("CCFFCC"))
 
 
@@ -422,8 +436,12 @@ def _add_fail_num_rules(ws, cell_range, theme):
     row0 = _range_first_row(cell_range)
     col0 = _col0(cell_range.split(":")[0].rstrip("0123456789"))
     cell = f"{xlutil.xl_col_to_name(col0)}{row0 + 1}"
-    _add_rule(ws, cell_range, f"AND(ISNUMBER({cell}),{cell}>0)", theme.cf_fill("FFCCCC"))
-    _add_rule(ws, cell_range, f"AND(ISNUMBER({cell}),{cell}=0)", theme.cf_fill("CCFFCC"))
+    _add_rule(
+        ws, cell_range, f"AND(ISNUMBER({cell}),{cell}>0)", theme.cf_fill("FFCCCC")
+    )
+    _add_rule(
+        ws, cell_range, f"AND(ISNUMBER({cell}),{cell}=0)", theme.cf_fill("CCFFCC")
+    )
 
 
 def _add_fails_scale(ws, cf):
@@ -456,7 +474,9 @@ def _add_dut_flag_status_rules(ws, cell_range, theme):
         ("Fail", "FFCCCC"),
         ("Pass", "CCFFCC"),
     ):
-        _add_rule(ws, cell_range, f'ISNUMBER(SEARCH("{needle}",{cell}))', theme.cf_fill(hex6))
+        _add_rule(
+            ws, cell_range, f'ISNUMBER(SEARCH("{needle}",{cell}))', theme.cf_fill(hex6)
+        )
 
 
 # --------------------------------------------------------------------------

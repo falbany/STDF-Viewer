@@ -2,14 +2,10 @@
 #    uv pip compile pyproject.toml -o requirements.txt
 annotated-types==0.7.0
     # via pydantic
-et-xmlfile==2.0.0
-    # via openpyxl
 numpy==2.5.4
     # via
     #   stdf-viewer (pyproject.toml)
     #   pyqtgraph
-openpyxl==3.1.5
-    # via stdf-viewer (pyproject.toml)
 pillow==13.0.0
     # via stdf-viewer (pyproject.toml)
 pydantic==2.11.9

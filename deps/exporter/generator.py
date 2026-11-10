@@ -25,14 +25,14 @@
 # Adapted from uic_stdExporter.py by noonchen (Copyright (c) 2020 noonchen)
 #
 
-Modern openpyxl report generator: plain, DUT Summary and chart sheets.
+Modern xlsxwriter report generator: plain, DUT Summary and chart sheets.
 
 ``ModernReportGenerator`` subclasses the classic ``reportGenerator`` from
 ``deps.uic_stdExporter`` and keeps its threading contract verbatim — the
 inherited ``generate_report`` slot, the ``waitFor*`` data handshake, the
 ``forceQuit`` early-exits and the ``loopCount`` / ``sendProgress`` cadence —
-while writing the workbook with openpyxl through the exporter theme and
-renderers instead of xlsxwriter.
+while writing the workbook with xlsxwriter through the exporter theme and
+renderers.
 
 Ninth wave (2026-11-10, A4 print design): the Bin Chart sheet gains a
 merged A:F "Title" banner (``_bin_banner`` — "{Product ID} / {Sublot ID}"
@@ -583,6 +583,7 @@ class ModernReportGenerator(reportGenerator):
         spec_cols = header_info.get("spec_cols")
         if cp_col is None or cpk_col is None or spec_cols is None:
             return {}
+
         def _cell(index):
             value = stat_row[index] if index < len(stat_row) else None
             return value if _is_number(value) else None
@@ -966,7 +967,11 @@ class ModernReportGenerator(reportGenerator):
             # (tenth wave) — the HB and SW tables stack below with a
             # single blank row between them
             row = write_merged_headline(
-                BinSheet, chart_row + 2, BIN_CONTRIBUTION_HEADLINE, "headline1", self._theme
+                BinSheet,
+                chart_row + 2,
+                BIN_CONTRIBUTION_HEADLINE,
+                "headline1",
+                self._theme,
             )
             row += 1  # blank below the contribution headline
             for index, (isHBIN, bins) in enumerate(zip((True, False), aggregated)):

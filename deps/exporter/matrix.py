@@ -269,8 +269,9 @@ ILLEGAL_CHARACTERS_RE = re.compile(r"[\000-\010]|[\013-\014]|[\016-\037]")
 
 
 def sanitize_cell(value):
-    """Make a value safe for openpyxl: strip illegal XML characters from
-    strings, map NaN (and None) to blank, pass scalars through unchanged."""
+    """Make a value safe for Excel sheet XML: strip illegal control
+    characters from strings, map NaN (and None) to blank, pass scalars
+    through unchanged."""
     if isinstance(value, str):
         return ILLEGAL_CHARACTERS_RE.sub("", value)
     if value is None:
@@ -450,7 +451,9 @@ def _flag_cell(flag):
 # --------------------------------------------------------------------------
 
 
-def _metadata_cell(meta, summaryTable, fid, dut_index, global_index, file_temperatures=None):
+def _metadata_cell(
+    meta, summaryTable, fid, dut_index, global_index, file_temperatures=None
+):
     name = meta["name"]
     info = summaryTable.get("dutInfo", {}).get(fid, {}).get(dut_index) or ()
 
@@ -520,7 +523,9 @@ def _is_masked(meta, values):
     return False
 
 
-def _metadata_block(summaryTable, chunk_cells, first_die, last_die, file_temperatures=None):
+def _metadata_block(
+    summaryTable, chunk_cells, first_die, last_die, file_temperatures=None
+):
     """The 13 metadata row-lists plus the absolute Excel rows to hide.
 
     Numeric rows carry live MIN/MAX over their die range; Temperature

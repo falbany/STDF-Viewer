@@ -68,7 +68,6 @@ import xlsxwriter.utility as xlutil
 from deps.exporter.matrix import sanitize_cell
 from deps.exporter.theme import (
     FONT_NAME,
-    FONT_SIZE,
     KPI_BORDER_DARK_BLUE,
     KPI_BORDER_DARK_RED,
     KPI_BORDER_DARK_YELLOW,
@@ -274,7 +273,9 @@ def _pin_label_flags(xml: str) -> str:
         )
     if "<c:plotVisOnly" not in xml:
         if "<c:dispBlanksAs" in xml:
-            xml = xml.replace("<c:dispBlanksAs", '<c:plotVisOnly val="0"/><c:dispBlanksAs', 1)
+            xml = xml.replace(
+                "<c:dispBlanksAs", '<c:plotVisOnly val="0"/><c:dispBlanksAs', 1
+            )
         else:
             xml = xml.replace("</c:chart>", '<c:plotVisOnly val="0"/></c:chart>', 1)
     return xml
@@ -300,7 +301,9 @@ def complete_chart_flags(path: str) -> None:
                 changed = True
     if not changed:
         return
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), suffix=".xlsx")
+    fd, tmp = tempfile.mkstemp(
+        dir=os.path.dirname(os.path.abspath(path)), suffix=".xlsx"
+    )
     os.close(fd)
     try:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
@@ -421,9 +424,12 @@ def write_kpi_cards(ws, start_row: int, kpi: dict, n_files: int, theme) -> int:
             border=False,
             fill_hex=fill_hex,
             extra={
-                "top": 2, "top_color": accent.format(border_hex),
-                "left": 2, "left_color": accent.format(border_hex),
-                "right": 2, "right_color": accent.format(border_hex),
+                "top": 2,
+                "top_color": accent.format(border_hex),
+                "left": 2,
+                "left_color": accent.format(border_hex),
+                "right": 2,
+                "right_color": accent.format(border_hex),
             },
         )
         mid_fmt = theme.cell_format(
@@ -432,8 +438,10 @@ def write_kpi_cards(ws, start_row: int, kpi: dict, n_files: int, theme) -> int:
             border=False,
             fill_hex=fill_hex,
             extra={
-                "left": 2, "left_color": accent.format(border_hex),
-                "right": 2, "right_color": accent.format(border_hex),
+                "left": 2,
+                "left_color": accent.format(border_hex),
+                "right": 2,
+                "right_color": accent.format(border_hex),
                 **({"num_format": KPI_PCT_FORMAT} if is_percent else {}),
             },
         )
@@ -443,23 +451,34 @@ def write_kpi_cards(ws, start_row: int, kpi: dict, n_files: int, theme) -> int:
             border=False,
             fill_hex=fill_hex,
             extra={
-                "bottom": 2, "bottom_color": accent.format(border_hex),
-                "left": 2, "left_color": accent.format(border_hex),
-                "right": 2, "right_color": accent.format(border_hex),
+                "bottom": 2,
+                "bottom_color": accent.format(border_hex),
+                "left": 2,
+                "left_color": accent.format(border_hex),
+                "right": 2,
+                "right_color": accent.format(border_hex),
             },
         )
         ws.merge_range(label_row - 1, first0, label_row - 1, first0 + 1, label, top_fmt)
         note_width(ws, first_col, label)
         ws.merge_range(value_row - 1, first0, value_row - 1, first0 + 1, value, mid_fmt)
         note_width(ws, first_col, str(value))
-        ws.merge_range(sub_row - 1, first0, sub_row - 1, first0 + 1, subtitle, bottom_fmt)
+        ws.merge_range(
+            sub_row - 1, first0, sub_row - 1, first0 + 1, subtitle, bottom_fmt
+        )
         note_width(ws, first_col, subtitle)
 
     return sub_row + 1
 
 
 def write_merged_headline(
-    ws, row: int, text: str, style_key: str, theme, first_col: int = 1, last_col: int = 6
+    ws,
+    row: int,
+    text: str,
+    style_key: str,
+    theme,
+    first_col: int = 1,
+    last_col: int = 6,
 ) -> int:
     """One merged headline band: ``merge_range`` with the theme's built-in
     style lookalike format (``"title" | "headline1" | "headline2"``).
@@ -479,7 +498,9 @@ def write_merged_headline(
     return row + 1
 
 
-def write_bin_table(ws, start_row: int, bins, theme, title: str, table_name: str) -> int:
+def write_bin_table(
+    ws, start_row: int, bins, theme, title: str, table_name: str
+) -> int:
     """Write one structured bin table (sixth wave) starting at 1-based
     ``start_row`` and return the next free row.
 
@@ -505,7 +526,12 @@ def write_bin_table(ws, start_row: int, bins, theme, title: str, table_name: str
 
     # section-title band: merged B:E, Headline-2 lookalike format
     ws.merge_range(
-        start_row - 1, first0, start_row - 1, last0, title, theme.lookalike(BIN_SECTION_STYLE)
+        start_row - 1,
+        first0,
+        start_row - 1,
+        last0,
+        title,
+        theme.lookalike(BIN_SECTION_STYLE),
     )
     note_width(ws, first_col, title)
 
@@ -525,7 +551,10 @@ def write_bin_table(ws, start_row: int, bins, theme, title: str, table_name: str
             "name": table_name,
             "style": None,  # keep the hand-tuned theme (no gallery stripes)
             "autofilter": True,
-            "columns": [{"header": header, "header_format": header_fmt} for header in BIN_TABLE_HEADERS],
+            "columns": [
+                {"header": header, "header_format": header_fmt}
+                for header in BIN_TABLE_HEADERS
+            ],
         },
     )
 
@@ -566,8 +595,13 @@ def write_bin_table(ws, start_row: int, bins, theme, title: str, table_name: str
     ws.write(total_row - 1, first0, BIN_TOTAL_LABEL, total_label_fmt)
     ws.write(total_row - 1, first0 + 2, int(total), total_label_fmt)
     note_width(ws, first0 + 3, str(total))
-    ws.write(total_row - 1, last0, 1.0, theme.cell_format(
-        font="bold_body", align="center", border=True, num_fmt=BIN_PCT_FORMAT
-    ))
+    ws.write(
+        total_row - 1,
+        last0,
+        1.0,
+        theme.cell_format(
+            font="bold_body", align="center", border=True, num_fmt=BIN_PCT_FORMAT
+        ),
+    )
 
     return total_row + 1

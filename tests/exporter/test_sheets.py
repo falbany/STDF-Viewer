@@ -9,7 +9,6 @@ so the in-memory ``ws._images`` list is the artifact under test.
 import io
 import math
 
-from openpyxl import Workbook
 import re
 import zipfile
 
@@ -98,11 +97,18 @@ class TestInsertReportImage:
     def insert(self, image_io, row=0, target_width_in=12.0, sheet_name="Sheet"):
         def build(wb, ws_by_name):
             self.consumed = insert_report_image(
-                ws_by_name[sheet_name], image_io, row=row, target_width_in=target_width_in
+                ws_by_name[sheet_name],
+                image_io,
+                row=row,
+                target_width_in=target_width_in,
             )
 
         book = render_workbook([sheet_name], build)
-        return read_xml(book, f"xl/drawings/drawing1.xml"), load_workbook_bytes(book)[sheet_name], book
+        return (
+            read_xml(book, "xl/drawings/drawing1.xml"),
+            load_workbook_bytes(book)[sheet_name],
+            book,
+        )
 
     def test_minimal_png_embedded(self):
         drawing, _ws, book = self.insert(io.BytesIO(PNG_1X1), row=0)

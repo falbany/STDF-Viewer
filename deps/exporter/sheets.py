@@ -72,7 +72,9 @@ def plain_table_spec(
     }
 
 
-def insert_report_image(ws, image_io: BytesIO, row: int, target_width_in: float = 12.0) -> int:
+def insert_report_image(
+    ws, image_io: BytesIO, row: int, target_width_in: float = 12.0
+) -> int:
     """Embed ``image_io`` (PNG) at column A of 0-based ``row``, scaled to
     ``target_width_in`` inches wide with the aspect ratio preserved.
 

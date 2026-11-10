@@ -24,6 +24,7 @@ from deps.SharedSrc import REC, getSetting, tab
 from deps.exporter.generator import ModernReportGenerator, bin_banner_from_file_info
 from deps.exporter.theme import number_format_from_settings
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
+from tests.exporter.test_writer import col_dim
 
 # openpyxl's reader drops features it cannot parse (xlsxwriter's sparkline
 # x14 extensions, solid data-bar extensions) — the suite asserts those via
@@ -33,7 +34,6 @@ pytestmark = [
     pytest.mark.filterwarnings("ignore:Conditional Formatting extension"),
     pytest.mark.filterwarnings("ignore:Unknown extension"),
 ]
-from tests.exporter.test_writer import col_dim, dxf_fill_hex
 
 
 def chart_title_text(xml: str) -> str:

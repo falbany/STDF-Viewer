@@ -14,10 +14,13 @@ from tests.exporter.conftest import (
     load_workbook_bytes,
     read_xml,
     render_workbook,
-    xlsxwriter_Workbook,
 )
 from deps.exporter.theme import ModernTheme
-from deps.exporter.writer import render_matrix_sheet, render_plain_table, write_plain_row
+from deps.exporter.writer import (
+    render_matrix_sheet,
+    render_plain_table,
+    write_plain_row,
+)
 
 BASE_HEADERS = [
     "Test#",
@@ -44,15 +47,9 @@ SCIENTIFIC = "0.00E+00"
 CP_16 = '=IFERROR((F16-E16)/(6*STDEV(M16:O16)),"")'
 CP_17 = '=IFERROR((F17-E17)/(6*STDEV(M17:O17)),"")'
 CP_18 = '=IFERROR((F18-E18)/(6*STDEV(M18:O18)),"")'
-CPK_16 = (
-    '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:O16)),(I16-E16)/(3*STDEV(M16:O16))),"")'
-)
-CPK_17 = (
-    '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:O17)),(I17-E17)/(3*STDEV(M17:O17))),"")'
-)
-CPK_18 = (
-    '=IFERROR(MIN((F18-I18)/(3*STDEV(M18:O18)),(I18-E18)/(3*STDEV(M18:O18))),"")'
-)
+CPK_16 = '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:O16)),(I16-E16)/(3*STDEV(M16:O16))),"")'
+CPK_17 = '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:O17)),(I17-E17)/(3*STDEV(M17:O17))),"")'
+CPK_18 = '=IFERROR(MIN((F18-I18)/(3*STDEV(M18:O18)),(I18-E18)/(3*STDEV(M18:O18))),"")'
 FAILS_LIMITS_16 = (
     '=SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16)))'
 )
@@ -289,7 +286,9 @@ class TestMatrixLayout:
         assert ws["A1"].value == "Test#"
         assert ws["M1"].value == 1  # banner labels are plain numeric DUT indices
         assert ws["A1"].fill.fgColor.rgb == "FFCBD5E1"
-        assert ws.row_dimensions[1].height == pytest.approx(22, abs=0.26)  # xlsxwriter rounds to the pixel grid
+        assert ws.row_dimensions[1].height == pytest.approx(
+            22, abs=0.26
+        )  # xlsxwriter rounds to the pixel grid
 
     def test_repeated_header_secondary_values_and_style(self):
         ws = self.wb()["DUT Summary"]
@@ -524,7 +523,12 @@ class TestMatrixConditionalFormatting:
             ["AND(ISNUMBER(K16),K16>=1)"],
             ["AND(ISNUMBER(K16),K16<1)"],
         ]
-        assert [r.stopIfTrue for r in rules] == [True, True, True, None]  # xlsxwriter omits stopIfTrue=0 (absent = not stopped)
+        assert [r.stopIfTrue for r in rules] == [
+            True,
+            True,
+            True,
+            None,
+        ]  # xlsxwriter omits stopIfTrue=0 (absent = not stopped)
         fills = [dxf_fill_hex(r) for r in rules]
         assert fills == ["FFA7F3D0", "FFD1FAE5", "FFFEF3C7", "FFFECACA"]
 
@@ -540,7 +544,12 @@ class TestMatrixConditionalFormatting:
             ["AND(ISNUMBER(J16),J16>=1)"],
             ["AND(ISNUMBER(J16),J16<1)"],
         ]
-        assert [r.stopIfTrue for r in rules] == [True, True, True, None]  # xlsxwriter omits stopIfTrue=0 (absent = not stopped)
+        assert [r.stopIfTrue for r in rules] == [
+            True,
+            True,
+            True,
+            None,
+        ]  # xlsxwriter omits stopIfTrue=0 (absent = not stopped)
         fills = [dxf_fill_hex(r) for r in rules]
         assert fills == ["FFA7F3D0", "FFD1FAE5", "FFFEF3C7", "FFFECACA"]
 
@@ -750,7 +759,9 @@ class TestPlainTable:
         assert ws["A1"].value == "File"
         assert ws["A1"].fill.fgColor.rgb == "FF1E40AF"
         assert ws["A1"].font.color.rgb == "FFFFFFFF"
-        assert ws.row_dimensions[1].height == pytest.approx(22, abs=0.26)  # xlsxwriter rounds to the pixel grid
+        assert ws.row_dimensions[1].height == pytest.approx(
+            22, abs=0.26
+        )  # xlsxwriter rounds to the pixel grid
 
     def test_alternating_banding_and_borders(self):
         ws = self.render_and_reload()
@@ -951,7 +962,12 @@ class TestPlainTableConditionalFormatting:
             ["AND(ISNUMBER(L2),L2>=1)"],
             ["AND(ISNUMBER(L2),L2<1)"],
         ]
-        assert [r.stopIfTrue for r in rules] == [True, True, True, None]  # xlsxwriter omits stopIfTrue=0 (absent = not stopped)
+        assert [r.stopIfTrue for r in rules] == [
+            True,
+            True,
+            True,
+            None,
+        ]  # xlsxwriter omits stopIfTrue=0 (absent = not stopped)
         fills = [dxf_fill_hex(r) for r in rules]
         assert fills == ["FFA7F3D0", "FFD1FAE5", "FFFEF3C7", "FFFECACA"]
 
@@ -966,7 +982,12 @@ class TestPlainTableConditionalFormatting:
             ["AND(ISNUMBER(K2),K2>=1)"],
             ["AND(ISNUMBER(K2),K2<1)"],
         ]
-        assert [r.stopIfTrue for r in rules] == [True, True, True, None]  # xlsxwriter omits stopIfTrue=0 (absent = not stopped)
+        assert [r.stopIfTrue for r in rules] == [
+            True,
+            True,
+            True,
+            None,
+        ]  # xlsxwriter omits stopIfTrue=0 (absent = not stopped)
         fills = [dxf_fill_hex(r) for r in rules]
         assert fills == ["FFA7F3D0", "FFD1FAE5", "FFFEF3C7", "FFFECACA"]
 
@@ -1080,7 +1101,7 @@ class TestPlainFormulaCache:
         return {
             "name": "Test Statistics",
             "headers": ["Test Name", "Cp", "Cpk"],
-            "rows": [["T/vcc", "=IFERROR((F2-E2)/(6*D2),\"\")", "=IFERROR(1/2,\"\")"]],
+            "rows": [["T/vcc", '=IFERROR((F2-E2)/(6*D2),"")', '=IFERROR(1/2,"")']],
         }
 
     def render(self, spec=None, data_only=False):
@@ -1116,7 +1137,7 @@ class TestPlainFormulaCache:
             write_plain_row(
                 ws_by_name["Sheet"],
                 2,
-                ["T", "=A2&\"x\""],
+                ["T", '=A2&"x"'],
                 ModernTheme(wb),
             )
 
@@ -1167,10 +1188,16 @@ class TestMatrixCachedValues:
 
         ws = load_workbook(io.BytesIO(book), data_only=True)["DUT Summary"]
         formula_cells = {
-            "G16": (16, 7), "H16": (16, 8), "I16": (16, 9),
-            "J16": (16, 10), "K16": (16, 11), "L16": (16, 12),
-            "G17": (17, 7), "L17": (17, 12),
-            "G18": (18, 7), "L18": (18, 12),
+            "G16": (16, 7),
+            "H16": (16, 8),
+            "I16": (16, 9),
+            "J16": (16, 10),
+            "K16": (16, 11),
+            "L16": (16, 12),
+            "G17": (17, 7),
+            "L17": (17, 12),
+            "G18": (18, 7),
+            "L18": (18, 12),
         }
         expected = spec["formula_values"]
         for cell, key in formula_cells.items():
@@ -1183,18 +1210,41 @@ class TestMatrixCachedValues:
         # Review Focus 3: a selected test no DUT executed — every stat
         # cache blank (Excel recomputes #DIV/0! or 0 on open), the CF
         # blank-neutral rule still first
-        spec = make_matrix_spec(rows=[
-            [
-                10, "0_T/v", "v", "V", 0.0, 1.0,
-                "=MIN(M16:O16)", "=MAX(M16:O16)", "=AVERAGE(M16:O16)",
-                CP_16, CPK_16, FAILS_LIMITS_16,
-                "", "", "", "", "", "",
-                "", "", "",
+        spec = make_matrix_spec(
+            rows=[
+                [
+                    10,
+                    "0_T/v",
+                    "v",
+                    "V",
+                    0.0,
+                    1.0,
+                    "=MIN(M16:O16)",
+                    "=MAX(M16:O16)",
+                    "=AVERAGE(M16:O16)",
+                    CP_16,
+                    CPK_16,
+                    FAILS_LIMITS_16,
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
             ],
-        ], row_groups=[0])
+            row_groups=[0],
+        )
         spec["formula_values"] = {
-            (16, 7): "", (16, 8): "", (16, 9): "",
-            (16, 10): "", (16, 11): "", (16, 12): 0,
+            (16, 7): "",
+            (16, 8): "",
+            (16, 9): "",
+            (16, 10): "",
+            (16, 11): "",
+            (16, 12): 0,
         }
         spec["auto_filter"] = {"ref": "A15:O16"}
         spec["conditional_formatting"]["die_rules"]["range"] = "M16:O16"
@@ -1211,19 +1261,40 @@ class TestMatrixCachedValues:
     def test_single_die_cpk_cached_blank(self):
         # Review Focus 4: n=1 — STDEV errors, Cp/Cpk cache blank, the
         # IFERROR formulas stay intact
-        spec = make_matrix_spec(rows=[
-            [
-                10, "0_T/v", "v", "V", 0.0, 1.0,
-                "=MIN(M16:M16)", "=MAX(M16:M16)", "=AVERAGE(M16:M16)",
-                '=IFERROR((F16-E16)/(6*STDEV(M16:M16)),"")',
-                '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:M16)),(I16-E16)/(3*STDEV(M16:M16))),"")',
-                FAILS_LIMITS_16.replace("M16:O16", "M16:M16"),
-                0.5, "", "", "", "", "",
-                "", "", "",
+        spec = make_matrix_spec(
+            rows=[
+                [
+                    10,
+                    "0_T/v",
+                    "v",
+                    "V",
+                    0.0,
+                    1.0,
+                    "=MIN(M16:M16)",
+                    "=MAX(M16:M16)",
+                    "=AVERAGE(M16:M16)",
+                    '=IFERROR((F16-E16)/(6*STDEV(M16:M16)),"")',
+                    '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:M16)),(I16-E16)/(3*STDEV(M16:M16))),"")',
+                    FAILS_LIMITS_16.replace("M16:O16", "M16:M16"),
+                    0.5,
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
             ],
-        ], die_columns=["M"], row_groups=[0], flag_first_col="Q")
+            die_columns=["M"],
+            row_groups=[0],
+            flag_first_col="Q",
+        )
         spec["conditional_formatting"]["die_rules"] = {
-            "range": "M16:M16", "first_die": "M", "flag_col_offset": 4,
+            "range": "M16:M16",
+            "first_die": "M",
+            "flag_col_offset": 4,
         }
         spec["conditional_formatting"]["cp_range"] = "J16:J16"
         spec["conditional_formatting"]["cpk_range"] = "K16:K16"
@@ -1232,8 +1303,12 @@ class TestMatrixCachedValues:
         spec["auto_filter"] = {"ref": "A15:M16"}
         spec["number_formats"]["M"] = SCIENTIFIC
         spec["formula_values"] = {
-            (16, 7): 0.5, (16, 8): 0.5, (16, 9): 0.5,
-            (16, 10): "", (16, 11): "", (16, 12): 0,
+            (16, 7): 0.5,
+            (16, 8): 0.5,
+            (16, 9): 0.5,
+            (16, 10): "",
+            (16, 11): "",
+            (16, 12): 0,
         }
         book = render_matrix_bytes(spec)
         from openpyxl import load_workbook
@@ -1242,7 +1317,7 @@ class TestMatrixCachedValues:
         assert ws["J16"].value in ("", None)
         assert ws["K16"].value in ("", None)
         ws2 = load_workbook(io.BytesIO(book))["DUT Summary"]
-        assert 'IFERROR' in ws2["J16"].value
+        assert "IFERROR" in ws2["J16"].value
 
 
 class TestMatrixSparklines:
@@ -1251,10 +1326,14 @@ class TestMatrixSparklines:
 
     def sparkline_spec(self, rows_sparks=None):
         spec = make_matrix_spec()
-        spec["sparklines"] = rows_sparks if rows_sparks is not None else [
-            {"row": 16, "type": "line", "range": "M16:O16"},
-            {"row": 18, "type": "column", "range": "M18:O18"},
-        ]
+        spec["sparklines"] = (
+            rows_sparks
+            if rows_sparks is not None
+            else [
+                {"row": 16, "type": "line", "range": "M16:O16"},
+                {"row": 18, "type": "column", "range": "M18:O18"},
+            ]
+        )
         spec["trend_col"] = "Q"
         return spec
 
@@ -1286,9 +1365,11 @@ class TestMatrixSparklines:
     def test_chunk_sheet_sparklines_qualified_ranges(self):
         # Review Focus 5: each chunk sheet qualifies its OWN name — a
         # chunk-2 range must reference 'DUT Summary (2)' not the base name
-        spec = self.sparkline_spec([
-            {"row": 16, "type": "line", "range": "M16:O16"},
-        ])
+        spec = self.sparkline_spec(
+            [
+                {"row": 16, "type": "line", "range": "M16:O16"},
+            ]
+        )
         book = render_matrix_bytes(spec, "DUT Summary (2)")
         xml = read_xml(book, "xl/worksheets/sheet1.xml")
         assert "'DUT Summary (2)'!M16:O16" in xml

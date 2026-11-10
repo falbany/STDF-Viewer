@@ -42,6 +42,7 @@ def get_column_letter(col: int) -> str:
     1-based Excel notation regardless of engine index conventions."""
     return xl_col_to_name(col - 1)
 
+
 # Part-ID temperature tag, e.g. the "_T25C" in "SN541_T25C"; case-insensitive,
 # optional decimal, and signed so cold temperatures ("_T-5.5C") match.
 TEMPERATURE_RE = re.compile(r"_T(-?\d+(?:\.\d+)?)C", re.IGNORECASE)

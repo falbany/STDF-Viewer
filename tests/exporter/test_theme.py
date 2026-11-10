@@ -140,7 +140,12 @@ class TestModernTheme:
         # single border style (the duplicate `thin_border` alias was removed)
         assert not hasattr(theme, "thin_border")
         cell = roundtrip_cell(theme, theme.border)
-        for side in (cell.border.left, cell.border.right, cell.border.top, cell.border.bottom):
+        for side in (
+            cell.border.left,
+            cell.border.right,
+            cell.border.top,
+            cell.border.bottom,
+        ):
             assert side.style == "thin"
             assert side.color.rgb.endswith("DBEAFE")
 
@@ -180,18 +185,30 @@ class TestModernTheme:
 
 class TestCellFormat:
     def test_same_kwargs_same_object(self, theme):
-        a = theme.cell_format(font="body", align="center", border=True, fill_hex=None, num_fmt="0.00")
-        b = theme.cell_format(font="body", align="center", border=True, fill_hex=None, num_fmt="0.00")
+        a = theme.cell_format(
+            font="body", align="center", border=True, fill_hex=None, num_fmt="0.00"
+        )
+        b = theme.cell_format(
+            font="body", align="center", border=True, fill_hex=None, num_fmt="0.00"
+        )
         assert a is b
 
     def test_different_kwargs_different_object(self, theme):
-        a = theme.cell_format(font="body", align="center", border=True, fill_hex=None, num_fmt="0.00")
-        b = theme.cell_format(font="header", align="center", border=True, fill_hex=None, num_fmt="0.00")
+        a = theme.cell_format(
+            font="body", align="center", border=True, fill_hex=None, num_fmt="0.00"
+        )
+        b = theme.cell_format(
+            font="header", align="center", border=True, fill_hex=None, num_fmt="0.00"
+        )
         assert a is not b
 
     def test_composed_format_values(self, theme):
         fmt = theme.cell_format(
-            font="body", align="center", border=True, fill_hex="FFF3CD", num_fmt="0.00E+00"
+            font="body",
+            align="center",
+            border=True,
+            fill_hex="FFF3CD",
+            num_fmt="0.00E+00",
         )
         assert fmt.font_name == "Times New Roman"
         assert fmt.font_size == 8
@@ -266,7 +283,9 @@ class TestLookalike:
             ("headline2", "Calibri", 13, "44546A", "thick", "8EA9DB"),
         ],
     )
-    def test_lookalike_definitions(self, theme, key, font, size, color, bottom_style, border_color):
+    def test_lookalike_definitions(
+        self, theme, key, font, size, color, bottom_style, border_color
+    ):
         fmt = theme.lookalike(key)
         assert fmt.font_name == font
         assert fmt.font_size == size

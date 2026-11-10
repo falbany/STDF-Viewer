@@ -1387,7 +1387,9 @@ class TestXlsxwriterMigration:
         # Review Focus 2: URL-looking strings must stay plain strings —
         # xlsxwriter's default strings_to_urls=True would turn File Info
         # values into hyperlinks
-        gen, wb, report_path, closed, errors = self._run(tmp_path, qapp, note="https://example.com/path")
+        gen, wb, report_path, closed, errors = self._run(
+            tmp_path, qapp, note="https://example.com/path"
+        )
         ws = wb["File Info"]
         row = None
         for r in range(2, ws.max_row + 1):
@@ -1403,7 +1405,9 @@ class TestXlsxwriterMigration:
 
         with zipfile.ZipFile(report_path) as zf:
             rels = [n for n in zf.namelist() if n.endswith("worksheet1.xml.rels")]
-        assert rels == [] or b"hyperlink" not in zipfile.ZipFile(report_path).read(rels[0])
+        assert rels == [] or b"hyperlink" not in zipfile.ZipFile(report_path).read(
+            rels[0]
+        )
 
     def _run(self, tmp_path, qapp, note="N" * 100):
         testTuples = [(10000, 0, "VCCC_ASIC")]
@@ -1430,7 +1434,10 @@ class TestXlsxwriterMigration:
             ["Note", note],
         ]
         gen.waitForTableData = lambda isFileInfo: file_info_table
-        gen.waitForDataList = lambda *a, **k: [["", "T", "1"], ["1 / Head1 / All Sites", "x", "2"]]
+        gen.waitForDataList = lambda *a, **k: [
+            ["", "T", "1"],
+            ["1 / Head1 / All Sites", "x", "2"],
+        ]
         closed, errors = [], []
         sig.closeSignal.connect(closed.append)
         sig.msgSignal.connect(errors.append)

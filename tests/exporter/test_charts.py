@@ -98,6 +98,7 @@ def env():
     wb = xlsxwriter.Workbook(out, {"in_memory": True, "strings_to_urls": False})
     ws = wb.add_worksheet("Sheet")
     theme = ModernTheme(wb)
+
     class Env(SimpleNamespace):
         def __getitem__(self, key):  # env["ws"] and env.ws both work
             return getattr(self, key)
@@ -375,7 +376,9 @@ class TestWriteKpiCards:
         assert isinstance(env["reload"]()["A4"].value, float)
         # numeric, wave-3 spirit (percent format read back on the reload)
         assert env["reload"]()["A4"].number_format == "0.00%"
-        assert env["reload"]()["A5"].value == "9 pass / 7 total parts"  # 10 - 3 superseded
+        assert (
+            env["reload"]()["A5"].value == "9 pass / 7 total parts"
+        )  # 10 - 3 superseded
 
     def test_card2_fails(self, env):
         self.written(env)
@@ -446,9 +449,15 @@ class TestWriteKpiCards:
         reloaded = env["reload"]()
         ranges = {str(r) for r in reloaded.merged_cells.ranges}
         for span in (
-            "A3:B3", "A4:B4", "A5:B5",
-            "C3:D3", "C4:D4", "C5:D5",
-            "E3:F3", "E4:F4", "E5:F5",
+            "A3:B3",
+            "A4:B4",
+            "A5:B5",
+            "C3:D3",
+            "C4:D4",
+            "C5:D5",
+            "E3:F3",
+            "E4:F4",
+            "E5:F5",
         ):
             assert span in ranges, span
 
@@ -465,7 +474,6 @@ class TestWriteKpiCards:
         # dark yellow accent: the top-row anchor carries top+left+right;
         # the bottom-row anchor carries bottom+left
         self.written(env)
-        reloaded = env["reload"]()
         rgb = "FF9C6500"
         top = env["reload"]()["A3"].border
         assert top.top.style == "medium" and top.top.color.rgb == rgb
@@ -484,7 +492,6 @@ class TestWriteKpiCards:
     def test_card2_and_card3_border_accents(self, env):
         # Fails card -> dark red, Total card -> dark blue (ninth wave)
         self.written(env)
-        reloaded = env["reload"]()
         c3 = env["reload"]()["C3"].border
         assert c3.top.style == "medium" and c3.top.color.rgb == "FF9C0006"
         assert c3.left.color.rgb == "FF9C0006"
@@ -498,7 +505,6 @@ class TestWriteKpiCards:
         # the whole artifact IS the save/reload in the xlsxwriter era —
         # the anchor sides ARE the saved XML
         self.written(env)
-        reloaded = env["reload"]()
         assert env["reload"]()["A3"].border.top.style == "medium"
         assert env["reload"]()["A3"].border.left.color.rgb == "FF9C6500"
         assert env["reload"]()["C3"].border.top.color.rgb == "FF9C0006"
@@ -550,8 +556,15 @@ class TestBuildBinDonut:
     (flags completed by complete_chart_flags), plotVisOnly, hidden helper
     columns. Helper-block cell values assert via the openpyxl read-back."""
 
-    def render(self, bins=None, anchor="A6", helper_col=61, helper_row=None,
-               sheet_name="Sheet", complete=True):
+    def render(
+        self,
+        bins=None,
+        anchor="A6",
+        helper_col=61,
+        helper_row=None,
+        sheet_name="Sheet",
+        complete=True,
+    ):
         captured = {}
 
         def build(wb, ws_by_name):
@@ -569,11 +582,15 @@ class TestBuildBinDonut:
         book = render_workbook([sheet_name], build)
         if complete:
             # complete_chart_flags operates on a path — render to one
-            import tempfile, os
+            import tempfile
+            import os
 
             fd, path = tempfile.mkstemp(suffix=".xlsx")
             os.close(fd)
-            with zipfile.ZipFile(io.BytesIO(book)) as zin, zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+            with (
+                zipfile.ZipFile(io.BytesIO(book)) as zin,
+                zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout,
+            ):
                 for info in zin.infolist():
                     zout.writestr(info.filename, zin.read(info.filename))
             complete_chart_flags(path)
@@ -604,7 +621,7 @@ class TestBuildBinDonut:
         assert '<c:plotVisOnly val="0"/>' in xml
         # tenth wave: 8.5 cm wide x the 250 pt band tall (px @ 96 dpi)
         assert "<a:ext" not in xml  # chart size lives in the drawing
-        assert '<c:percentOfPlot' not in xml
+        assert "<c:percentOfPlot" not in xml
 
     def test_data_labels_percent_only_with_flags_pinned(self):
         # ninth-wave print fix: Excel renders MISSING dLbls show* flags as
@@ -636,10 +653,14 @@ class TestBuildBinDonut:
         import re
 
         to = re.search(
-            r"<xdr:to><xdr:col>(\d+)</xdr:col>.*?<xdr:row>(\d+)</xdr:row>", drawing, re.S
+            r"<xdr:to><xdr:col>(\d+)</xdr:col>.*?<xdr:row>(\d+)</xdr:row>",
+            drawing,
+            re.S,
         )
         frm = re.search(
-            r"<xdr:from><xdr:col>(\d+)</xdr:col>.*?<xdr:row>(\d+)</xdr:row>", drawing, re.S
+            r"<xdr:from><xdr:col>(\d+)</xdr:col>.*?<xdr:row>(\d+)</xdr:row>",
+            drawing,
+            re.S,
         )
         assert to and frm
         assert int(to.group(1)) > int(frm.group(1))  # spans columns
@@ -702,7 +723,10 @@ class TestBuildBinDonut:
 
 class TestWriteMergedHeadline:
     def test_merge_value_return(self, env):
-        assert write_merged_headline(env["ws"], 1, "Charts", "headline1", env["theme"]) == 2
+        assert (
+            write_merged_headline(env["ws"], 1, "Charts", "headline1", env["theme"])
+            == 2
+        )
         reloaded = env["reload"]()
         assert "A1:F1" in {str(r) for r in reloaded.merged_cells.ranges}
         assert reloaded["A1"].value == "Charts"
@@ -720,7 +744,9 @@ class TestWriteMergedHeadline:
         assert cell.border.bottom.color.rgb.endswith("4472C4")
 
     def test_custom_span(self, env):
-        write_merged_headline(env["ws"], 4, "t", "title", env["theme"], first_col=2, last_col=5)
+        write_merged_headline(
+            env["ws"], 4, "t", "title", env["theme"], first_col=2, last_col=5
+        )
         reloaded = env["reload"]()
         assert "B4:E4" in {str(r) for r in reloaded.merged_cells.ranges}
         assert reloaded["B4"].font.name == "Cambria"  # title lookalike
@@ -789,12 +815,18 @@ class TestWriteBinTable:
         self.written(env)
         reloaded = env["reload"]()
         assert [reloaded[cell].value for cell in ("B17", "C17", "D17", "E17")] == [
-            "PASS_BIN", 1, 9, 0.9,
+            "PASS_BIN",
+            1,
+            9,
+            0.9,
         ]
         assert isinstance(reloaded["D17"].value, int)
         assert isinstance(reloaded["E17"].value, float)
         assert [reloaded[cell].value for cell in ("B18", "C18", "D18", "E18")] == [
-            "FAIL_BIN", 3, 1, 0.1,
+            "FAIL_BIN",
+            3,
+            1,
+            0.1,
         ]
         # fraction cells carry the 0.00% display format
         assert reloaded["E17"].number_format == "0.00%"
@@ -842,7 +874,9 @@ class TestWriteBinTable:
     def test_data_bar_over_distribution_data_rows_only(self, env):
         self.written(env)
         reloaded = env["reload"]()
-        ranges = {str(cf.sqref): list(cf.rules) for cf in reloaded.conditional_formatting}
+        ranges = {
+            str(cf.sqref): list(cf.rules) for cf in reloaded.conditional_formatting
+        }
         assert list(ranges) == ["E17:E18"]  # Total row (19) outside
         (rule,) = ranges["E17:E18"]
         assert rule.type == "dataBar"
@@ -899,6 +933,8 @@ class TestWriteBinTable:
 
     @pytest.mark.filterwarnings("ignore:Conditional Formatting extension")
     @pytest.mark.filterwarnings("ignore:Unknown extension")
+    @pytest.mark.filterwarnings("ignore:Conditional Formatting extension")
+    @pytest.mark.filterwarnings("ignore:Unknown extension")
     def test_round_trip_keeps_table_and_data_bar(self, env):
         self.written(env)
         reloaded = env["reload"]()
@@ -930,10 +966,12 @@ class TestCompleteChartFlags:
         if with_labels:
             chart = wb.add_chart({"type": "doughnut"})
             chart.set_hole_size(55)
-            chart.add_series({
-                "values": "='Bin Chart'!$BK$7:$BK$8",
-                "data_labels": {"percentage": True, "font": BIN_LABEL_FONT},
-            })
+            chart.add_series(
+                {
+                    "values": "='Bin Chart'!$BK$7:$BK$8",
+                    "data_labels": {"percentage": True, "font": BIN_LABEL_FONT},
+                }
+            )
             chart.show_hidden_data()
             ws.insert_chart("A1", chart)
         wb.close()
@@ -962,9 +1000,15 @@ class TestCompleteChartFlags:
     def test_book_without_charts_untouched(self, tmp_path):
         path = str(tmp_path / "book.xlsx")
         self._write_chart_book(path, with_labels=False)
-        before = {i.filename: zipfile.ZipFile(path).read(i.filename) for i in zipfile.ZipFile(path).infolist()}
+        before = {
+            i.filename: zipfile.ZipFile(path).read(i.filename)
+            for i in zipfile.ZipFile(path).infolist()
+        }
         complete_chart_flags(path)
-        after = {i.filename: zipfile.ZipFile(path).read(i.filename) for i in zipfile.ZipFile(path).infolist()}
+        after = {
+            i.filename: zipfile.ZipFile(path).read(i.filename)
+            for i in zipfile.ZipFile(path).infolist()
+        }
         assert before == after
 
     def test_saved_package_still_loads(self, tmp_path):
