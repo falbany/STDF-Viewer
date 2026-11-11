@@ -6,7 +6,7 @@ import numpy as np
 from openpyxl.utils import column_index_from_string
 
 from deps.SharedSrc import REC
-from deps.exporter.helpers import DUT_CHUNK_CAP, cp_cached, cpk_cached, die_col
+from deps.exporter.helpers import DUT_CHUNK_CAP, cp_cached, cpk_cached, die_col, resolve_dut_temperature
 from deps.exporter.matrix import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
@@ -845,6 +845,18 @@ class TestStructure:
         # CELLS ONLY (row 14 = METADATA_START + the DUT Flag position in
         # METADATA_ROWS — computed, not hard-coded; base cells never styled)
         assert cf["dut_flag_range"] == "M14:O14"
+        # duplicate-highlight wave: same die-cells-only rule over the Part ID
+        # metadata row (row 3 = METADATA_START + the Part ID position)
+        assert cf["part_id_range"] == "M3:O3"
+
+    def test_resolve_dut_temperature_parity(self):
+        # tag wins over the file temperature; 0.0 is a value, not a
+        # fallback trigger; no tag + no file row stays None
+        assert resolve_dut_temperature("SN_T25C", 100.0) == 25.0
+        assert resolve_dut_temperature("SN", 100.0) == 100.0
+        assert resolve_dut_temperature("SN_T0C", None) == 0.0
+        assert resolve_dut_temperature(None, None) is None
+        assert resolve_dut_temperature("SN", None) is None
 
     def test_tr_translates_base_labels_only(self):
         spec = build(base_tests(), base_duts(), tr=str.upper)[0]

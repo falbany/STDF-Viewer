@@ -49,9 +49,9 @@ from deps.exporter.helpers import (
     has_numeric,
     metadata_stat_formulas,
     parse_bin,
-    parse_temperature,
     parse_test_time,
     part_id_base,
+    resolve_dut_temperature,
     split_dut_chunks,
     split_test_name,
     stat_cached,
@@ -259,6 +259,14 @@ DUT_FLAG_ROW = METADATA_START + next(
     index for index, meta in enumerate(METADATA_ROWS) if meta["name"] == "DUT Flag"
 )
 
+# Absolute Excel row of the Part ID metadata row (duplicate-highlight
+# wave): computed the same way — the Excel duplicate-value CF range lives
+# over THIS row's die cells only (blanks never highlight; the "DUT #n"
+# fallback is header-only).
+PART_ID_ROW = METADATA_START + next(
+    index for index, meta in enumerate(METADATA_ROWS) if meta["name"] == "Part ID"
+)
+
 # First two integers inside a preformatted "(X, Y)" string.
 _XY_INT_RE = re.compile(r"-?\d+")
 
@@ -462,11 +470,12 @@ def _metadata_cell(
 
     if name == "Temperature":
         part_id = raw(1)
-        temperature = parse_temperature(part_id if isinstance(part_id, str) else None)
-        if temperature is None and file_temperatures is not None:
-            # no _T<n>C tag in the part ID: the file's recorded temperature
-            # (MIR TST_TEMP per selected fid) covers the DUT
-            temperature = file_temperatures.get(fid)
+        # one shared resolver (§7.4): the split groups by this same value,
+        # so the row and the grouping can never diverge
+        temperature = resolve_dut_temperature(
+            part_id if isinstance(part_id, str) else None,
+            file_temperatures.get(fid) if file_temperatures else None,
+        )
         return "" if temperature is None else float(temperature)
     if name in ("HW Bin", "SW Bin"):
         # DB shape "Bin N" -> bare int N
@@ -812,6 +821,9 @@ def _build_chunk(
             # (never the base cells; the writer adds Superseded/Fail/Pass
             # SEARCH rules on this range)
             "dut_flag_range": f"{first_die}{DUT_FLAG_ROW}:{last_die}{DUT_FLAG_ROW}",
+            # duplicate-highlight wave: Excel's own duplicate-value CF over
+            # the Part ID row's DIE CELLS ONLY (always on — no option flag)
+            "part_id_range": f"{first_die}{PART_ID_ROW}:{last_die}{PART_ID_ROW}",
         },
     }
     if rows:

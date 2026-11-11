@@ -104,6 +104,17 @@ def parse_temperature_text(value) -> float | None:
     return float(match.group(0)) if match else None
 
 
+def resolve_dut_temperature(part_id: str | None, file_temperature: float | None) -> float | None:
+    """One resolver, two consumers (DUT Summary design §7.4): the
+    Temperature metadata row and the temperature split group by the SAME
+    per-DUT value. A ``_T<n>C`` tag in the Part ID wins; the file's
+    recorded MIR TST_TEMP covers untagged IDs; ``None`` when neither
+    source carries a number. ``0.0`` is a value, never a fallback
+    trigger."""
+    tagged = parse_temperature(part_id)
+    return tagged if tagged is not None else file_temperature
+
+
 def part_id_base(part_id: str | None) -> str:
     """Return the part ID without its (last) temperature tag.
 
