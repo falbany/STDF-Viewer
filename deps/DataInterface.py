@@ -35,6 +35,22 @@ def apply_dut_exclusion(testDataDict: dict, fid: int, dut_exclusion: dict | None
     for key in ("dutList", "dataList", "flagList", "stateList"):
         if key in testDataDict:
             masked[key] = np.asarray(testDataDict[key])[keep]
+    # the fetch precomputed Min/Max/Median/Mean/SDev/Cpk over the FULL
+    # population (testDataProcessCore) — recompute over the kept DUTs
+    # exactly like it does, or the row's scalars contradict its own
+    # masked Fail Num (branch-review C1, spec G3)
+    data = masked["dataList"]
+    if data.size > 0 and not np.all(np.isnan(data)):
+        masked["Min"] = np.nanmin(data)
+        masked["Max"] = np.nanmax(data)
+        masked["Median"] = np.nanmedian(data)
+    else:
+        masked["Min"] = np.nan
+        masked["Max"] = np.nan
+        masked["Median"] = np.nan
+    masked["Mean"], masked["SDev"], masked["Cpk"] = calc_cpk(
+        masked.get("LLimit", np.nan), masked.get("HLimit", np.nan), data
+    )
     return masked
 
 
