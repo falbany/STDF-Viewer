@@ -64,7 +64,7 @@ import xlsxwriter
 import xlsxwriter.utility as xlutil
 from PyQt5 import QtCore
 
-from deps.SharedSrc import REC, tab
+from deps.SharedSrc import REC, getSetting, tab  # fork(falbany): getSetting for the re-measure filter
 from deps.uic_stdExporter import (
     ReportSelection,
     dataChannel,
@@ -100,7 +100,9 @@ from deps.exporter.matrix import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
     build_dut_summary_spec,
+    prune_summary_view,
 )
+from deps.exporter.dedup import compute_remeasure_drops  # fork(falbany): re-measure filter
 from deps.exporter.sheets import (
     insert_report_image,
     plain_table_spec,
@@ -794,6 +796,29 @@ class ModernReportGenerator(reportGenerator):
     # DUT Summary matrix + chart sheets (Task 8)
     # ----------------------------------------------------------------------
 
+    def _order_and_ids(self, summaryTable, order_filter=None):
+        """The classic `(fid, dutIndex)` display order and its per-column
+        part IDs (moved verbatim out of writeDUT_Summary).
+
+        `order_filter` (temperature split §7.4) keeps only the listed
+        pairs — None keeps everything. The "DUT #n" fallback numbers
+        within the KEPT order."""
+        order = []
+        for fid in sorted(summaryTable["dutInfo"].keys()):
+            for dutIndex in sorted(summaryTable["dutInfo"][fid].keys()):
+                pair = (fid, dutIndex)
+                if order_filter is None or pair in order_filter:
+                    order.append(pair)
+
+        # full part ID per ordered DUT (classic dataRow[1] indexing); a
+        # blank part ID falls back to "DUT #n"
+        dut_ids = []
+        for i, (fid, dutIndex) in enumerate(order):
+            info = summaryTable["dutInfo"][fid][dutIndex]
+            part_id = info[1] if len(info) > 1 and info[1] else ""
+            dut_ids.append(part_id if part_id else f"DUT #{i + 1}")
+        return order, dut_ids
+
     def writeDUT_Summary(self):
         DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
         if DutSheet is None:
@@ -823,19 +848,21 @@ class ModernReportGenerator(reportGenerator):
             ):
                 self._ftr_tests.add((test_tuple[0], test_tuple[2]))
 
-        # use a list to determine the dut order (classic order-building)
-        order = []
-        for fid in sorted(summaryTable["dutInfo"].keys()):
-            for dutIndex in sorted(summaryTable["dutInfo"][fid].keys()):
-                order.append((fid, dutIndex))
+        # re-measure filter (DUT Summary enhancements §7.2): the drop-set
+        # is computed BEFORE rendering and stored for writeStatistic's
+        # stats hook (Task 6) — the DUT sheet runs first in the report
+        # sequence, so a DUT-selected export never refetches here. An
+        # empty set means "ran, nothing to drop"; None (never stored)
+        # means the DUT sheet did not render (stat-only fallback fetch).
+        if getSetting().gen.hide_remeasured:
+            drops = compute_remeasure_drops(summaryTable["dutInfo"], self.selectedFiles)
+        else:
+            drops = set()
+        self._remeasure_drops = drops
+        if drops:
+            summaryTable = prune_summary_view(summaryTable, drops)
 
-        # full part ID per ordered DUT (classic dataRow[1] indexing); a
-        # blank part ID falls back to "DUT #n"
-        dut_ids = []
-        for i, (fid, dutIndex) in enumerate(order):
-            info = summaryTable["dutInfo"][fid][dutIndex]
-            part_id = info[1] if len(info) > 1 and info[1] else ""
-            dut_ids.append(part_id if part_id else f"DUT #{i + 1}")
+        order, dut_ids = self._order_and_ids(summaryTable)
 
         # per-file MIR Test Temperature (fix wave: the Temperature metadata
         # row falls back to it when a part ID carries no _T<n>C tag). The
@@ -865,9 +892,14 @@ class ModernReportGenerator(reportGenerator):
         # (die overflow beyond the Excel column cap) get their own sheets —
         # spec names already carry the " (n)" suffixes. Column widths are
         # pinned inside render_matrix_sheet (A=8, B=30, C..L=8, dies=8).
+        # Every sheet created here joins _dut_sheet_block (base sheet
+        # first, report_core appended it at creation) so the close-time
+        # reorder keeps the DUT block adjacent to the base sheet.
         for chunk_index, spec in enumerate(specs):
             ws = DutSheet if chunk_index == 0 else self._wb.add_worksheet(spec["name"])
             render_matrix_sheet(ws, spec, self._theme)
+            if chunk_index > 0:
+                self._dut_sheet_block.append(ws)
 
         # classic cadence: one tick after the DUT info part...
         self.loopCount += 1
@@ -1131,6 +1163,13 @@ class ModernReportGenerator(reportGenerator):
         # Stat-only selection leaves it empty (the Pattern-Name fallback
         # covers detection there)
         self._ftr_tests: set = set()
+        # re-measure filter hand-off (§7.2): None until writeDUT_Summary
+        # stores its drop-set — None (vs an empty set) is the stat-only
+        # signal that triggers the light dutInfo-only fetch
+        self._remeasure_drops: "set | None" = None
+        # the DUT-derived sheet block (base + chunk overflow + temperature
+        # splits, base first) for the close-time tab-order reorder (§7.4)
+        self._dut_sheet_block: list = []
 
         # the try/finally mirrors the classic `with Workbook(...)` block:
         # the (partial) workbook is saved on forceQuit early-returns and on
@@ -1173,6 +1212,9 @@ class ModernReportGenerator(reportGenerator):
                     sheetName = self.tr("Correlation")
                 if cont in self.selectedContents:
                     self.sheetDict[cont] = self._wb.add_worksheet(sheetName)
+                    if cont == ReportSelection.DUT:
+                        # block[0] = the base DUT sheet (§7.4 reorder)
+                        self._dut_sheet_block.append(self.sheetDict[cont])
 
             # ** write contents independent of test numbers
             # file info

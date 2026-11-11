@@ -132,13 +132,19 @@ def make_dut_info(
     )
 
 
-def make_summary(tagged=True):
+def make_summary(tagged=True, duplicate_sn=False, blank_ids=False):
     """Classic waitForDutSummary dict: 2 tests x 3 DUTs in file 1.
 
     `tagged` controls the _T<n>C temperature tag on the part IDs — the
-    untagged variant exercises the MIR Test Temperature fallback."""
+    untagged variant exercises the MIR Test Temperature fallback.
+    `duplicate_sn` re-uses SN541 on the third DUT (dutIndex 2) with the
+    SAME temperature tag as the first — identical raw Part IDs, so the
+    filter's exact-match rule drops the FIRST occurrence (1, 0).
+    `blank_ids` empties every Part ID (the filter must never match)."""
 
     def part_id(base, temp):
+        if blank_ids:
+            return ""
         return f"{base}_T{temp}C" if tagged else base
 
     duts = [
@@ -153,7 +159,15 @@ def make_summary(tagged=True):
                 dut_flag="Failed",
             ),
         ),
-        (1, 2, make_dut_info(part_id=part_id("SN543", 85))),
+        # duplicate_sn: dutIndex 2 carries dutIndex 0's EXACT part ID
+        # (base AND tag) — the filter matches raw strings, not SNs
+        (
+            1,
+            2,
+            make_dut_info(
+                part_id=part_id("SN541" if duplicate_sn else "SN543", 25 if duplicate_sn else 85)
+            ),
+        ),
     ]
     tests = [
         # parametric with limits (data row 16)
@@ -225,12 +239,19 @@ def build_generated(
     with_file_info=False,
     part_id_tagged=True,
     file_temperature=None,
+    duplicate_sn=False,
+    blank_ids=False,
+    hide_remeasured=False,
+    monkeypatch=None,
 ):
     """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus Stat when
     `with_stat`, FileInfo when `with_file_info`) and return (generator,
     reloaded workbook, report path, close/error capture). `file_temperature`
     appends a File Info "Test Temperature:" row (the DUT Summary fallback
-    source); `part_id_tagged` drops the _T<n>C tag from the part IDs."""
+    source); `part_id_tagged` drops the _T<n>C tag from the part IDs.
+    `duplicate_sn` shares SN541 between the first and third DUT;
+    `hide_remeasured` flips the filter setting for the run (pass the test's
+    `monkeypatch` fixture so it auto-restores)."""
     testTuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
     selectedFiles = [1]
     selectedHeads = [1]
@@ -273,8 +294,16 @@ def build_generated(
 
     # GUI side: classic-protocol summary table, chart PNGs, stat rows
     gen.waitForDutSummary = lambda heads, sites, fids, testTuples: make_summary(
-        tagged=part_id_tagged
+        tagged=part_id_tagged, duplicate_sn=duplicate_sn, blank_ids=blank_ids
     )
+    # the filter path must never reach the GUI for dutInfo when the DUT
+    # sheet rendered (Task 6 will move this stub into the stat-only tests)
+    gen.waitForDutInfo = lambda *args: (_ for _ in ()).throw(
+        AssertionError("waitForDutInfo must not be called when the DUT sheet ran")
+    )
+    if hide_remeasured:
+        assert monkeypatch is not None, "hide_remeasured=True requires monkeypatch"
+        monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
 
     def fake_wait_for_image(testTuple, head, sites, fids, chartType):
         return io.BytesIO(PNG_BYTES)
@@ -1010,6 +1039,63 @@ class TestDuplicatePartIdHighlight:
         # the CF range is the die span only — never the full row
         with pytest.raises(AssertionError, match="no conditional formatting"):
             cf_block(wb["DUT Summary"], "A3:O3")
+
+
+class TestRemeasureFilterPrune:
+    """Filter ON drops re-measured DUT columns before the spec builds;
+    OFF is the byte-identical identity path."""
+
+    def test_filter_on_drops_first_duplicate_occurrence(self, tmp_path, qapp, monkeypatch):
+        generated = build_generated(
+            tmp_path, qapp, duplicate_sn=True, hide_remeasured=True, monkeypatch=monkeypatch
+        )
+        _, wb, _, _, _ = generated
+        ws = wb["DUT Summary"]
+        # kept order: dutIndex 1 (SN542) then 2 (the later SN541)
+        assert ws["M15"].value == "SN542"
+        assert ws["N15"].value == "SN541"
+        # the third die column is gone: O15 is the spacer region
+        assert ws["O15"].value in (None, "")
+
+    def test_filter_off_keeps_all_columns(self, tmp_path, qapp):
+        generated = build_generated(tmp_path, qapp, duplicate_sn=True)
+        _, wb, _, _, _ = generated
+        ws = wb["DUT Summary"]
+        assert ws["M15"].value == "SN541"
+        assert ws["N15"].value == "SN542"
+        assert ws["O15"].value == "SN541"
+
+    def test_filter_on_blank_ids_never_match(self, tmp_path, qapp, monkeypatch):
+        generated = build_generated(
+            tmp_path, qapp, blank_ids=True, hide_remeasured=True, monkeypatch=monkeypatch
+        )
+        _, wb, _, _, _ = generated
+        ws = wb["DUT Summary"]
+        # nothing dropped: all three die columns survive
+        assert ws["M15"].value == "DUT #1"
+        assert ws["N15"].value == "DUT #2"
+        assert ws["O15"].value == "DUT #3"
+
+    def test_prune_summary_view_removes_exactly_the_drops(self):
+        from deps.exporter.matrix import prune_summary_view
+
+        summary = make_summary()
+        dropped = {(1, 0)}
+        pruned = prune_summary_view(summary, dropped)
+        assert 0 not in pruned["dutInfo"][1]
+        assert 1 in pruned["dutInfo"][1]
+        assert 0 not in pruned["dut2ind"][1]
+        # Data / TestInfo are shared, not rebuilt
+        assert pruned["Data"] is summary["Data"]
+        assert pruned["TestInfo"] is summary["TestInfo"]
+        # the original is untouched (copies, not in-place)
+        assert 0 in summary["dutInfo"][1]
+
+    def test_prune_summary_view_empty_set_is_identity(self):
+        from deps.exporter.matrix import prune_summary_view
+
+        summary = make_summary()
+        assert prune_summary_view(summary, set()) is summary
 
 
 class TestStatFtrCacheDetection:

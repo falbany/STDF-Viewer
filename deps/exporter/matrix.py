@@ -836,3 +836,25 @@ def _build_chunk(
             "ref": f"A{HEADER_ROW}:{last_die}{last_data_row}",
         }
     return spec
+
+
+def prune_summary_view(summaryTable: dict, drop_pairs: set[tuple[int, int]]) -> dict:
+    """A summaryTable view without the dropped `(fid, dutIndex)` pairs.
+
+    `dutInfo`/`dut2ind` lose exactly the dropped pairs (copies; the input
+    is never mutated); `Data`/`TestInfo` are shared as-is — die cells
+    resolve through `dut2ind`, so a dropped DUT simply never renders. An
+    empty drop-set returns the SAME dict object (the filter's OFF path is
+    byte-identical by construction)."""
+    if not drop_pairs:
+        return summaryTable
+    pruned = dict(summaryTable)
+    pruned["dutInfo"] = {
+        fid: {dut_index: info for dut_index, info in rows.items() if (fid, dut_index) not in drop_pairs}
+        for fid, rows in summaryTable["dutInfo"].items()
+    }
+    pruned["dut2ind"] = {
+        fid: {dut_index: data_index for dut_index, data_index in indices.items() if (fid, dut_index) not in drop_pairs}
+        for fid, indices in summaryTable["dut2ind"].items()
+    }
+    return pruned
