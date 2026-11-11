@@ -984,6 +984,34 @@ def cf_block(ws, ref):
     raise AssertionError(f"no conditional formatting on {ref}")
 
 
+class TestDuplicatePartIdHighlight:
+    """Always-on Excel duplicate-value CF over the Part ID metadata row's
+    DIE CELLS ONLY (row 3) — builtin yellow preset, no option flag."""
+
+    @pytest.fixture
+    def generated(self, tmp_path, qapp):
+        return build_generated(tmp_path, qapp)
+
+    def test_one_duplicate_rule_on_part_id_die_cells(self, generated):
+        _, wb, _, _, _ = generated
+        rules = cf_block(wb["DUT Summary"], "M3:O3")
+        assert len(rules) == 1
+        # xlsxwriter emits type "duplicate"; openpyxl reads its expanded
+        # form "duplicateValues"
+        assert rules[0].type == "duplicateValues"
+
+    def test_rule_uses_builtin_yellow(self, generated):
+        _, wb, _, _, _ = generated
+        rules = cf_block(wb["DUT Summary"], "M3:O3")
+        assert str(rules[0].dxf.fill.bgColor.rgb).endswith("FFFF00")
+
+    def test_base_cells_not_covered(self, generated):
+        _, wb, _, _, _ = generated
+        # the CF range is the die span only — never the full row
+        with pytest.raises(AssertionError, match="no conditional formatting"):
+            cf_block(wb["DUT Summary"], "A3:O3")
+
+
 class TestStatFtrCacheDetection:
     """DUT + Stat selection: writeDUT_Summary runs FIRST and caches the FTR
     test keys (PRIMARY detection signal); the Test Statistics FTR row gets

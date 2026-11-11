@@ -238,6 +238,12 @@ class ModernTheme:
         merges the rule's fill itself; the format carries just the color)."""
         return self._format({"bg_color": f"#{hex6}"})
 
+    def cf_duplicate_preset(self):
+        """Excel's builtin "Yellow Fill with Dark Yellow Text" preset for
+        the duplicate-Part-ID highlight — hardcoded (like
+        SCIENTIFIC_FORMAT), not theme-derived; cached like every format."""
+        return self._format({"bg_color": "#FFFF00", "font_color": "#9C6500"})
+
     def lookalike(self, key: str, wrap: bool = False):
         """Built-in named style lookalike (Title / Headline 1 / Headline 2 —
         definitions in LOOKALIKE_DEFS); ``wrap`` adds text wrapping and a

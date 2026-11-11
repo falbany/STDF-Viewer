@@ -479,6 +479,20 @@ def _add_dut_flag_status_rules(ws, cell_range, theme):
         )
 
 
+def _add_duplicate_part_id_rules(ws, cell_range, theme):
+    """One Excel duplicate-value rule over the Part ID metadata row's DIE
+    cells — always on (no option flag), styled with the builtin yellow
+    preset. Excel does the detecting: its duplicate rule ignores blank
+    cells and is case-insensitive (spec §8 — `sn001`/`SN001` highlights
+    though the filter never drops it). The range carries die cells only:
+    the Part ID row holds raw IDs (the "DUT #n" fallback is header-only,
+    outside the range), so no false positives."""
+    ws.conditional_format(
+        cell_range,
+        {"type": "duplicate", "format": theme.cf_duplicate_preset()},
+    )
+
+
 # --------------------------------------------------------------------------
 # hidden mirror columns + sparklines
 # --------------------------------------------------------------------------
@@ -581,6 +595,10 @@ def render_matrix_sheet(ws, spec: dict, theme) -> None:
     dut_flag_range = cf.get("dut_flag_range")
     if dut_flag_range:
         _add_dut_flag_status_rules(ws, dut_flag_range, theme)
+    part_id_range = cf.get("part_id_range")
+    if part_id_range:
+        # duplicate-highlight wave: always-on Excel-native duplicate CF
+        _add_duplicate_part_id_rules(ws, part_id_range, theme)
 
     _hide_mirror_columns(ws, spec, theme)
     _add_sparklines(ws, spec)
