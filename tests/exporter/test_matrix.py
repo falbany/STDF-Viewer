@@ -12,6 +12,7 @@ from deps.exporter.matrix import (
     FTR_SPEC_MIN,
     METADATA_ROWS,
     build_dut_summary_spec,
+    group_order_by_temperature,
     sanitize_cell,
 )
 
@@ -1454,3 +1455,54 @@ class TestOneSidedLimitRow:
         assert '(F16<>"")' in row[11] and (row[5] == "")
         fv = spec["formula_values"]
         assert fv[(16, 12)] == 1  # flags alone would say 0 — cache matches formula
+
+
+# --------------------------------------------------------------------------
+# temperature split grouping (split §7.4)
+# --------------------------------------------------------------------------
+
+
+def group_tests():
+    class Info:
+        def __init__(self, part_id):
+            self.part_id = part_id
+
+        def __getitem__(self, index):
+            return self.part_id if index == 1 else ""
+
+        def __len__(self):
+            return 2
+
+    return Info
+
+
+class TestGroupOrderByTemperature:
+    def test_tags_merge_on_numeric_equality(self):
+        info = {1: {0: (group_tests())("SN_A_T25C"), 1: (group_tests())("SN_B_T25.0C")}}
+        groups = group_order_by_temperature([(1, 0), (1, 1)], info, {})
+        assert groups == {25.0: [(1, 0), (1, 1)]}
+
+    def test_tag_and_file_fallback_merge(self):
+        info = {1: {0: (group_tests())("SN_A_T25C")}, 2: {0: (group_tests())("SN_B")}}
+        groups = group_order_by_temperature([(1, 0), (2, 0)], info, {1: None, 2: 25.0})
+        assert groups == {25.0: [(1, 0), (2, 0)]}
+
+    def test_unresolvable_dut_lands_in_none_group(self):
+        info = {1: {0: (group_tests())("SN_A_T25C")}, 2: {0: (group_tests())("SN_B")}}
+        groups = group_order_by_temperature([(1, 0), (2, 0)], info, {1: None, 2: None})
+        assert groups == {25.0: [(1, 0)], None: [(2, 0)]}
+
+    def test_exact_float_equality_no_rounding(self):
+        info = {
+            1: {0: (group_tests())("SN_A_T25C"), 1: (group_tests())("SN_B_T25.000001C")},
+        }
+        groups = group_order_by_temperature([(1, 0), (1, 1)], info, {})
+        assert 25.0 in groups and 25.000001 in groups
+        assert groups[25.0] == [(1, 0)]
+        assert groups[25.000001] == [(1, 1)]
+
+    def test_order_preserved_within_group(self):
+        info = {1: {0: (group_tests())("A_T25C"), 1: (group_tests())("B_T25C"), 2: (group_tests())("C_T-5C")}}
+        groups = group_order_by_temperature([(1, 0), (1, 1), (1, 2)], info, {})
+        assert groups[25.0] == [(1, 0), (1, 1)]
+        assert groups[-5.0] == [(1, 2)]

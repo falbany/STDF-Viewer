@@ -115,6 +115,17 @@ def resolve_dut_temperature(part_id: str | None, file_temperature: float | None)
     return tagged if tagged is not None else file_temperature
 
 
+def format_temperature_label(value: float) -> str:
+    """The ``T<n>`` label of a split sheet name: the float with a trimmed
+    trailing ``.0`` — ``25.0`` -> ``"25"``, ``125.5`` -> ``"125.5"``,
+    ``-55.0`` -> ``"-55"``. Float rendering cannot produce a forbidden
+    sheet-name character, and every label stays far under Excel's
+    31-character sheet-name cap."""
+    if value == int(value):
+        return str(int(value))
+    return repr(float(value))
+
+
 def part_id_base(part_id: str | None) -> str:
     """Return the part ID without its (last) temperature tag.
 

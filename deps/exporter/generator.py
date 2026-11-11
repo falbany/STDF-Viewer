@@ -90,6 +90,7 @@ from deps.exporter.charts import (
 from deps.exporter.helpers import (
     apply_cp_formula,
     apply_cpk_formula,
+    format_temperature_label,
     get_column_letter,
     parse_temperature_text,
     split_test_name,
@@ -100,6 +101,7 @@ from deps.exporter.matrix import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
     build_dut_summary_spec,
+    group_order_by_temperature,
     prune_summary_view,
 )
 from deps.exporter.dedup import (  # fork(falbany): re-measure filter
@@ -930,6 +932,35 @@ class ModernReportGenerator(reportGenerator):
             render_matrix_sheet(ws, spec, self._theme)
             if chunk_index > 0:
                 self._dut_sheet_block.append(ws)
+
+        # temperature split (§7.4): one extra worksheet per distinct
+        # temperature, ascending — additive; the base sheet above is
+        # untouched. Groups of the filtered view only; DUTs with no
+        # resolvable temperature stay in the base sheet only. No new
+        # progress ticks (splitting adds sheets, not fetches).
+        if getSetting().gen.split_temperature:
+            groups = group_order_by_temperature(order, summaryTable["dutInfo"], file_temperatures)
+            resolved = [temp for temp in groups if temp is not None]
+            if len(resolved) >= 2:
+                # sorted(resolved), not sorted(groups): the None key does
+                # not compare against floats
+                for temp in sorted(resolved):
+                    pairs = set(groups[temp])
+                    subset = prune_summary_view(summaryTable, set(order) - pairs)
+                    sub_order, sub_ids = self._order_and_ids(subset, order_filter=pairs)
+                    split_specs = build_dut_summary_spec(
+                        subset,
+                        self.testTuples,
+                        sub_order,
+                        sub_ids,
+                        sheet_name=f'{self.tr("DUT Summary")} - T{format_temperature_label(temp)}°C',
+                        tr=self.tr,
+                        file_temperatures=file_temperatures,
+                    )
+                    for spec in split_specs:
+                        ws = self._wb.add_worksheet(spec["name"])
+                        render_matrix_sheet(ws, spec, self._theme)
+                        self._dut_sheet_block.append(ws)
 
         # classic cadence: one tick after the DUT info part...
         self.loopCount += 1

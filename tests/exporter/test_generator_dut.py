@@ -132,7 +132,7 @@ def make_dut_info(
     )
 
 
-def make_summary(tagged=True, duplicate_sn=False, blank_ids=False):
+def make_summary(tagged=True, duplicate_sn=False, blank_ids=False, part_ids=None):
     """Classic waitForDutSummary dict: 2 tests x 3 DUTs in file 1.
 
     `tagged` controls the _T<n>C temperature tag on the part IDs — the
@@ -140,35 +140,52 @@ def make_summary(tagged=True, duplicate_sn=False, blank_ids=False):
     `duplicate_sn` re-uses SN541 on the third DUT (dutIndex 2) with the
     SAME temperature tag as the first — identical raw Part IDs, so the
     filter's exact-match rule drops the FIRST occurrence (1, 0).
-    `blank_ids` empties every Part ID (the filter must never match)."""
+    `blank_ids` empties every Part ID (the filter must never match).
+    `part_ids` overrides the whole per-DUT Part ID list verbatim (its
+    length IS the DUT count; data arrays pad with pass/NaN) — the
+    temperature-split tests build mixed tag/untagged rosters with it."""
 
     def part_id(base, temp):
         if blank_ids:
             return ""
         return f"{base}_T{temp}C" if tagged else base
 
-    duts = [
-        (1, 0, make_dut_info(part_id=part_id("SN541", 25))),
-        (
-            1,
-            1,
-            make_dut_info(
-                part_id=part_id("SN542", 25),
-                sw_bin="Bin 3",
-                xy=(4, -6),
-                dut_flag="Failed",
+    if part_ids is not None:
+        ids = part_ids
+        flagged = ["Passed", "Failed", "Passed"] + ["Passed"] * (len(ids) - 3)
+        duts = [(1, i, make_dut_info(part_id=pid, dut_flag=flag)) for i, (pid, flag) in enumerate(zip(ids, flagged))]
+    else:
+        duts = [
+            (1, 0, make_dut_info(part_id=part_id("SN541", 25))),
+            (
+                1,
+                1,
+                make_dut_info(
+                    part_id=part_id("SN542", 25),
+                    sw_bin="Bin 3",
+                    xy=(4, -6),
+                    dut_flag="Failed",
+                ),
             ),
-        ),
-        # duplicate_sn: dutIndex 2 carries dutIndex 0's EXACT part ID
-        # (base AND tag) — the filter matches raw strings, not SNs
-        (
-            1,
-            2,
-            make_dut_info(
-                part_id=part_id("SN541" if duplicate_sn else "SN543", 25 if duplicate_sn else 85)
+            # duplicate_sn: dutIndex 2 carries dutIndex 0's EXACT part ID
+            # (base AND tag) — the filter matches raw strings, not SNs
+            (
+                1,
+                2,
+                make_dut_info(
+                    part_id=part_id("SN541" if duplicate_sn else "SN543", 25 if duplicate_sn else 85)
+                ),
             ),
-        ),
-    ]
+        ]
+    n = len(duts)
+
+    def pad(values, flags):
+        values = list(values) + [np.nan] * (n - len(values))
+        flags = list(flags) + [0] * (n - len(flags))
+        return values, flags
+
+    ptr_values, ptr_flags = pad([1.0, 1.2, np.nan], [0, 0, -1])
+    ftr_values, ftr_flags = pad([0.0, 1.0, 0.0], [0, 0x80, 0])
     tests = [
         # parametric with limits (data row 16)
         dict(
@@ -178,7 +195,7 @@ def make_summary(tagged=True, duplicate_sn=False, blank_ids=False):
             llimit=0.5,
             hlimit=1.5,
             rec=REC.PTR,
-            data={1: ([1.0, 1.2, np.nan], [0, 0, -1])},
+            data={1: (ptr_values, ptr_flags)},
         ),
         # FTR (data row 17): die cells from the flag list
         dict(
@@ -189,11 +206,11 @@ def make_summary(tagged=True, duplicate_sn=False, blank_ids=False):
             hlimit=np.nan,
             rec=REC.FTR,
             vect_nam="PAT_TOP",
-            data={1: ([0.0, 1.0, 0.0], [0, 0x80, 0])},
+            data={1: (ftr_values, ftr_flags)},
         ),
     ]
     data, test_info, dut2ind, dut_info = {}, {}, {}, {}
-    dut2ind[1] = {0: 0, 1: 1, 2: 2}
+    dut2ind[1] = {dut_index: dut_index for dut_index in range(n)}
     dut_info[1] = {d[1]: d[2] for d in duts}
     for t in tests:
         test_tuple = (t["num"], 0, t["name"])
@@ -241,6 +258,8 @@ def build_generated(
     file_temperature=None,
     duplicate_sn=False,
     blank_ids=False,
+    part_ids=None,
+    split_temperature=False,
     hide_remeasured=False,
     with_dut=True,
     monkeypatch=None,
@@ -301,7 +320,7 @@ def build_generated(
 
     # GUI side: classic-protocol summary table, chart PNGs, stat rows
     gen.waitForDutSummary = lambda heads, sites, fids, testTuples: make_summary(
-        tagged=part_id_tagged, duplicate_sn=duplicate_sn, blank_ids=blank_ids
+        tagged=part_id_tagged, duplicate_sn=duplicate_sn, blank_ids=blank_ids, part_ids=part_ids
     )
     # the filter path must never reach the GUI for dutInfo when the DUT
     # sheet rendered; the stat-only selection stubs the light fetch with
@@ -320,6 +339,9 @@ def build_generated(
     if hide_remeasured:
         assert monkeypatch is not None, "hide_remeasured=True requires monkeypatch"
         monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
+    if split_temperature:
+        assert monkeypatch is not None, "split_temperature=True requires monkeypatch"
+        monkeypatch.setattr(getSetting().gen, "split_temperature", True)
 
     def fake_wait_for_image(testTuple, head, sites, fids, chartType):
         return io.BytesIO(PNG_BYTES)
@@ -1303,3 +1325,78 @@ class TestBinBannerFromFileInfo:
     def test_label_matching_normalizes_and_strips_colon(self):
         rows = [["Product ID: ", "P"], ["Sublot ID:", "S"]]
         assert bin_banner_from_file_info(rows) == "P / S"
+
+
+class TestTemperatureSplit:
+    """Split ON renders one extra sheet per distinct temperature (§7.4);
+    the base sheet and Test Statistics stay exactly as with the option OFF."""
+
+    SPLIT_IDS = ["SN541_T25C", "SN542_T-55C", "SN543_T125.5C"]
+
+    def split_generated(self, tmp_path, qapp, monkeypatch, part_ids=None, **kwargs):
+        return build_generated(
+            tmp_path, qapp,
+            part_ids=list(self.SPLIT_IDS) if part_ids is None else part_ids,
+            split_temperature=True, monkeypatch=monkeypatch, **kwargs
+        )
+
+    def test_split_sheets_exist_ascending_among_themselves(self, tmp_path, qapp, monkeypatch):
+        generated = self.split_generated(tmp_path, qapp, monkeypatch)
+        _, wb, _, _, _ = generated
+        names = wb.sheetnames
+        assert "DUT Summary - T-55°C" in names
+        assert "DUT Summary - T125.5°C" in names
+        assert "DUT Summary - T25°C" in names
+        # ascending by temperature among the splits: -55 < 25 < 125.5
+        # (pre-Task-8 truth: appended after the other sheets — Task 8
+        # pins the adjacent order)
+        i55 = names.index("DUT Summary - T-55°C")
+        i125 = names.index("DUT Summary - T125.5°C")
+        i25 = names.index("DUT Summary - T25°C")
+        assert i55 < i25 < i125
+
+    def test_each_split_carries_only_its_temperature(self, tmp_path, qapp, monkeypatch):
+        generated = self.split_generated(tmp_path, qapp, monkeypatch)
+        _, wb, _, _, _ = generated
+        assert wb["DUT Summary - T25°C"]["M15"].value == "SN541"
+        assert wb["DUT Summary - T-55°C"]["M15"].value == "SN542"
+        assert wb["DUT Summary - T125.5°C"]["M15"].value == "SN543"
+        # one die column per sheet: N15 is the spacer region everywhere
+        for name in ("DUT Summary - T25°C", "DUT Summary - T-55°C", "DUT Summary - T125.5°C"):
+            assert wb[name]["N15"].value in (None, "")
+
+    def test_unresolvable_dut_base_only(self, tmp_path, qapp, monkeypatch):
+        generated = self.split_generated(
+            tmp_path, qapp, monkeypatch,
+            part_ids=self.SPLIT_IDS + ["SN544"],  # no tag, no file temp
+        )
+        _, wb, _, _, _ = generated
+        # base sheet keeps all four DUTs
+        base_headers = [wb["DUT Summary"][f"{col}15"].value for col in "MNOP"]
+        assert base_headers == ["SN541", "SN542", "SN543", "SN544"]
+        # SN544 appears in NO split sheet
+        for name in ("DUT Summary - T25°C", "DUT Summary - T-55°C", "DUT Summary - T125.5°C"):
+            headers = [wb[name][f"{col}15"].value for col in "MN"]
+            assert "SN544" not in headers
+
+    def test_split_off_unchanged(self, tmp_path, qapp):
+        generated = build_generated(tmp_path, qapp, part_ids=list(self.SPLIT_IDS))
+        _, wb, _, _, _ = generated
+        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer Map"]
+
+    def test_single_temperature_no_split_sheets(self, tmp_path, qapp, monkeypatch):
+        generated = build_generated(
+            tmp_path, qapp,
+            part_ids=["SN541_T25C", "SN542_T25C", "SN543_T25C"],
+            split_temperature=True, monkeypatch=monkeypatch,
+        )
+        _, wb, _, _, _ = generated
+        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer Map"]
+
+    def test_split_does_not_touch_stats_kargs(self, tmp_path, qapp, monkeypatch):
+        generated = self.split_generated(tmp_path, qapp, monkeypatch, with_stat=True)
+        gen, _, _, _, _ = generated
+        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
+        assert stat_kargs and stat_kargs[0] == {
+            "testTuples": [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
+        }

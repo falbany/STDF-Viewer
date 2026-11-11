@@ -858,3 +858,26 @@ def prune_summary_view(summaryTable: dict, drop_pairs: set[tuple[int, int]]) -> 
         for fid, indices in summaryTable["dut2ind"].items()
     }
     return pruned
+
+
+def group_order_by_temperature(
+    order: list[tuple[int, int]],
+    dutInfo: dict,
+    file_temperatures: "dict | None",
+) -> "dict[float | None, list[tuple[int, int]]]":
+    """The ordered DUT list grouped by its resolved temperature (§7.4).
+
+    Every pair resolves through `resolve_dut_temperature` — the SAME
+    resolver the Temperature metadata row renders with, so what a sheet
+    shows and what the split groups by can never diverge. Groups are
+    keyed by exact float (no rounding — 25 and 25.000001 are two groups);
+    unresolvable DUTs land under the ``None`` key and never reach a split
+    sheet. Pair order inside each group follows `order`."""
+    groups: dict[float | None, list[tuple[int, int]]] = {}
+    for fid, dut_index in order:
+        info = dutInfo.get(fid, {}).get(dut_index)
+        part_id = info[1] if info is not None and len(info) > 1 else None
+        file_temperature = file_temperatures.get(fid) if file_temperatures else None
+        temperature = resolve_dut_temperature(part_id, file_temperature)
+        groups.setdefault(temperature, []).append((fid, dut_index))
+    return groups

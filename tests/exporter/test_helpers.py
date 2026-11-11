@@ -13,6 +13,7 @@ from deps.exporter.helpers import (
     fails_cached_flags,
     fails_cached_limits,
     fails_cached_limits_one_sided,
+    format_temperature_label,
     get_column_letter,
     has_numeric,
     numeric_values,
@@ -695,3 +696,13 @@ class TestOneSidedFailsCache:
         # helper itself reports everything inside an empty window (0 fails
         # on limits) so the CALLER decides the fallback
         assert fails_cached_limits_one_sided([0.5], None, None) == 0
+
+
+class TestFormatTemperatureLabel:
+    def test_int_temperatures_trim_the_decimal(self):
+        assert format_temperature_label(25.0) == "25"
+        assert format_temperature_label(-55.0) == "-55"
+
+    def test_fractional_temperatures_keep_their_decimals(self):
+        assert format_temperature_label(125.5) == "125.5"
+        assert format_temperature_label(-5.5) == "-5.5"
