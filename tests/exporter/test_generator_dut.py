@@ -1400,3 +1400,48 @@ class TestTemperatureSplit:
         assert stat_kargs and stat_kargs[0] == {
             "testTuples": [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
         }
+
+
+class TestDutBlockTabOrder:
+    """§7.4 placement ruling: the DUT-derived block (base + chunk overflow +
+    temperature splits) sits ADJACENT to the base sheet, ahead of Bin /
+    Trend / Wafer — sheets xlsxwriter appends mid-report otherwise land at
+    the workbook end."""
+
+    def test_order_dut_block_places_block_after_base(self):
+        from deps.exporter.generator import order_dut_block
+
+        fileinfo, dut, gdr, stat, trend, chunk, split_a = object(), object(), object(), object(), object(), object(), object()
+        worksheets = [fileinfo, dut, gdr, stat, trend, chunk, split_a]
+        block = [dut, chunk, split_a]
+        assert order_dut_block(worksheets, block) == [fileinfo, dut, chunk, split_a, gdr, stat, trend]
+
+    def test_single_member_block_is_identity(self):
+        from deps.exporter.generator import order_dut_block
+
+        fileinfo, dut, stat = object(), object(), object()
+        worksheets = [fileinfo, dut, stat]
+        assert order_dut_block(worksheets, [dut]) == worksheets
+
+    def test_empty_block_is_identity(self):
+        from deps.exporter.generator import order_dut_block
+
+        worksheets = [object(), object()]
+        assert order_dut_block(worksheets, []) == worksheets
+
+    def test_split_sheets_adjacent_to_base_sheet(self, tmp_path, qapp, monkeypatch):
+        generated = build_generated(
+            tmp_path, qapp,
+            part_ids=["SN541_T25C", "SN542_T-55C", "SN543_T125.5C"],
+            split_temperature=True, monkeypatch=monkeypatch,
+        )
+        _, wb, _, _, _ = generated
+        assert wb.sheetnames == [
+            "DUT Summary",
+            "DUT Summary - T-55°C",
+            "DUT Summary - T25°C",
+            "DUT Summary - T125.5°C",
+            "Trend Chart",
+            "Bin Chart",
+            "Wafer Map",
+        ]

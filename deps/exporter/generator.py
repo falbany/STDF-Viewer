@@ -163,6 +163,23 @@ _BANNER_SUBLOT_LABEL = "Sublot ID"
 _FILE_INFO_TEMPERATURE_LABEL = "Test Temperature"
 
 
+def order_dut_block(worksheets: list, block: list) -> list:
+    """Stable reorder placing the DUT-derived `block` contiguously directly
+    after its first member (the base DUT sheet) — §7.4's tab-order ruling.
+
+    The base sheet is already in `worksheets` at its creation position;
+    chunk-overflow / split sheets sit at the workbook end. Everything
+    outside the block keeps its relative order. Identity when the block
+    has no more than one member (base-only exports render in place) or
+    nothing to place."""
+    if len(block) <= 1:
+        return worksheets
+    base, derived = block[0], block[1:]
+    base_at = worksheets.index(base)
+    without_derived = [ws for ws in worksheets if ws not in derived]
+    return without_derived[: base_at + 1] + derived + without_derived[base_at + 1 :]
+
+
 def bin_banner_from_file_info(rows: list) -> "str | None":
     """ "{Product ID} / {Sublot ID}" per file column, files joined " | "
     (ninth wave banner text for the Bin sheet's Title row).
@@ -1317,6 +1334,18 @@ class ModernReportGenerator(reportGenerator):
                 for key in (ReportSelection.Trend, ReportSelection.Histo):
                     self._row[key] = self._row.get(key, 0) + 2
         finally:
+            # §7.4 placement ruling: sheets xlsxwriter appends mid-report
+            # land at the workbook end — reposition the DUT-derived block
+            # (base + chunk overflow + temperature splits) so it sits
+            # adjacent to the base sheet. Tab order derives from the
+            # worksheet list at close(), so the reposition is the whole
+            # job. PRIVATE-LIST DEPENDENCY: Workbook.worksheets_objs is
+            # pinned by TestDutBlockTabOrder (pure + integration) —
+            # re-verify on xlsxwriter version bumps.
+            if self._dut_sheet_block:
+                self._wb.worksheets_objs = order_dut_block(
+                    self._wb.worksheets_objs, self._dut_sheet_block
+                )
             self._wb.close()
             # xlsxwriter gap completion (charts.py): inject the data-label
             # show* zeros + <c:plotVisOnly val="0"/> it cannot emit — run on
