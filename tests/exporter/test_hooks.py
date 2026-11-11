@@ -1,11 +1,18 @@
-"""Tests for Modern Export hooks: persisted settings field (Task 9).
+"""Tests for Modern Export hooks: persisted settings fields + the stats
+exclusion hook.
 
 GeneralConfig gains `modern_export` (alias "Modern Export", default True)
-so the export dialog's "Modern Report" checkbox state survives restarts.
-The UI/uic wiring is verified by import checks plus the full suite; these
-tests are pure config, no Qt/GUI required.
+so the export dialog's "Modern Report" checkbox state survives restarts;
+the re-measure feature adds `hide_remeasured` / `split_temperature` and
+the pure `apply_dut_exclusion` numpy mask used by
+DataInterface.getTestStatistics. The UI/uic wiring is verified by import
+checks plus the full suite; these tests are pure config/numpy, no
+Qt/GUI required.
 """
 
+import numpy as np
+
+from deps.DataInterface import apply_dut_exclusion
 from deps.SharedSrc import SettingParams
 
 
@@ -58,3 +65,44 @@ def test_split_temperature_round_trips():
     dumped = params.model_dump(by_alias=True)
     assert dumped["General"]["Split Temperature"] is True
     assert params.gen.split_temperature is True
+
+
+def ptr_dict():
+    """A classic getTestDataFromHeadSite PTR result: three DUT indices
+    with matching data/flag lists."""
+    return {
+        "dutList": np.asarray([0, 1, 2]),
+        "dataList": np.asarray([1.0, 2.0, 3.0]),
+        "flagList": np.asarray([0, 0, 1]),
+    }
+
+
+class TestApplyDutExclusion:
+    def test_ptr_dict_masks_all_lists(self):
+        d = ptr_dict()
+        masked = apply_dut_exclusion(d, 1, {1: {1}})
+        assert masked["dutList"].tolist() == [0, 2]
+        assert masked["dataList"].tolist() == [1.0, 3.0]
+        assert masked["flagList"].tolist() == [0, 1]
+
+    def test_mpr_state_list_masked_too(self):
+        d = {
+            "dutList": np.asarray([0, 1]),
+            "dataList": np.asarray([1.0, 2.0]),
+            "stateList": np.asarray([1, 0]),
+            "flagList": np.asarray([0, 1]),
+        }
+        masked = apply_dut_exclusion(d, 1, {1: {1}})
+        assert masked["stateList"].tolist() == [1]
+
+    def test_none_exclusion_returns_same_object(self):
+        d = ptr_dict()
+        assert apply_dut_exclusion(d, 1, None) is d
+
+    def test_unknown_fid_returns_same_object(self):
+        d = ptr_dict()
+        assert apply_dut_exclusion(d, 7, {1: {0}}) is d
+
+    def test_all_excluded_empties_the_dict(self):
+        d = ptr_dict()
+        assert apply_dut_exclusion(d, 1, {1: {0, 1, 2}}) == {}

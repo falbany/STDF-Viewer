@@ -102,7 +102,11 @@ from deps.exporter.matrix import (
     build_dut_summary_spec,
     prune_summary_view,
 )
-from deps.exporter.dedup import compute_remeasure_drops  # fork(falbany): re-measure filter
+from deps.exporter.dedup import (  # fork(falbany): re-measure filter
+    compute_remeasure_drops,
+    dut_info_from_partial,
+    drops_to_exclusion,
+)
 from deps.exporter.sheets import (
     insert_report_image,
     plain_table_spec,
@@ -687,8 +691,17 @@ class ModernReportGenerator(reportGenerator):
         if StatSheet is None:
             return
 
+        # re-measure filter (§7.2): Test Statistics honors the same kept-DUT
+        # set as the DUT Summary — the stored drop-set when the DUT sheet
+        # ran, a light dutInfo-only fetch otherwise (stat-only exports)
+        kargs = {"testTuples": testTuples}
+        if getSetting().gen.hide_remeasured:
+            drops = self._resolve_remeasure_drops()
+            if drops:
+                kargs["dut_exclusion"] = drops_to_exclusion(drops)
+
         dataTable = self.waitForDataList(
-            heads, sites, self.selectedFiles, tab.Trend, {"testTuples": testTuples}
+            heads, sites, self.selectedFiles, tab.Trend, kargs
         )
         if not dataTable:
             return
@@ -795,6 +808,23 @@ class ModernReportGenerator(reportGenerator):
     # ----------------------------------------------------------------------
     # DUT Summary matrix + chart sheets (Task 8)
     # ----------------------------------------------------------------------
+
+    def _resolve_remeasure_drops(self) -> "set | set()":
+        """The filter's drop-set, either direction of the sheet selection.
+
+        writeDUT_Summary stores its drop-set before writeStatistic runs
+        (DUT sheet selected → reuse it; an empty set means "ran, nothing
+        to drop" — never refetch). None means the DUT sheet did not
+        render: the light dutInfo-only fetch answers, and an empty fetch
+        degrades gracefully to an empty drop-set."""
+        if self._remeasure_drops is not None:
+            return self._remeasure_drops
+        partial = self.waitForDutInfo(
+            self.selectedHeads, self.selectedSites, self.selectedFiles
+        )
+        return compute_remeasure_drops(
+            dut_info_from_partial(partial or {}), self.selectedFiles
+        )
 
     def _order_and_ids(self, summaryTable, order_filter=None):
         """The classic `(fid, dutIndex)` display order and its per-column

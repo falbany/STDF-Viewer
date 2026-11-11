@@ -242,6 +242,7 @@ def build_generated(
     duplicate_sn=False,
     blank_ids=False,
     hide_remeasured=False,
+    with_dut=True,
     monkeypatch=None,
 ):
     """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus Stat when
@@ -271,6 +272,12 @@ def build_generated(
         # classic sheet-creation order: DUT < Stat < Trend
         selection.insert(1, ReportSelection.Stat)
         totalLoopCnt += 2  # Stat: +1 per data row
+    if not with_dut:
+        # stat-only selection: the DUT sheet (its info tick + 2 test
+        # columns) never renders — the filter's stat-only fallback fetch
+        # path (§7.2) is what still honors the drop-set
+        selection.remove(ReportSelection.DUT)
+        totalLoopCnt -= 3
     if with_file_info:
         # classic sheet-creation order: FileInfo first (+1 loop tick)
         selection.insert(0, ReportSelection.FileInfo)
@@ -297,10 +304,19 @@ def build_generated(
         tagged=part_id_tagged, duplicate_sn=duplicate_sn, blank_ids=blank_ids
     )
     # the filter path must never reach the GUI for dutInfo when the DUT
-    # sheet rendered (Task 6 will move this stub into the stat-only tests)
+    # sheet rendered; the stat-only selection stubs the light fetch with
+    # the partial dutInfo shape (getPartialDUTInfoOnCondition rows)
     gen.waitForDutInfo = lambda *args: (_ for _ in ()).throw(
         AssertionError("waitForDutInfo must not be called when the DUT sheet ran")
     )
+    gen._captured_stat_kargs = []
+    if not with_dut:
+        gen.waitForDutInfo = lambda heads, sites, fids: {
+            1: {
+                0: ("SN541", "", "Head 1 - Site 1", "Failed - 0x08"),
+                2: ("SN541", "", "Head 1 - Site 1", "Passed - 0x00"),
+            }
+        }
     if hide_remeasured:
         assert monkeypatch is not None, "hide_remeasured=True requires monkeypatch"
         monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
@@ -372,6 +388,14 @@ def build_generated(
         return [["TREND-ROW", "mean", 1.1]]
 
     gen.waitForDataList = fake_wait_for_data_list
+
+    real_fake = gen.waitForDataList
+
+    def capturing_wait_for_data_list(heads, sites, fids, chartType, kargs):
+        gen._captured_stat_kargs.append((chartType, dict(kargs)))
+        return real_fake(heads, sites, fids, chartType, kargs)
+
+    gen.waitForDataList = capturing_wait_for_data_list
 
     # writeDUT_Summary fetches the File Info table for the temperature
     # fallback regardless of the sheet selection — the stub answers from
@@ -1096,6 +1120,60 @@ class TestRemeasureFilterPrune:
 
         summary = make_summary()
         assert prune_summary_view(summary, set()) is summary
+
+
+class TestStatsExclusionChain:
+    """G3: Test Statistics honors the drop-set in every selection — via
+    the kargs hand-off when the DUT sheet ran, via the light dutInfo-only
+    fetch when it did not."""
+
+    def test_dut_selected_kargs_carry_exclusion(self, tmp_path, qapp, monkeypatch):
+        generated = build_generated(
+            tmp_path,
+            qapp,
+            with_stat=True,
+            duplicate_sn=True,
+            hide_remeasured=True,
+            monkeypatch=monkeypatch,
+        )
+        gen, _, _, _, _ = generated
+        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
+        assert stat_kargs and stat_kargs[0].get("dut_exclusion") == {1: {0}}
+
+    def test_dut_selected_filter_off_no_exclusion_key(self, tmp_path, qapp):
+        generated = build_generated(tmp_path, qapp, with_stat=True, duplicate_sn=True)
+        gen, _, _, _, _ = generated
+        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
+        assert stat_kargs and "dut_exclusion" not in stat_kargs[0]
+
+    def test_dut_selected_never_fetches_dutinfo(self, tmp_path, qapp, monkeypatch):
+        # waitForDutInfo raises when the DUT sheet ran — the run succeeding
+        # is the assertion
+        build_generated(
+            tmp_path,
+            qapp,
+            with_stat=True,
+            duplicate_sn=True,
+            hide_remeasured=True,
+            monkeypatch=monkeypatch,
+        )
+
+    def test_stat_only_fetches_dutinfo_and_excludes(self, tmp_path, qapp, monkeypatch):
+        generated = build_generated(
+            tmp_path,
+            qapp,
+            with_stat=True,
+            duplicate_sn=True,
+            hide_remeasured=True,
+            with_dut=False,
+            monkeypatch=monkeypatch,
+        )
+        gen, wb, _, _, _ = generated
+        # the DUT sheet is absent; the fallback fetch ran (stub did not raise)
+        assert "DUT Summary" not in wb.sheetnames
+        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
+        # partial fetch: SN541 at dutIndex 0 and 2 → first occurrence drops
+        assert stat_kargs and stat_kargs[0].get("dut_exclusion") == {1: {0}}
 
 
 class TestStatFtrCacheDetection:

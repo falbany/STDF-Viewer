@@ -1534,6 +1534,16 @@ class MyWindow(QtWidgets.QMainWindow):
         Return data for `DutSummary` content
         '''
         return self.data_interface.getDutSummaryReportContent(testTuples, heads, sites, fids)
+
+
+    def getDutInfoForReport(self, heads: list[int], sites: list[int], fids: list[int]) -> dict:
+        # fork(falbany): re-measure filter — light dutInfo-only fetch for
+        # stat-only exports (Part ID + DUT Flag suffice for the drop-set;
+        # superseded DUTs included, same as the DUT Summary fetch)
+        return {
+            fid: self.data_interface.DatabaseFetcher.getPartialDUTInfoOnCondition(heads, sites, fid)
+            for fid in fids
+        }
     
     
     def getDatalogForReport(self, fids: list[int]):
@@ -1589,7 +1599,8 @@ class MyWindow(QtWidgets.QMainWindow):
         data = []
         if tabType in [tab.Trend, tab.Histo, tab.PPQQ]:
             testTuples = kargs["testTuples"]
-            d = self.data_interface.getTestStatistics(testTuples, heads, sites, fids)
+            # fork(falbany): re-measure filter — honor the drop-set in stats
+            d = self.data_interface.getTestStatistics(testTuples, heads, sites, fids, dut_exclusion=kargs.get("dut_exclusion"))
             # add translated hheader, put an empty string for matching
             data.append([""] + [self.tr(h) for h in d["HHeader"]])
             # vheader + statistics

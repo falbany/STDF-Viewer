@@ -18,6 +18,26 @@ from deps.DatabaseFetcherRust import DatabaseFetcherRust
 from deps.SharedSrc import *
 
 
+# fork(falbany): re-measure filter — pure numpy mask shared by
+# getTestStatistics. `dut_exclusion` is {fid: {dutIndex, ...}}; None (or
+# a fid with no entry) leaves the dict untouched so upstream behavior is
+# byte-identical by default.
+def apply_dut_exclusion(testDataDict: dict, fid: int, dut_exclusion: dict | None) -> dict:
+    if not dut_exclusion:
+        return testDataDict
+    excluded = dut_exclusion.get(fid)
+    if not excluded:
+        return testDataDict
+    keep = np.asarray([dut not in excluded for dut in testDataDict.get("dutList", [])])
+    if not keep.any():
+        return {}
+    masked = dict(testDataDict)
+    for key in ("dutList", "dataList", "flagList", "stateList"):
+        if key in testDataDict:
+            masked[key] = np.asarray(testDataDict[key])[keep]
+    return masked
+
+
 class DataInterface:
     '''
     `DataInterface` provides APIs for STDF-Viewer UI to retrieve
@@ -479,7 +499,7 @@ class DataInterface:
             return stop.value
     
     
-    def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], selectFiles: list[int]):
+    def getTestStatistics(self, testTuples: list[tuple], selectHeads:list[int], selectSites:list[int], selectFiles: list[int], dut_exclusion: dict | None = None):
         '''
         Generate data of `Test Statistic` table when `Trend`/`Histo`/`Info` tab is activated
         
@@ -513,7 +533,10 @@ class DataInterface:
         floatFormat = getSetting().getFloatFormat()
         for testTup, head, site, fid in itertools.product(*default_order):
             testDataDict = self.getTestDataFromHeadSite(testTup, [head], [site], fid)
-            # if current file doesn't have testID, 
+            # fork(falbany): re-measure filter — drop the excluded DUTs of
+            # this file before stats are computed (None = untouched)
+            testDataDict = apply_dut_exclusion(testDataDict, fid, dut_exclusion)
+            # if current file doesn't have testID,
             # `testDataDict` will be emtpy
             if testDataDict:
                 test_num, pmr, test_name = testTup
@@ -551,7 +574,6 @@ class DataInterface:
                 continue
         
         return {"VHeader": vHeaderLabels, "HHeader": hHeaderLabels, "Rows": rowList}
-    
     
     def getBinStatistics(self, selectHeads:list[int], selectSites:list[int], selectFiles: list[int]):
         '''

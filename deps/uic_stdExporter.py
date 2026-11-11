@@ -183,6 +183,9 @@ class signals(QtCore.QObject):
     
     # selected heads, selected sites, selected files, testTuples
     retrieveDutSummarySignal = Signal(list, list, list, list)
+
+    # fork(falbany): light dutInfo-only fetch (re-measure filter, stat-only)
+    retrieveDutInfoSignal = Signal(list, list, list)
     
     
     
@@ -246,6 +249,16 @@ class reportGenerator(QtCore.QObject):
     def waitForDutSummary(self, selectedHeads: list[int], selectedSites: list[int], selectedFiles: list[int], testTuples: list):
         self.mutex.lock()
         self.retrieveDutSummarySignal.emit(selectedHeads, selectedSites, selectedFiles, testTuples)
+        self.condWait.wait(self.mutex)
+        self.mutex.unlock()
+        return self.channel.dataListChannel
+
+
+    def waitForDutInfo(self, selectedHeads: list[int], selectedSites: list[int], selectedFiles: list[int]) -> dict:
+        # fork(falbany): re-measure filter — light dutInfo-only fetch
+        # (stat-only exports; Part ID + DUT Flag suffice for the drop-set)
+        self.mutex.lock()
+        self.retrieveDutInfoSignal.emit(selectedHeads, selectedSites, selectedFiles)
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         return self.channel.dataListChannel
@@ -666,6 +679,7 @@ class progressDisplayer(QtWidgets.QDialog):
         self.signals.retrieveDataListSignal.connect(self.getDataListFromParentMethod)
         self.signals.retrieveTableDataSignal.connect(self.getTableDataFromParent)
         self.signals.retrieveDutSummarySignal.connect(self.getDutSummaryFromParent)
+        self.signals.retrieveDutInfoSignal.connect(self.getDutInfoFromParent)  # fork(falbany): re-measure filter
         
         
     # fork(falbany): pluggable report generator
@@ -778,6 +792,15 @@ class progressDisplayer(QtWidgets.QDialog):
     @Slot(list, list, list, list)
     def getDutSummaryFromParent(self, selectedHeads: list, seletedSites: list, selectedFiles: list, testTuples: list):
         self.channel.dataListChannel = self.mainUI.getDUTSummaryForReport(selectedHeads, seletedSites, selectedFiles, testTuples)
+        self.mutex.lock()   # wait the mutex to unlock once the thread paused
+        self.condWait.wakeAll()
+        self.mutex.unlock()
+
+
+    @Slot(list, list, list)
+    def getDutInfoFromParent(self, selectedHeads: list, selectedSites: list, selectedFiles: list):
+        # fork(falbany): re-measure filter — light dutInfo-only fetch
+        self.channel.dataListChannel = self.mainUI.getDutInfoForReport(selectedHeads, selectedSites, selectedFiles)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()
