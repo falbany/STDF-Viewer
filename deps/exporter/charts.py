@@ -93,6 +93,25 @@ BIN_DONUT_HOLE_SIZE = 55
 # element" (it IS xlsxwriter's default) — same rendering, different bytes.
 BIN_CHART_STYLE = 2
 
+# Modern categorical slice palette (2026-11-11 user ruling "modernize,
+# PPT-ready"): explicit per-slice colors cycling this order — the same
+# accent family the sheet tokens use — with white slice borders for the
+# flat modern separation. REVERSES the wave-7 no-per-slice ruling; the
+# charts also drop the chart-area frame so a copy-paste into PowerPoint
+# lands as a native, presentation-clean chart (xlsxwriter embeds the
+# cached data, so the pasted chart survives without the workbook).
+BIN_SLICE_PALETTE = (
+    "1E40AF",  # blue (primary)
+    "0EA5E9",  # sky
+    "16A34A",  # green
+    "EA580C",  # orange
+    "7C3AED",  # violet
+    "DC2626",  # red
+    "0D9488",  # teal
+    "CA8A04",  # amber
+)
+BIN_SLICE_BORDER_HEX = "FFFFFF"
+
 # Donut data-label text: white bold Times New Roman 9 — readable on the
 # saturated palette slices (ninth-wave print fix).
 BIN_LABEL_FONT = {"name": FONT_NAME, "size": 9, "bold": True, "color": "#FFFFFF"}
@@ -356,9 +375,22 @@ def build_bin_donut(
         ws.write(row0 + index, helper_col + 1, int(count))
 
     chart = wb.add_chart({"type": "doughnut"})
-    chart.set_title({"name": title})
+    chart.set_title(
+        {
+            "name": title,
+            "name_font": {
+                "name": "Calibri",
+                "size": 12,
+                "bold": True,
+                "color": "#1F2937",
+            },
+        }
+    )
     chart.set_hole_size(BIN_DONUT_HOLE_SIZE)
     chart.set_style(BIN_CHART_STYLE)
+    # frameless chart area (2026-11-11): the dated gray border is gone and
+    # a paste into PowerPoint adopts the slide background cleanly
+    chart.set_chartarea({"border": {"none": True}, "fill": {"none": True}})
     chart.add_series(
         {
             # values = the data rows only; the "Count" header cell becomes
@@ -369,6 +401,16 @@ def build_bin_donut(
             "categories": f"='{sheet}'!${label_letter}${helper_row + 1}:${label_letter}${helper_row + len(bins)}",
             "name": f"='{sheet}'!${count_letter}${helper_row}",
             "data_labels": {"percentage": True, "font": BIN_LABEL_FONT},
+            # per-slice modern palette with white borders (cycled)
+            "points": [
+                {
+                    "fill": {
+                        "color": f"#{BIN_SLICE_PALETTE[i % len(BIN_SLICE_PALETTE)]}"
+                    },
+                    "border": {"color": f"#{BIN_SLICE_BORDER_HEX}"},
+                }
+                for i in range(len(bins))
+            ],
         }
     )
     chart.set_legend({"position": "right"})  # mockup: right-hand legend

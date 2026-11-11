@@ -668,7 +668,9 @@ class TestChartSheets:
             assert '<c:plotVisOnly val="0"/>' in xml  # hidden helpers plot
             assert '<c:showVal val="0"/>' in xml  # completion pinned the flags
             assert '<c:showPercent val="1"/>' in xml
-            assert "<c:dPt>" not in xml  # builtin palette, no per-slice fills
+            # 2026-11-11 modern palette: per-slice dPt colors (wave-7
+            # no-per-slice ruling reversed)
+            assert "<c:dPt>" in xml
             assert "<c:style" not in xml  # style 2 = xlsxwriter default
         with zipfile.ZipFile(report_path) as zf:
             # the chart anchors live in the Bin sheet's drawing (drawing1
@@ -683,13 +685,17 @@ class TestChartSheets:
         assert sorted(anchors) == [(0, 8), (3, 8)]
         assert ws_row_height(generated, "Bin Chart", 9) == pytest.approx(250, abs=0.3)
 
-    def test_bin_charts_use_builtin_palette(self, generated):
-        # seventh wave (ruled consequence): no per-slice DataPoint fills
+    def test_bin_charts_use_modern_palette(self, generated):
+        # 2026-11-11: explicit per-slice modern palette colors
+        from deps.exporter.charts import BIN_SLICE_PALETTE
+
         _, _, report_path, _, _ = generated
         with zipfile.ZipFile(report_path) as zf:
             for name in zf.namelist():
                 if name.startswith("xl/charts/chart") and name.endswith(".xml"):
-                    assert b"<c:dPt>" not in zf.read(name), name
+                    data = zf.read(name).decode()
+                    assert "<c:dPt>" in data, name
+                    assert BIN_SLICE_PALETTE[0] in data, name
 
     def test_bin_helper_block_hidden_columns(self, generated):
         # helper data in fixed far columns BJ/BK, header "Bin"/"Count" +

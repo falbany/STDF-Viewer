@@ -1352,11 +1352,14 @@ class TestMatrixSparklines:
         # sheet-qualified absolute ranges
         assert "DUT Summary!M16:O16" in xml or "'DUT Summary'!M16:O16" in xml
         assert "DUT Summary!M18:O18" in xml or "'DUT Summary'!M18:O18" in xml
-        # pinned visual tokens
+        # pinned visual tokens (2026-11-11 user ruling: high RED, low
+        # GREEN — swapped — and negative points displayed, also red)
         assert 'colorSeries rgb="FF1E40AF"' in xml
-        assert 'colorHigh rgb="FF16A34A"' in xml
-        assert 'colorLow rgb="FFDC2626"' in xml
+        assert 'colorHigh rgb="FFDC2626"' in xml
+        assert 'colorLow rgb="FF16A34A"' in xml
+        assert 'colorNegative rgb="FFDC2626"' in xml
         assert 'high="1"' in xml and 'low="1"' in xml
+        assert 'negative="1"' in xml
         assert 'displayEmptyCellsAs="gap"' in xml
 
     def test_column_type_for_ftr_row(self):

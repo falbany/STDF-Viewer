@@ -508,8 +508,10 @@ def _hide_mirror_columns(ws, spec, theme):
 def _add_sparklines(ws, spec):
     """Trend sparklines (migration upgrade 2): one per spec entry, ranges
     qualified with the sheet name (chunk sheets qualify their own name).
-    Visual tokens per the user ruling: theme-blue line, green high / red
-    low points, blank die cells as gaps; FTR rows use column type."""
+    Visual tokens per the 2026-11-11 user ruling: theme-blue line, RED
+    high / GREEN low points (swapped from the original green-high), red
+    negative points displayed, blank die cells as gaps; FTR rows use
+    column type."""
     trend_col = spec.get("trend_col")
     if not trend_col:
         return
@@ -524,8 +526,10 @@ def _add_sparklines(ws, spec):
                 "series_color": "#1E40AF",
                 "high_point": True,
                 "low_point": True,
-                "high_color": "#16A34A",
-                "low_color": "#DC2626",
+                "high_color": "#DC2626",
+                "low_color": "#16A34A",
+                "negative_points": True,
+                "negative_color": "#DC2626",
                 "empty_cells": "gap",
             },
         )

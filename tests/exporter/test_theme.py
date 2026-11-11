@@ -321,7 +321,7 @@ class TestTabColors:
             "file_info": "94A3B8",
             "dut": "1E40AF",
             "gdr": "94A3B8",
-            "stat": "1E40AF",
+            "stat": "16A34A",  # 2026-11-11 user ruling: green
             "trend": "0EA5E9",
             "histo": "0EA5E9",
             "bin": "EA580C",

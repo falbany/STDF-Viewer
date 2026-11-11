@@ -1448,7 +1448,9 @@ class TestXlsxwriterMigration:
     def test_tab_colors_wired(self, generated):
         _, wb, _, _, _ = generated
         assert wb["File Info"].sheet_properties.tabColor.rgb == "FF94A3B8"
-        assert wb["Test Statistics"].sheet_properties.tabColor.rgb == "FF1E40AF"
+        assert (
+            wb["Test Statistics"].sheet_properties.tabColor.rgb == "FF16A34A"
+        )  # green (2026-11-11)
 
     def test_footers_written(self, generated, report_path=None):
         import zipfile

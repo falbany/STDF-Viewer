@@ -702,11 +702,23 @@ class TestBuildBinDonut:
         assert col_dim(ws, "BJ").hidden is True
         assert col_dim(ws, "BK").hidden is True
 
-    def test_no_per_slice_data_points_builtin_palette(self):
-        # seventh wave (ruled consequence): no per-slice color overrides —
-        # Excel's built-in style-2 palette colors the slices
+    def test_modern_slice_palette_per_point(self):
+        # 2026-11-11 user ruling ("modernize, PPT-ready"): explicit
+        # per-slice colors from the modern categorical palette with white
+        # slice borders — REVERSES the wave-7 no-per-slice ruling
+        from deps.exporter.charts import BIN_SLICE_PALETTE
+
         _ws, xml, _book = self.render()
-        assert "<c:dPt>" not in xml
+        assert xml.count("<c:dPt>") == len(BINS)  # one dPt per slice
+        assert f'<a:srgbClr val="{BIN_SLICE_PALETTE[0]}"/>' in xml
+        assert f'<a:srgbClr val="{BIN_SLICE_PALETTE[1]}"/>' in xml
+        # white slice borders (the flat modern separation)
+        assert '<a:ln><a:solidFill><a:srgbClr val="FFFFFF"/>' in xml
+
+    def test_chart_area_frameless(self):
+        # modern look + native paste into PowerPoint: no chart-area border
+        _ws, xml, _book = self.render()
+        assert "<a:ln><a:noFill/></a:ln>" in xml  # chartarea border none
 
     def test_empty_bins_noop(self):
         ws, _xml, _book = self.render(bins=[])
