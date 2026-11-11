@@ -237,8 +237,13 @@ def col_range(letter_first: str, letter_last: str, row: int) -> str:
 
 
 def stat_formula(name: str, row: int, first: str, last: str) -> str:
-    """Row statistic over the die range: ``=MIN(M17:AZ17)`` style."""
-    return f"={name}({first}{row}:{last}{row})"
+    """Row statistic over the die range, IFERROR-guarded (2026-11-11 user
+    ruling: resilience): ``=IFERROR(AVERAGE(M17:AZ17),"")`` style.
+
+    AVERAGE/STDEV error on all-blank / too-few ranges; MIN/MAX never error
+    (an empty range computes 0) but take the same guard for uniformity —
+    the error branch always blanks the cell."""
+    return f'=IFERROR({name}({first}{row}:{last}{row}),"")'
 
 
 def cp_formula(row: int, first_die: str, last_die: str) -> str:
@@ -267,15 +272,20 @@ def cpk_formula(row: int, first_die: str, last_die: str) -> str:
 
 
 def fails_formula_limits(row: int, first: str, last: str) -> str:
-    """FAILS count vs low/high limits (E/F), ignoring blank DUT cells."""
+    """FAILS count vs low/high limits (E/F), ignoring blank DUT cells —
+    IFERROR-guarded (2026-11-11) like every DUT Summary formula."""
     rng = col_range(first, last, row)
-    return f'=SUMPRODUCT(({rng}<>"")*((E{row}<>"")*({rng}<E{row})+(F{row}<>"")*({rng}>F{row})))'
+    return (
+        f'=IFERROR(SUMPRODUCT(({rng}<>"")'
+        f'*((E{row}<>"")*({rng}<E{row})+(F{row}<>"")*({rng}>F{row}))),"")'
+    )
 
 
 def fails_formula_flags(row: int, first: str, last: str) -> str:
-    """FAILS count of 0/1 flag cells over the hidden mirror range."""
+    """FAILS count of 0/1 flag cells over the hidden mirror range —
+    IFERROR-guarded (2026-11-11) like every DUT Summary formula."""
     mrng = col_range(first, last, row)
-    return f'=SUMPRODUCT(({mrng}<>"")*({mrng}=1))'
+    return f'=IFERROR(SUMPRODUCT(({mrng}<>"")*({mrng}=1)),"")'
 
 
 def metadata_stat_formulas(

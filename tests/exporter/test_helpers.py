@@ -236,10 +236,10 @@ class TestColumns:
 class TestStatFormula:
     @pytest.mark.parametrize("name", ["MIN", "MAX", "AVERAGE", "STDEV"])
     def test_spec_names(self, name):
-        assert stat_formula(name, 17, "M", "AZ") == f"={name}(M17:AZ17)"
+        assert stat_formula(name, 17, "M", "AZ") == f'=IFERROR({name}(M17:AZ17),"")'
 
     def test_other_row(self):
-        assert stat_formula("MIN", 18, "M", "N") == "=MIN(M18:N18)"
+        assert stat_formula("MIN", 18, "M", "N") == '=IFERROR(MIN(M18:N18),"")'
 
 
 class TestCpFormula:
@@ -280,13 +280,13 @@ class TestFailsFormulas:
     def test_limits_variant(self):
         assert (
             fails_formula_limits(17, "M", "AZ")
-            == '=SUMPRODUCT((M17:AZ17<>"")*((E17<>"")*(M17:AZ17<E17)+(F17<>"")*(M17:AZ17>F17)))'
+            == '=IFERROR(SUMPRODUCT((M17:AZ17<>"")*((E17<>"")*(M17:AZ17<E17)+(F17<>"")*(M17:AZ17>F17))),"")'
         )
 
     def test_flags_variant_over_mirror_range(self):
         assert (
             fails_formula_flags(17, "Q", "S")
-            == '=SUMPRODUCT((Q17:S17<>"")*(Q17:S17=1))'
+            == '=IFERROR(SUMPRODUCT((Q17:S17<>"")*(Q17:S17=1)),"")'
         )
 
     def test_ftr_variant_removed(self):
@@ -359,36 +359,36 @@ class TestParseBin:
 class TestMetadataStatFormulas:
     def test_mean_true_returns_min_max_mean_triple(self):
         assert metadata_stat_formulas(17, "M", "AZ", mean=True) == (
-            "=MIN(M17:AZ17)",
-            "=MAX(M17:AZ17)",
-            "=AVERAGE(M17:AZ17)",
+            '=IFERROR(MIN(M17:AZ17),"")',
+            '=IFERROR(MAX(M17:AZ17),"")',
+            '=IFERROR(AVERAGE(M17:AZ17),"")',
         )
 
     def test_mean_false_drops_average(self):
         # third wave: only Temperature keeps a Mean cell — other numeric
         # metadata rows take the (MIN, MAX) pair and pad Mean with a dash
         assert metadata_stat_formulas(20, "M", "O", mean=False) == (
-            "=MIN(M20:O20)",
-            "=MAX(M20:O20)",
+            '=IFERROR(MIN(M20:O20),"")',
+            '=IFERROR(MAX(M20:O20),"")',
         )
 
     def test_std_true_appends_stdev_after_mean(self):
         # fourth wave: the Test Time row keeps Mean AND St. Dev. (sample
         # stdev, same STDEV semantic as the data rows' St. Dev. column)
         assert metadata_stat_formulas(21, "M", "O", mean=True, std=True) == (
-            "=MIN(M21:O21)",
-            "=MAX(M21:O21)",
-            "=AVERAGE(M21:O21)",
-            "=STDEV(M21:O21)",
+            '=IFERROR(MIN(M21:O21),"")',
+            '=IFERROR(MAX(M21:O21),"")',
+            '=IFERROR(AVERAGE(M21:O21),"")',
+            '=IFERROR(STDEV(M21:O21),"")',
         )
 
     def test_std_true_without_mean(self):
         # the helper stays general: STDEV without AVERAGE is legal even
         # though no metadata row uses that combination today
         assert metadata_stat_formulas(22, "M", "O", mean=False, std=True) == (
-            "=MIN(M22:O22)",
-            "=MAX(M22:O22)",
-            "=STDEV(M22:O22)",
+            '=IFERROR(MIN(M22:O22),"")',
+            '=IFERROR(MAX(M22:O22),"")',
+            '=IFERROR(STDEV(M22:O22),"")',
         )
 
 

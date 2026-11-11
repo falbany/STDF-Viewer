@@ -568,10 +568,14 @@ def _metadata_block(
             )
             dashes = 4 - int(meta["mean"]) - int(meta["std"])
             prefix.extend(["-"] * dashes)
-            # cached stat results beside the formulas (xlsxwriter migration)
+            # cached stat results beside the formulas (xlsxwriter
+            # migration); empty MIN/MAX cache the faithful 0 (the guarded
+            # formula computes 0 on an empty range, never the error branch)
             for col, stat_name in ((7, "MIN"), (8, "MAX")):
                 cached = stat_cached(stat_name, values)
-                formula_values[(excel_row, col)] = "" if cached is None else cached
+                if cached is None:
+                    cached = 0
+                formula_values[(excel_row, col)] = cached
             if meta["mean"]:
                 cached = stat_cached("AVERAGE", values)
                 formula_values[(excel_row, 9)] = "" if cached is None else cached
@@ -650,6 +654,10 @@ def _test_rows(
             (11, cpk_cached(lo, hi, die_cells)),
             (12, fails_cache),
         ):
+            if cached is None and col in (7, 8):
+                # MIN/MAX never error: IFERROR(MIN(...),"") computes 0 on
+                # an empty range — cache the faithful 0, not blank
+                cached = 0
             formula_values[(row_index, col)] = "" if cached is None else cached
 
         # Trend sparkline per data row with numeric die values (FTR rows

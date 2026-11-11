@@ -50,13 +50,9 @@ CP_18 = '=IFERROR((F18-E18)/(6*STDEV(M18:O18)),"")'
 CPK_16 = '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:O16)),(I16-E16)/(3*STDEV(M16:O16))),"")'
 CPK_17 = '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:O17)),(I17-E17)/(3*STDEV(M17:O17))),"")'
 CPK_18 = '=IFERROR(MIN((F18-I18)/(3*STDEV(M18:O18)),(I18-E18)/(3*STDEV(M18:O18))),"")'
-FAILS_LIMITS_16 = (
-    '=SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16)))'
-)
-FAILS_LIMITS_18 = (
-    '=SUMPRODUCT((M18:O18<>"")*((E18<>"")*(M18:O18<E18)+(F18<>"")*(M18:O18>F18)))'
-)
-FAILS_FLAGS_17 = '=SUMPRODUCT((S17:U17<>"")*(S17:U17=1))'
+FAILS_LIMITS_16 = '=IFERROR(SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16))),"")'
+FAILS_LIMITS_18 = '=IFERROR(SUMPRODUCT((M18:O18<>"")*((E18<>"")*(M18:O18<E18)+(F18<>"")*(M18:O18>F18))),"")'
+FAILS_FLAGS_17 = '=IFERROR(SUMPRODUCT((S17:U17<>"")*(S17:U17=1)),"")'
 
 METADATA_NAMES = [
     "File ID",
@@ -82,7 +78,14 @@ def make_metadata_rows():
         # real spec builder (third wave: no Mean outside Temperature);
         # text rows are all dashes
         if name == "File ID":
-            stats = ["=MIN(M2:O2)", "=MAX(M2:O2)", "-", "-", "-", "-"]
+            stats = [
+                '=IFERROR(MIN(M2:O2),"")',
+                '=IFERROR(MAX(M2:O2),"")',
+                "-",
+                "-",
+                "-",
+                "-",
+            ]
             unit = "INT"
         else:
             stats = ["-"] * 6
@@ -101,9 +104,9 @@ def make_rows():
             "V",
             0.5,
             1.5,
-            "=MIN(M16:O16)",
-            "=MAX(M16:O16)",
-            "=AVERAGE(M16:O16)",
+            '=IFERROR(MIN(M16:O16),"")',
+            '=IFERROR(MAX(M16:O16),"")',
+            '=IFERROR(AVERAGE(M16:O16),"")',
             CP_16,
             CPK_16,
             FAILS_LIMITS_16,
@@ -125,9 +128,9 @@ def make_rows():
             "dB",
             "",
             "",
-            "=MIN(M17:O17)",
-            "=MAX(M17:O17)",
-            "=AVERAGE(M17:O17)",
+            '=IFERROR(MIN(M17:O17),"")',
+            '=IFERROR(MAX(M17:O17),"")',
+            '=IFERROR(AVERAGE(M17:O17),"")',
             CP_17,
             CPK_17,
             FAILS_FLAGS_17,
@@ -150,9 +153,9 @@ def make_rows():
             "P/F",
             -0.999999,
             0.999999,
-            "=MIN(M18:O18)",
-            "=MAX(M18:O18)",
-            "=AVERAGE(M18:O18)",
+            '=IFERROR(MIN(M18:O18),"")',
+            '=IFERROR(MAX(M18:O18),"")',
+            '=IFERROR(AVERAGE(M18:O18),"")',
             CP_18,
             CPK_18,
             FAILS_LIMITS_18,
@@ -301,7 +304,7 @@ class TestMatrixLayout:
 
     def test_data_formula_survives_reload(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["G16"].value == "=MIN(M16:O16)"
+        assert ws["G16"].value == '=IFERROR(MIN(M16:O16),"")'
         assert ws["K17"].value == CPK_17
         assert ws["L18"].value == FAILS_LIMITS_18
 
@@ -316,7 +319,9 @@ class TestMatrixLayout:
         # default reads back as a theme color)
         assert ws["A2"].font.color.type == "theme"
         assert ws["E2"].value == "-"  # placeholder
-        assert ws["G2"].value == "=MIN(M2:O2)"  # metadata formula passed through
+        assert (
+            ws["G2"].value == '=IFERROR(MIN(M2:O2),"")'
+        )  # metadata formula passed through
 
     def test_metadata_stats_keep_general_format(self):
         # scientific applies to data rows only (2026-11-10 R3)
@@ -1227,9 +1232,9 @@ class TestMatrixCachedValues:
                     "V",
                     0.0,
                     1.0,
-                    "=MIN(M16:O16)",
-                    "=MAX(M16:O16)",
-                    "=AVERAGE(M16:O16)",
+                    '=IFERROR(MIN(M16:O16),"")',
+                    '=IFERROR(MAX(M16:O16),"")',
+                    '=IFERROR(AVERAGE(M16:O16),"")',
                     CP_16,
                     CPK_16,
                     FAILS_LIMITS_16,
@@ -1247,12 +1252,12 @@ class TestMatrixCachedValues:
             row_groups=[0],
         )
         spec["formula_values"] = {
-            (16, 7): "",
-            (16, 8): "",
-            (16, 9): "",
+            (16, 7): 0,  # IFERROR(MIN(...),""): empty range computes 0
+            (16, 8): 0,
+            (16, 9): "",  # AVERAGE errors on empty -> blank
             (16, 10): "",
             (16, 11): "",
-            (16, 12): 0,
+            (16, 12): 0,  # SUMPRODUCT never errors
         }
         spec["auto_filter"] = {"ref": "A15:O16"}
         spec["conditional_formatting"]["die_rules"]["range"] = "M16:O16"
@@ -1260,9 +1265,11 @@ class TestMatrixCachedValues:
         from openpyxl import load_workbook
 
         ws = load_workbook(io.BytesIO(book), data_only=True)["DUT Summary"]
-        for cell in ("G16", "H16", "I16", "J16", "K16"):
+        assert ws["G16"].value == 0  # MIN of an empty range computes 0
+        assert ws["H16"].value == 0
+        for cell in ("I16", "J16", "K16"):
             assert ws[cell].value in ("", None), cell
-        assert ws["L16"].value == 0  # bare SUMPRODUCT computes 0
+        assert ws["L16"].value == 0  # SUMPRODUCT never errors
         rules = cf_block(ws, "M16:O16")
         assert rules[0].formula == ['M16=""']  # blank-neutral first
 
@@ -1278,9 +1285,9 @@ class TestMatrixCachedValues:
                     "V",
                     0.0,
                     1.0,
-                    "=MIN(M16:M16)",
-                    "=MAX(M16:M16)",
-                    "=AVERAGE(M16:M16)",
+                    '=IFERROR(MIN(M16:M16),"")',
+                    '=IFERROR(MAX(M16:M16),"")',
+                    '=IFERROR(AVERAGE(M16:M16),"")',
                     '=IFERROR((F16-E16)/(6*STDEV(M16:M16)),"")',
                     '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:M16)),(I16-E16)/(3*STDEV(M16:M16))),"")',
                     FAILS_LIMITS_16.replace("M16:O16", "M16:M16"),

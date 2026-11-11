@@ -434,7 +434,7 @@ class TestDutSummarySheet:
         # Test Time row (13): parsed to bare ints under MIN/MAX formulas
         assert ws["C13"].value == "Test Time"
         assert ws["D13"].value == "ms"
-        assert ws["G13"].value == "=MIN(M13:O13)"
+        assert ws["G13"].value == '=IFERROR(MIN(M13:O13),"")'
         # always-fold rows stay hidden (Head-Site 11, Test Time 13); the DUT
         # Flag row (14) is VISIBLE since the fourth wave (status CF)
         for row in (11, 13):
@@ -446,9 +446,9 @@ class TestDutSummarySheet:
     def test_first_test_formulas_at_row_sixteen(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        assert ws["G16"].value.startswith("=MIN(M16:")
-        assert ws["H16"].value.startswith("=MAX(M16:")
-        assert ws["L16"].value.startswith("=SUMPRODUCT(")
+        assert ws["G16"].value.startswith("=IFERROR(MIN(M16:")
+        assert ws["H16"].value.startswith("=IFERROR(MAX(M16:")
+        assert ws["L16"].value.startswith("=IFERROR(SUMPRODUCT(")
 
     def test_die_values_parametric_and_ftr(self, generated):
         _, wb, _, _, _ = generated

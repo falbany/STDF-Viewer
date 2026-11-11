@@ -31,13 +31,9 @@ CP_18 = '=IFERROR((F18-E18)/(6*STDEV(M18:O18)),"")'
 CPK_16 = '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:O16)),(I16-E16)/(3*STDEV(M16:O16))),"")'
 CPK_17 = '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:O17)),(I17-E17)/(3*STDEV(M17:O17))),"")'
 CPK_18 = '=IFERROR(MIN((F18-I18)/(3*STDEV(M18:O18)),(I18-E18)/(3*STDEV(M18:O18))),"")'
-FAILS_LIMITS_16 = (
-    '=SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16)))'
-)
-FAILS_LIMITS_18 = (
-    '=SUMPRODUCT((M18:O18<>"")*((E18<>"")*(M18:O18<E18)+(F18<>"")*(M18:O18>F18)))'
-)
-FAILS_FLAGS_17 = '=SUMPRODUCT((S17:U17<>"")*(S17:U17=1))'
+FAILS_LIMITS_16 = '=IFERROR(SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16))),"")'
+FAILS_LIMITS_18 = '=IFERROR(SUMPRODUCT((M18:O18<>"")*((E18<>"")*(M18:O18<E18)+(F18<>"")*(M18:O18>F18))),"")'
+FAILS_FLAGS_17 = '=IFERROR(SUMPRODUCT((S17:U17<>"")*(S17:U17=1)),"")'
 
 BASE_HEADERS = [
     "Test#",
@@ -411,8 +407,8 @@ class TestMetadataBlock:
             "INT",
             "-",
             "-",
-            "=MIN(M2:O2)",
-            "=MAX(M2:O2)",
+            '=IFERROR(MIN(M2:O2),"")',
+            '=IFERROR(MAX(M2:O2),"")',
             "-",
             "-",
             "-",
@@ -445,7 +441,11 @@ class TestMetadataBlock:
     def test_temperature_row_numeric_formulas_and_parsed_values(self):
         row = self.spec()["metadata_rows"][3]
         assert row[:4] == [10003, "METADATA", "Temperature", "CELSIUS"]
-        assert row[6:9] == ["=MIN(M5:O5)", "=MAX(M5:O5)", "=AVERAGE(M5:O5)"]
+        assert row[6:9] == [
+            '=IFERROR(MIN(M5:O5),"")',
+            '=IFERROR(MAX(M5:O5),"")',
+            '=IFERROR(AVERAGE(M5:O5),"")',
+        ]
         assert row[12:] == [25.0, 25.0, 85.0]
 
     def test_bin_rows_parsed_to_bare_integers(self):
@@ -459,10 +459,10 @@ class TestMetadataBlock:
         # row stays hidden — the formulas serve a user who unhides it)
         row = self.spec()["metadata_rows"][11]
         assert row[6:10] == [
-            "=MIN(M13:O13)",
-            "=MAX(M13:O13)",
-            "=AVERAGE(M13:O13)",
-            "=STDEV(M13:O13)",
+            '=IFERROR(MIN(M13:O13),"")',
+            '=IFERROR(MAX(M13:O13),"")',
+            '=IFERROR(AVERAGE(M13:O13),"")',
+            '=IFERROR(STDEV(M13:O13),"")',
         ]
         assert row[10:12] == ["-", "-"]
         assert row[12:] == [123, 123, 123]
@@ -479,12 +479,16 @@ class TestMetadataBlock:
         # test_test_time_parsed_to_milliseconds — fourth wave mean+std)
         for pos in (0, 4, 5, 6, 7, 8, 10):
             assert rows[pos][6:8] == [
-                f"=MIN(M{2 + pos}:O{2 + pos})",
-                f"=MAX(M{2 + pos}:O{2 + pos})",
+                f'=IFERROR(MIN(M{2 + pos}:O{2 + pos}),"")',
+                f'=IFERROR(MAX(M{2 + pos}:O{2 + pos}),"")',
             ]
             assert rows[pos][8:12] == ["-", "-", "-", "-"]
         # Temperature (pos 3) keeps MIN/MAX/MEAN, St. Dev. a dash
-        assert rows[3][6:9] == ["=MIN(M5:O5)", "=MAX(M5:O5)", "=AVERAGE(M5:O5)"]
+        assert rows[3][6:9] == [
+            '=IFERROR(MIN(M5:O5),"")',
+            '=IFERROR(MAX(M5:O5),"")',
+            '=IFERROR(AVERAGE(M5:O5),"")',
+        ]
         assert rows[3][9:12] == ["-", "-", "-"]
 
     def test_masked_rows_absolute_positions(self):
@@ -608,9 +612,9 @@ class TestRows:
             "V",
             0.5,
             1.5,
-            "=MIN(M16:O16)",
-            "=MAX(M16:O16)",
-            "=AVERAGE(M16:O16)",
+            '=IFERROR(MIN(M16:O16),"")',
+            '=IFERROR(MAX(M16:O16),"")',
+            '=IFERROR(AVERAGE(M16:O16),"")',
             CP_16,
             CPK_16,
             FAILS_LIMITS_16,
@@ -634,9 +638,9 @@ class TestRows:
             "dB",
             "",
             "",
-            "=MIN(M17:O17)",
-            "=MAX(M17:O17)",
-            "=AVERAGE(M17:O17)",
+            '=IFERROR(MIN(M17:O17),"")',
+            '=IFERROR(MAX(M17:O17),"")',
+            '=IFERROR(AVERAGE(M17:O17),"")',
             CP_17,
             CPK_17,
             FAILS_FLAGS_17,
@@ -667,9 +671,9 @@ class TestRows:
             "P/F",
             -0.999999,
             0.999999,
-            "=MIN(M18:O18)",
-            "=MAX(M18:O18)",
-            "=AVERAGE(M18:O18)",
+            '=IFERROR(MIN(M18:O18),"")',
+            '=IFERROR(MAX(M18:O18),"")',
+            '=IFERROR(AVERAGE(M18:O18),"")',
             CP_18,
             CPK_18,
             FAILS_LIMITS_18,
@@ -706,8 +710,8 @@ class TestRows:
         assert row[5] == 0.999999
         # single-die range: the limits-variant FAILS over M16:M16
         assert row[11] == (
-            '=SUMPRODUCT((M16:M16<>"")*((E16<>"")*(M16:M16<E16)'
-            '+(F16<>"")*(M16:M16>F16)))'
+            '=IFERROR(SUMPRODUCT((M16:M16<>"")*((E16<>"")*(M16:M16<E16)'
+            '+(F16<>"")*(M16:M16>F16))),"")'
         )
 
     def test_row_length_layout(self):
@@ -876,15 +880,15 @@ class TestChunking:
         assert (
             spec["flag_first_col"] == "R"
         )  # die M..N, spacer O, Trend P, spacer Q, mirror R..S
-        assert spec["rows"][0][6] == "=MIN(M16:N16)"
+        assert spec["rows"][0][6] == '=IFERROR(MIN(M16:N16),"")'
         assert spec["rows"][0][12:14] == [1.0, 1.2]
-        assert spec["metadata_rows"][0][6] == "=MIN(M2:N2)"
+        assert spec["metadata_rows"][0][6] == '=IFERROR(MIN(M2:N2),"")'
         assert spec["auto_filter"]["ref"] == "A15:N18"
 
     def test_chunk_two_references_own_columns(self):
         spec = self.specs()[1]
         assert spec["headers"][12:] == [3, "", "Trend"]  # global numbering + Trend tail
-        assert spec["rows"][0][6] == "=MIN(M16:M16)"
+        assert spec["rows"][0][6] == '=IFERROR(MIN(M16:M16),"")'
         assert spec["rows"][0][12:] == [
             "",
             "",
@@ -892,7 +896,7 @@ class TestChunking:
             "",
             "",
         ]  # nan die, spacer, Trend, spacer, blank mirror
-        assert spec["metadata_rows"][0][6] == "=MIN(M2:M2)"
+        assert spec["metadata_rows"][0][6] == '=IFERROR(MIN(M2:M2),"")'
         assert spec["auto_filter"]["ref"] == "A15:M18"
         assert spec["conditional_formatting"]["die_rules"]["flag_col_offset"] == 4
         assert spec["conditional_formatting"]["fails_max"] == 0.2 * 1
@@ -931,8 +935,8 @@ class TestColumnCapBoundaries:
         assert mirror_first + DUT_CHUNK_CAP - 1 <= 16384  # last mirror <= XFD
         # formulas build against the full-width ranges
         last_die = die_col(DUT_CHUNK_CAP - 1)
-        assert spec["metadata_rows"][0][6] == f"=MIN(M2:{last_die}2)"
-        assert spec["rows"][0][6] == f"=MIN(M16:{last_die}16)"
+        assert spec["metadata_rows"][0][6] == f'=IFERROR(MIN(M2:{last_die}2),"")'
+        assert spec["rows"][0][6] == f'=IFERROR(MIN(M16:{last_die}16),"")'
 
     def test_16301_dies_two_valid_chunks(self):
         # the old 16300-boundary count now spans two chunks; BOTH must build
@@ -979,7 +983,11 @@ class TestZeroDutChunk:
         assert spec["freeze_panes"] == "M16"
         # metadata formulas stay well-formed (M2:M2, not the inverted N2:M2);
         # third wave: the File ID row carries MIN/MAX and a dash Mean
-        assert spec["metadata_rows"][0][6:9] == ["=MIN(M2:M2)", "=MAX(M2:M2)", "-"]
+        assert spec["metadata_rows"][0][6:9] == [
+            '=IFERROR(MIN(M2:M2),"")',
+            '=IFERROR(MAX(M2:M2),"")',
+            "-",
+        ]
 
     def test_no_limit_fails_formula_degenerates_to_visible_range(self):
         tests = [
@@ -995,7 +1003,9 @@ class TestZeroDutChunk:
         ]
         spec = build(tests, [])[0]
         # mirror range collapses onto M (the empty visible range), not N:M
-        assert spec["rows"][0][11] == '=SUMPRODUCT((M16:M16<>"")*(M16:M16=1))'
+        assert (
+            spec["rows"][0][11] == '=IFERROR(SUMPRODUCT((M16:M16<>"")*(M16:M16=1)),"")'
+        )
 
 
 # --------------------------------------------------------------------------
@@ -1288,9 +1298,13 @@ class TestFormulaValues:
         ]
         spec = build(tests, base_duts())[0]
         fv = spec["formula_values"]
-        for col in (7, 8, 9, 10, 11):
+        # IFERROR-wrapped (2026-11-11): AVERAGE/Cp/Cpk error on an empty
+        # range -> "" ; MIN/MAX never error — an empty range computes 0
+        assert fv[(16, 7)] == 0
+        assert fv[(16, 8)] == 0
+        for col in (9, 10, 11):
             assert fv[(16, col)] == ""
-        # FAILS is a bare SUMPRODUCT: Excel computes 0 for a blank range
+        # SUMPRODUCT never errors: 0 for a blank range
         assert fv[(16, 12)] == 0
 
     def test_single_die_cpk_blank(self):
