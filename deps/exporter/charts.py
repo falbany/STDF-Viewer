@@ -116,9 +116,6 @@ BIN_SLICE_BORDER_HEX = "FFFFFF"
 # saturated palette slices (ninth-wave print fix).
 BIN_LABEL_FONT = {"name": FONT_NAME, "size": 9, "bold": True, "color": "#FFFFFF"}
 
-# Helper block headers: labels column helper_col, counts column
-# helper_col + 1, one header row + one row per bin (0-based columns).
-BIN_HELPER_HEADERS = ("Bin", "Count")
 
 # Structured bin tables (sixth wave, user mockup).
 BIN_TABLE_HEADERS = ("Bin", "Value", "Count", "Distribution")
@@ -258,9 +255,21 @@ def aggregate_kpi(rows) -> dict:
     return sums
 
 
-def bin_label(bin_num: int, name: str) -> str:
-    """Slice label for the donut legend: ``"Bin {num} - {name}"``."""
-    return f"Bin {bin_num} - {name}"
+def bin_table_ranges(title_row: int, n_bins: int, first_col: int = BIN_TABLE_FIRST_COL):
+    """Chart-source refs for one bin table: ``(name_cell, cat_range,
+    val_range)`` — the donuts read the VISIBLE tables (2026-11-11 user
+    ruling): series name over the section-title cell, categories over the
+    Bin-name column, values over the Count column (``first_col + 2``).
+    Refs are ABSOLUTE ($-locked) A1 notation, ready to sheet-qualify."""
+    name_col = xlutil.xl_col_to_name(first_col - 1)
+    count_col = xlutil.xl_col_to_name(first_col + 1)
+    first_data = title_row + 2
+    last_data = title_row + 1 + n_bins
+    return (
+        f"${name_col}${title_row}",
+        f"${name_col}${first_data}:${name_col}${last_data}",
+        f"${count_col}${first_data}:${count_col}${last_data}",
+    )
 
 
 # --------------------------------------------------------------------------
@@ -341,39 +350,47 @@ def complete_chart_flags(path: str) -> None:
 
 
 def build_bin_donut(
-    wb, ws, title: str, bins, anchor_cell: str, helper_col: int, helper_row=None
+    wb,
+    ws,
+    title: str,
+    bins,
+    anchor_cell: str,
+    name_cell: str,
+    cat_range: str,
+    val_range: str,
 ) -> None:
-    """Add one native doughnut chart for ``bins = [(bin_num, label, count)]``.
+    """Add one native doughnut chart fed by the VISIBLE bin table below it
+    (2026-11-11 user ruling — the old hidden BJ/BK helper block is gone).
 
-    - the chart data lives in a two-column helper block (labels column
-      ``helper_col`` 0-BASED, counts column ``helper_col + 1``, one header
-      row "Bin" / "Count" + one row per bin) starting at ``helper_row``
-      (1-based; by default the row of ``anchor_cell``; pass an explicit
-      row when two charts share the anchor row);
+    - ``bins`` only gates the no-op (empty → no chart); the DATA lives in
+      the table the caller wrote: ``name_cell`` (the section-title cell)
+      becomes the series name, ``cat_range`` (the table's Bin column data
+      rows) the categories, ``val_range`` (the Count column data rows) the
+      values — so the chart follows the table, including user edits and
+      filters;
     - the chart: title, doughnut with ``BIN_DONUT_HOLE_SIZE`` hole,
       ``BIN_CHART_STYLE`` (2 — xlsxwriter's default, no <c:style> element),
       percent data labels in a white bold label font (the show* flag zeros
-      reach the file via ``complete_chart_flags``), legend on the right,
-      hidden helper columns still plotted (``show_hidden_data``; the
-      matching ``<c:plotVisOnly val="0"/>`` comes from the completion), and
-      a ``BIN_CHART_WIDTH_CM`` x ``BIN_CHART_HEIGHT_CM`` frame in pixels;
-    - both helper columns are hidden; ``bins`` empty → no-op.
+      reach the file via ``complete_chart_flags``), per-slice modern
+      palette with white borders, legend on the right, frameless chart
+      area, and a ``BIN_CHART_WIDTH_CM`` x ``BIN_CHART_HEIGHT_CM`` frame
+      in pixels.
     """
     if not bins:
         return
-    if helper_row is None:
-        helper_row = xlutil.xl_cell_to_rowcol(anchor_cell)[0] + 1
-    row0 = helper_row - 1
-    label_letter = xlutil.xl_col_to_name(helper_col)
-    count_letter = xlutil.xl_col_to_name(helper_col + 1)
     sheet = ws.name
 
-    for offset, header in enumerate(BIN_HELPER_HEADERS):
-        ws.write(row0, helper_col + offset, header)
-    for index, (_bin_num, label, count) in enumerate(bins, start=1):
-        ws.write(row0 + index, helper_col, sanitize_cell(label))
-        ws.write(row0 + index, helper_col + 1, int(count))
+    def _abs(ref: str) -> str:
+        """$-lock an A1 cell/range ("B3:B4" -> "$B$3:$B$4")."""
+        import re as _re
 
+        parts = []
+        for part in ref.split(":"):
+            match = _re.match(r"([A-Z]+)(\d+)$", part.replace("$", ""))
+            parts.append(f"${match.group(1)}${match.group(2)}")
+        return ":".join(parts)
+
+    val_range, cat_range, name_cell = _abs(val_range), _abs(cat_range), _abs(name_cell)
     chart = wb.add_chart({"type": "doughnut"})
     chart.set_title(
         {
@@ -391,15 +408,16 @@ def build_bin_donut(
     # frameless chart area (2026-11-11): the dated gray border is gone and
     # a paste into PowerPoint adopts the slide background cleanly
     chart.set_chartarea({"border": {"none": True}, "fill": {"none": True}})
+    # sheet-qualified absolute refs (sheet names with spaces need quoting)
+    qualified = f"{xlutil.quote_sheetname(sheet)}!"
     chart.add_series(
         {
-            # values = the data rows only; the "Count" header cell becomes
-            # the series name via the explicit name ref (the openpyxl-era
-            # titles_from_data split — a text cell inside a numeric values
-            # range would phantom-slice)
-            "values": f"='{sheet}'!${count_letter}${helper_row + 1}:${count_letter}${helper_row + len(bins)}",
-            "categories": f"='{sheet}'!${label_letter}${helper_row + 1}:${label_letter}${helper_row + len(bins)}",
-            "name": f"='{sheet}'!${count_letter}${helper_row}",
+            # values = the table's Count column data rows; categories = the
+            # table's Bin column; series name = the section-title cell —
+            # the chart literally displays the data in the table below it
+            "values": f"{qualified}{val_range}",
+            "categories": f"{qualified}{cat_range}",
+            "name": f"{qualified}{name_cell}",
             "data_labels": {"percentage": True, "font": BIN_LABEL_FONT},
             # per-slice modern palette with white borders (cycled)
             "points": [
@@ -414,14 +432,11 @@ def build_bin_donut(
         }
     )
     chart.set_legend({"position": "right"})  # mockup: right-hand legend
-    chart.show_hidden_data()  # plot the hidden helper columns
     chart.set_size(
         {"width": cm_to_px(BIN_CHART_WIDTH_CM), "height": cm_to_px(BIN_CHART_HEIGHT_CM)}
     )
     row_anchor, col_anchor = xlutil.xl_cell_to_rowcol(anchor_cell)
     ws.insert_chart(row_anchor, col_anchor, chart)
-
-    ws.set_column(helper_col, helper_col + 1, None, None, {"hidden": True})
 
 
 def write_kpi_cards(ws, start_row: int, kpi: dict, n_files: int, theme) -> int:

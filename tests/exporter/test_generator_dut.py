@@ -665,7 +665,9 @@ class TestChartSheets:
             assert "<c:doughnutChart>" in xml
             assert '<c:holeSize val="55"/>' in xml
             assert '<c:legendPos val="r"/>' in xml
-            assert '<c:plotVisOnly val="0"/>' in xml  # hidden helpers plot
+            # no hidden data anymore: plotVisOnly stays xlsxwriter's
+            # default (visible cells only — the tables are visible)
+            assert '<c:plotVisOnly val="0"/>' not in xml
             assert '<c:showVal val="0"/>' in xml  # completion pinned the flags
             assert '<c:showPercent val="1"/>' in xml
             # 2026-11-11 modern palette: per-slice dPt colors (wave-7
@@ -684,6 +686,16 @@ class TestChartSheets:
         # both donuts cell-anchored on the band row 9 (0-based 8): cols 0/3
         assert sorted(anchors) == [(0, 8), (3, 8)]
         assert ws_row_height(generated, "Bin Chart", 9) == pytest.approx(250, abs=0.3)
+        # the series feed the TABLES: categories B15:B16, counts D15:D16,
+        # series name = the HB section title cell
+        hb = next(c for c in charts if "Hardware" in c)
+        assert "'Bin Chart'!$B$15:$B$16" in hb
+        assert "'Bin Chart'!$D$15:$D$16" in hb
+        assert "'Bin Chart'!$B$13" in hb
+        sb = next(c for c in charts if "Software" in c)
+        assert "'Bin Chart'!$B$21:$B$22" in sb
+        assert "'Bin Chart'!$D$21:$D$22" in sb
+        assert "'Bin Chart'!$B$19" in sb
 
     def test_bin_charts_use_modern_palette(self, generated):
         # 2026-11-11: explicit per-slice modern palette colors
@@ -697,24 +709,20 @@ class TestChartSheets:
                     assert "<c:dPt>" in data, name
                     assert BIN_SLICE_PALETTE[0] in data, name
 
-    def test_bin_helper_block_hidden_columns(self, generated):
-        # helper data in fixed far columns BJ/BK, header "Bin"/"Count" +
-        # one row per bin; both columns hidden; the two charts of the block
-        # use distinct helper row ranges (HB 1..3, SB 5..7)
+    def test_donuts_reference_the_visible_tables(self, generated):
+        # 2026-11-11 ruling: the donuts feed from the HW/SW TABLES below
+        # them (Bin column B, Count column D, section title as series
+        # name) — the old hidden BJ/BK helper block is gone
         _, wb, _, _, _ = generated
         ws = wb["Bin Chart"]
-        assert ws["BJ1"].value == "Bin"
-        assert ws["BK1"].value == "Count"
-        assert ws["BJ2"].value == "Bin 1 - PASS_BIN"
-        assert ws["BK2"].value == 9
-        assert isinstance(ws["BK2"].value, int)
-        assert ws["BJ3"].value == "Bin 3 - FAIL_BIN"
-        assert ws["BK3"].value == 1
-        assert ws["BJ5"].value == "Bin"
-        assert ws["BJ6"].value == "Bin 1 - PASS_BIN"
-        assert ws["BJ7"].value == "Bin 3 - FAIL_BIN"
+        # no helper block anywhere in the far columns
+        assert ws["BJ1"].value is None and ws["BK1"].value is None
         for letter in ("BJ", "BK"):
-            assert col_dim(ws, letter).hidden is True
+            assert col_dim(ws, letter) is None
+        # the tables hold the data the charts reference (2-bin fixture:
+        # title 13, header 14, data 15-16)
+        assert ws["B15"].value == "PASS_BIN" and ws["D15"].value == 9
+        assert ws["B16"].value == "FAIL_BIN" and ws["D16"].value == 1
 
     # -- structured tables after the fixed charts band (eighth wave) ---------
 
@@ -894,8 +902,9 @@ class TestChartSheets:
             # grid recalibration in Excel is a USER CHECKLIST item
             assert col_dim(ws, letter).width == pytest.approx(15, abs=0.75), letter
         assert "G" not in ws.column_dimensions  # beyond the page
-        assert col_dim(ws, "BJ").hidden is True
-        assert col_dim(ws, "BK").hidden is True
+        # no helper columns exist anymore (table-driven donuts, 2026-11-11)
+        assert col_dim(ws, "BJ") is None
+        assert col_dim(ws, "BK") is None
 
     def test_bin_sheet_a4_print_setup(self, generated):
         # eighth wave (R1): the Bin sheet prints on A4, fit to one page

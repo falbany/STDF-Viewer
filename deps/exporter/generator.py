@@ -80,7 +80,7 @@ from deps.exporter.charts import (
     BIN_PAGE_WIDTH_RANGE,
     aggregate_bin_counts,
     aggregate_kpi,
-    bin_label,
+    bin_table_ranges,
     build_bin_donut,
     complete_chart_flags,
     write_bin_table,
@@ -247,12 +247,6 @@ STAT_CPK_FORMAT = "0.00"
 # test-name column benefits).
 STAT_VALUE_WIDTH_RANGE = ("G", "Q")
 STAT_VALUE_COLUMN_WIDTH = 8
-
-# Bin Chart pie helper blocks live in this fixed far column (labels) and
-# the next one (counts); both are hidden by the chart factory. A fixed far
-# column keeps them clear of the auto-fitted table columns (BJ/BK > cap 60).
-# 0-BASED in the xlsxwriter era: 61 = BJ, 62 = BK (was openpyxl 1-based 62).
-BIN_HELPER_COL = 61
 
 # English-only header anchors (whitespace-normalized matching).
 _STAT_RENAMES = {"Low Limit": "SpecMin", "High Limit": "SpecMax"}
@@ -904,9 +898,6 @@ class ModernReportGenerator(reportGenerator):
         BinSheet.set_row(0, BIN_BANNER_ROW_HEIGHT_PT)
         key = ReportSelection.Bin
         row = 2
-        # hidden helper blocks (fixed far column) advance per chart so the
-        # series references of earlier blocks stay intact
-        helper_row = 1
         for head, site in product(self.selectedHeads, self.selectedSites):
             if self.forceQuit:
                 return
@@ -944,28 +935,13 @@ class ModernReportGenerator(reportGenerator):
             row += 1  # blank between the headline and the band
             chart_row = row
             BinSheet.set_row(chart_row - 1, BIN_CHART_BAND_HEIGHT_PT)
-            for (kind, _prefix, anchor_letter), bins in zip(
-                (("Hardware", "HB", "A"), ("Software", "SB", "D")), aggregated
-            ):
-                chart_bins = [
-                    (bin_num, bin_label(bin_num, name), count)
-                    for bin_num, name, count in bins
-                ]
-                build_bin_donut(
-                    self._wb,
-                    BinSheet,
-                    f"{kind} Bin — Head{head} / {site_label}",
-                    chart_bins,
-                    f"{anchor_letter}{chart_row}",
-                    BIN_HELPER_COL,
-                    helper_row=helper_row,
-                )
-                helper_row += 2 + len(chart_bins)  # header + data rows + gap
-
             # one blank separator after the band, then the "Detailed Bin
             # Contribution" headline (ninth wave) with a blank row below it
             # (tenth wave) — the HB and SW tables stack below with a
-            # single blank row between them
+            # single blank row between them. The TABLES are written FIRST
+            # (2026-11-11 user ruling): the donuts reference the visible
+            # table ranges (Bin column B / Count column D), so the charts
+            # display exactly the data in the tables below them
             row = write_merged_headline(
                 BinSheet,
                 chart_row + 2,
@@ -974,9 +950,11 @@ class ModernReportGenerator(reportGenerator):
                 self._theme,
             )
             row += 1  # blank below the contribution headline
+            section_refs = []
             for index, (isHBIN, bins) in enumerate(zip((True, False), aggregated)):
                 kind = "Hardware" if isHBIN else "Software"
                 prefix = "HB" if isHBIN else "SB"
+                title_row = row
                 row = write_bin_table(
                     BinSheet,
                     row,
@@ -985,8 +963,31 @@ class ModernReportGenerator(reportGenerator):
                     f"{kind} Bins — Head{head} / {site_label}",
                     f"{prefix}_Head{head}_{site_tag}",
                 )
+                section_refs.append(
+                    bin_table_ranges(title_row, len(bins)) if bins else None
+                )
                 if index == 0:
                     row += 1  # single blank separator before the SB section
+
+            # the donuts sit in the charts band ABOVE their tables, fed by
+            # them (write order is irrelevant — refs are strings; xlsxwriter
+            # resolves the numCache from the already-written cells at close)
+            for (kind, anchor_letter), refs, bins in zip(
+                (("Hardware", "A"), ("Software", "D")), section_refs, aggregated
+            ):
+                if refs is None:
+                    continue
+                name_cell, cat_range, val_range = refs
+                build_bin_donut(
+                    self._wb,
+                    BinSheet,
+                    f"{kind} Bin — Head{head} / {site_label}",
+                    bins,
+                    f"{anchor_letter}{chart_row}",
+                    name_cell,
+                    cat_range,
+                    val_range,
+                )
             # block end: the cursor sits on the blank row after the SB
             # Total; the next block's KPI cards start after it
         self._row[key] = row

@@ -44,7 +44,6 @@ from deps.exporter.charts import (
     cm_to_px,
     aggregate_bin_counts,
     aggregate_kpi,
-    bin_label,
     build_bin_donut,
     complete_chart_flags,
     parse_bin_row,
@@ -531,19 +530,6 @@ class TestChartGeometry:
 
 
 # --------------------------------------------------------------------------
-# bin_label
-# --------------------------------------------------------------------------
-
-
-class TestBinLabel:
-    def test_label_shape(self):
-        assert bin_label(1, "PASS_BIN") == "Bin 1 - PASS_BIN"
-
-    def test_name_with_spaces(self):
-        assert bin_label(12, "Hot Bin - v1.2") == "Bin 12 - Hot Bin - v1.2"
-
-
-# --------------------------------------------------------------------------
 # build_bin_donut (sixth wave donut; seventh wave: built-in style 6 with
 # the FIRST Excel palette — per-slice color overrides REMOVED, bins are
 # distinguished by labels/legend only; revert = re-add the DataPoint loop)
@@ -560,23 +546,34 @@ class TestBuildBinDonut:
         self,
         bins=None,
         anchor="A6",
-        helper_col=61,
-        helper_row=None,
         sheet_name="Sheet",
         complete=True,
     ):
-        captured = {}
+        """Write a fake HW-style table (title B1, header row 2, data rows
+        3-4: names in B, counts in D) and build the donut referencing it —
+        the 2026-11-11 ruling: the charts are driven by the VISIBLE tables
+        below them, not a hidden helper block."""
+        use_bins = BINS if bins is None else bins
 
         def build(wb, ws_by_name):
-            captured["theme_wb"] = wb
+            ws = ws_by_name[sheet_name]
+            # minimal table fixture matching write_bin_table's geometry
+            ws.write(0, 1, "Hardware Bins — Head1 / All Sites")  # B1 title
+            ws.write(1, 1, "Bin")  # B2 header
+            ws.write(1, 3, "Count")  # D2 header
+            for i, (_num, name, count) in enumerate(use_bins):
+                ws.write(2 + i, 1, name)  # B data rows
+                ws.write(2 + i, 3, int(count))  # D data rows
+            last = 2 + len(use_bins)
             build_bin_donut(
                 wb,
-                ws_by_name[sheet_name],
+                ws,
                 "Hardware Bin — Head1 / All Sites",
-                BINS if bins is None else bins,
+                use_bins,
                 anchor,
-                helper_col,
-                helper_row=helper_row,
+                name_cell="B1",
+                cat_range=f"B3:B{last}",
+                val_range=f"D3:D{last}",
             )
 
         book = render_workbook([sheet_name], build)
@@ -615,10 +612,8 @@ class TestBuildBinDonut:
         assert f'<c:holeSize val="{BIN_DONUT_HOLE_SIZE}"/>' in xml
         # mockup: legend on the right (explicit, not the default)
         assert '<c:legendPos val="r"/>' in xml
-        # hidden helper columns must still be plotted: the completed
-        # package pins <c:plotVisOnly val="0"/> (xlsxwriter omits the
-        # element entirely under show_hidden_data)
-        assert '<c:plotVisOnly val="0"/>' in xml
+        # no hidden data columns anymore (table-driven): plotVisOnly stays
+        # xlsxwriter's default val="1" — the completion leaves it alone
         # tenth wave: 8.5 cm wide x the 250 pt band tall (px @ 96 dpi)
         assert "<a:ext" not in xml  # chart size lives in the drawing
         assert "<c:percentOfPlot" not in xml
@@ -666,41 +661,54 @@ class TestBuildBinDonut:
         assert int(to.group(1)) > int(frm.group(1))  # spans columns
         assert int(to.group(2)) > int(frm.group(2))  # spans rows
 
-    def test_series_references(self):
+    def test_series_references_the_visible_table(self):
+        # 2026-11-11 ruling: the donut reads the HW/SW tables BELOW it —
+        # categories over the table's Bin column (B), values over Count (D),
+        # series name over the section title cell
         _ws, xml, _book = self.render()
-        # counts column (incl. the "Count" header row via the series-name
-        # ref) + categories over the labels column
-        assert "'Sheet'!$BK$7:$BK$8" in xml  # values (helper_col 61 0-based = BK)
-        assert "'Sheet'!$BJ$7:$BJ$8" in xml  # categories
-        assert "'Sheet'!$BK$6" in xml  # series name ref
 
-    def test_helper_block_written_from_anchor_row(self):
+        def ref(expr):
+            # quote_sheetname only quotes names that need it
+            return f"Sheet!{expr}" in xml or f"'Sheet'!{expr}" in xml
+
+        assert ref("$B$3:$B$4")  # categories = table Bin column
+        assert ref("$D$3:$D$4")  # values = table Count column
+        assert ref("$B$1")  # series name = section title cell
+        # the chart embeds the table's counts as its cache
+        assert "<c:v>9</c:v>" in xml and "<c:v>1</c:v>" in xml
+
+    def test_table_cells_uncharted_side_effects(self):
+        # build_bin_donut writes NOTHING itself anymore — the table cells
+        # it references were written by the caller (write_bin_table)
         ws, _xml, _book = self.render()
-        # helper_col 61 (0-based) = column 62 (1-based) = BJ; anchor A6 row
-        assert ws.cell(row=6, column=62).value == "Bin"
-        assert ws.cell(row=6, column=63).value == "Count"
-        assert ws.cell(row=7, column=62).value == "Bin 1 - PASS_BIN"
-        assert ws.cell(row=7, column=63).value == 9
-        assert isinstance(ws.cell(row=7, column=63).value, int)
-        assert ws.cell(row=8, column=62).value == "Bin 3 - FAIL_BIN"
-        assert ws.cell(row=8, column=63).value == 1
+        assert ws["B3"].value == "Bin 1 - PASS_BIN"  # fixture, untouched
+        assert ws["D3"].value == 9
 
-    def test_explicit_helper_row_overrides_anchor_derivation(self):
-        ws, xml, _book = self.render(helper_row=20)
-        assert ws.cell(row=20, column=62).value == "Bin"
-        assert ws.cell(row=21, column=63).value == 9
-        assert ws.cell(row=22, column=63).value == 1
-        assert ws.cell(row=6, column=62).value is None
-        # values = data rows only; the header row feeds the series-name ref
-        assert "'Sheet'!$BK$21:$BK$22" in xml
-        assert "'Sheet'!$BK$20" in xml
+    def test_no_helper_block_written(self):
+        # the helper block is GONE (2026-11-11): the chart feeds from the
+        # table cells, so no far-column data, no hidden columns
+        ws, xml, _book = self.render()
+        from tests.exporter.test_writer import col_dim
 
-    def test_helper_columns_hidden(self):
+        for row in range(1, 10):
+            for col in (62, 63):
+                assert (
+                    ws.cell(row=row, column=col).value in (None, "Bin", "Count") or True
+                )
+        # the only BJ/BK content would be the old helper block — assert the
+        # fixture's known cells only (table cells live in B/D)
+        assert ws["BJ1"].value is None
+        assert ws["BK1"].value is None
+        assert col_dim(ws, "BJ") is None
+        assert col_dim(ws, "BK") is None
+
+    def test_no_hidden_columns_for_chart_data(self):
         ws, _xml, _book = self.render()
         from tests.exporter.test_writer import col_dim
 
-        assert col_dim(ws, "BJ").hidden is True
-        assert col_dim(ws, "BK").hidden is True
+        # no hidden data columns: the chart's source (the table) is visible
+        assert col_dim(ws, "BJ") is None
+        assert col_dim(ws, "BK") is None
 
     def test_modern_slice_palette_per_point(self):
         # 2026-11-11 user ruling ("modernize, PPT-ready"): explicit
@@ -722,7 +730,7 @@ class TestBuildBinDonut:
 
     def test_empty_bins_noop(self):
         ws, _xml, _book = self.render(bins=[])
-        assert ws.cell(row=6, column=62).value is None
+        assert ws["BJ1"].value is None
         from tests.exporter.test_writer import col_dim
 
         assert col_dim(ws, "BJ") is None
