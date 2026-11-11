@@ -111,6 +111,8 @@ class GeneralConfig(BaseModel):
     hide_inf: bool = Field(True, alias="Hide Infinite Value")
     vert_bar: bool = Field(False, alias="Vertical BarGraph")
     modern_export: bool = Field(True, alias="Modern Export")  # fork(falbany): modern exporter toggle
+    hide_remeasured: bool = Field(False, alias="Hide Remeasured")  # fork(falbany): hide re-measured DUTs toggle
+    split_temperature: bool = Field(False, alias="Split Temperature")  # fork(falbany): split DUT Summary by temperature
     file_symbols: dict[int, str] = Field(
         default_factory=lambda: {0: "o"},
         alias="File Symbols (Scatter Points)"

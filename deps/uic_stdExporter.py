@@ -828,6 +828,12 @@ class stdfExporter(QtWidgets.QDialog):
         # fork(falbany): modern exporter toggle
         self.exportUI.ModernReport_cb.setChecked(getSetting().gen.modern_export)
         self.exportUI.ModernReport_cb.toggled.connect(self.onModernToggled)
+        # fork(falbany): hide re-measured / split temperature toggles
+        self.exportUI.HideRemeasured_cb.setChecked(getSetting().gen.hide_remeasured)
+        self.exportUI.HideRemeasured_cb.toggled.connect(self.onHideRemeasuredToggled)
+        self.exportUI.SplitTemperature_cb.setChecked(getSetting().gen.split_temperature)
+        self.exportUI.SplitTemperature_cb.toggled.connect(self.onSplitTemperatureToggled)
+        self._sync_option_checkboxes()
         # bind check/cancel button to function
         self.exportUI.checkAll.clicked.connect(lambda: self.toggleSite(True))
         self.exportUI.cancelAll.clicked.connect(lambda: self.toggleSite(False))
@@ -840,6 +846,23 @@ class stdfExporter(QtWidgets.QDialog):
         # fork(falbany): persist modern exporter toggle
         getSetting().gen.modern_export = checked
         dumpConfigFile()
+        self._sync_option_checkboxes()  # fork(falbany): options live only under Modern Report
+
+    def onHideRemeasuredToggled(self, checked: bool):
+        # fork(falbany): persist hide re-measured toggle
+        getSetting().gen.hide_remeasured = checked
+        dumpConfigFile()
+
+    def onSplitTemperatureToggled(self, checked: bool):
+        # fork(falbany): persist split temperature toggle
+        getSetting().gen.split_temperature = checked
+        dumpConfigFile()
+
+    def _sync_option_checkboxes(self):
+        # fork(falbany): both options are Modern-only — disabled with it
+        enabled = self.exportUI.ModernReport_cb.isChecked()
+        self.exportUI.HideRemeasured_cb.setEnabled(enabled)
+        self.exportUI.SplitTemperature_cb.setEnabled(enabled)
                 
     def showUI(self):
         # used to determine the source of close event

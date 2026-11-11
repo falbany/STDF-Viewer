@@ -24,3 +24,37 @@ def test_modern_export_false_round_trips():
     dumped = params.model_dump(by_alias=True)
     assert dumped["General"]["Modern Export"] is False
     assert params.gen.modern_export is False
+
+
+def test_hide_remeasured_default_false():
+    assert SettingParams().gen.hide_remeasured is False
+
+
+def test_hide_remeasured_alias_in_dump():
+    dumped = SettingParams().model_dump(by_alias=True)
+    assert dumped["General"]["Hide Remeasured"] is False
+
+
+def test_hide_remeasured_round_trips():
+    params = SettingParams()
+    params.gen.hide_remeasured = True
+    dumped = params.model_dump(by_alias=True)
+    assert dumped["General"]["Hide Remeasured"] is True
+    assert params.gen.hide_remeasured is True
+
+
+def test_split_temperature_default_false():
+    assert SettingParams().gen.split_temperature is False
+
+
+def test_split_temperature_alias_in_dump():
+    dumped = SettingParams().model_dump(by_alias=True)
+    assert dumped["General"]["Split Temperature"] is False
+
+
+def test_split_temperature_round_trips():
+    params = SettingParams()
+    params.gen.split_temperature = True
+    dumped = params.model_dump(by_alias=True)
+    assert dumped["General"]["Split Temperature"] is True
+    assert params.gen.split_temperature is True

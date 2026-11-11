@@ -121,6 +121,12 @@ class Ui_exportUI(object):
         self.ModernReport_cb = QtWidgets.QCheckBox(self.contentPage)  # fork(falbany): modern exporter toggle
         self.ModernReport_cb.setObjectName("ModernReport_cb")
         self.verticalLayout_2.addWidget(self.ModernReport_cb)
+        self.HideRemeasured_cb = QtWidgets.QCheckBox(self.contentPage)  # fork(falbany): hide re-measured DUTs toggle
+        self.HideRemeasured_cb.setObjectName("HideRemeasured_cb")
+        self.verticalLayout_2.addWidget(self.HideRemeasured_cb)
+        self.SplitTemperature_cb = QtWidgets.QCheckBox(self.contentPage)  # fork(falbany): split DUT Summary by temperature
+        self.SplitTemperature_cb.setObjectName("SplitTemperature_cb")
+        self.verticalLayout_2.addWidget(self.SplitTemperature_cb)
         self.stackedWidget.addWidget(self.contentPage)
         self.testPage = QtWidgets.QWidget()
         self.testPage.setObjectName("testPage")
@@ -412,6 +418,8 @@ class Ui_exportUI(object):
         self.Stat_cb.setText(_translate("exportUI", "Test Statistics"))
         self.GDR_DTR_cb.setText(_translate("exportUI", "GDR DTR Summary"))
         self.ModernReport_cb.setText(_translate("exportUI", "Modern Report"))  # fork(falbany): modern exporter toggle
+        self.HideRemeasured_cb.setText(_translate("exportUI", "Hide re-measured DUTs (keep latest)"))  # fork(falbany): hide re-measured DUTs toggle
+        self.SplitTemperature_cb.setText(_translate("exportUI", "Split Temperature"))  # fork(falbany): split DUT Summary by temperature
         self.PPQQ_cb.setText(_translate("exportUI", "Normal Validation"))
         self.Correlation_cb.setText(_translate("exportUI", "Correlation"))
         self.exportPath_selection.setTitle(_translate("exportUI", "Export Path Selection"))
