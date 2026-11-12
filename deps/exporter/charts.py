@@ -450,7 +450,9 @@ def build_bin_donut(
     ws.insert_chart(row_anchor, col_anchor, chart)
 
 
-def write_kpi_cards(ws, start_row: int, kpi: dict, n_files: int, theme) -> int:
+def write_kpi_cards(
+    ws, start_row: int, kpi: dict, n_files: int, theme, note_widths: bool = True
+) -> int:
     """Write the three dashboard KPI cards (seventh-wave mockup) starting
     at 1-based ``start_row`` (the label row) and return the next free row.
 
@@ -461,7 +463,9 @@ def write_kpi_cards(ws, start_row: int, kpi: dict, n_files: int, theme) -> int:
     — medium, in the card's DARK accent; corners combine two sides by
     construction). Card fills: neutral yellow / fail red / group blue-grey.
     Card 2's subtitle may clip at the uniform column width (accepted in
-    wave 8)."""
+    wave 8). ``note_widths=False`` skips the width ledger (the wafer
+    block's cards ride over the fixed 24 px columns — the autofit must
+    never resize them)."""
     label_row, value_row, sub_row = start_row, start_row + 1, start_row + 2
     yield_value = kpi.get("yield")
     effective_total = kpi.get("total", 0) - kpi.get("superseded", 0)
@@ -528,13 +532,16 @@ def write_kpi_cards(ws, start_row: int, kpi: dict, n_files: int, theme) -> int:
             },
         )
         ws.merge_range(label_row - 1, first0, label_row - 1, first0 + 1, label, top_fmt)
-        note_width(ws, first_col, label)
+        if note_widths:
+            note_width(ws, first_col, label)
         ws.merge_range(value_row - 1, first0, value_row - 1, first0 + 1, value, mid_fmt)
-        note_width(ws, first_col, str(value))
+        if note_widths:
+            note_width(ws, first_col, str(value))
         ws.merge_range(
             sub_row - 1, first0, sub_row - 1, first0 + 1, subtitle, bottom_fmt
         )
-        note_width(ws, first_col, subtitle)
+        if note_widths:
+            note_width(ws, first_col, subtitle)
 
     return sub_row + 1
 
@@ -755,15 +762,75 @@ def _wafer_site_info(sites) -> str:
     return "All Sites" if -1 in sites else f"Site {', '.join(map(str, sites))}"
 
 
+def wafer_kpi_from_grid(grid: dict, bin_pf: dict) -> dict:
+    """KPI counts derived from the DEDUPLICATED die grid (2026-11-12 user
+    ruling: the cards must match the SW bin table, whose counts come from
+    the same grid — the getWaferStatistics DUT-record counts disagree by
+    construction: they include superseded DUTs, DUTs without coordinates
+    and duplicate (x, y) retests). pass = P bins, failed = F bins,
+    unknown = the rest; superseded never reaches the map (Supersede=0 in
+    the coords SQL) -> 0; yield = pass / (total - superseded) — the
+    write_kpi_cards convention."""
+    total = len(grid)
+    counts: dict = {}
+    for sbin in grid.values():
+        counts[sbin] = counts.get(sbin, 0) + 1
+    n_pass = sum(c for sbin, c in counts.items() if bin_pf.get(sbin) == "P")
+    n_fail = sum(c for sbin, c in counts.items() if bin_pf.get(sbin) == "F")
+    effective = total  # superseded == 0 on the map
+    return {
+        "total": total,
+        "pass": n_pass,
+        "failed": n_fail,
+        "unknown": total - n_pass - n_fail,
+        "superseded": 0,
+        "yield": (n_pass / effective) if effective else None,
+    }
+
+
+def wafer_info_rows(rows: list) -> list:
+    """Filter the flagged payload rows for the block's plain info rows:
+    the KPI-matching cells (Yield / Total / Pass / Failed / Unknown /
+    Superseded) are dropped — the KPI cards carry the grid-derived values
+    now — while the wafer identity cells (WAFER_ID, FABWF_ID, ...) and
+    any unrecognized text survive. Rows left empty are dropped."""
+    out = []
+    for row in rows or []:
+        kept = [
+            cell
+            for cell in row
+            if not (
+                isinstance(cell, str)
+                and (
+                    KPI_ROW_RE.match(cell.strip()) is not None
+                    or cell.strip().startswith("Yield:")
+                )
+            )
+        ]
+        if kept:
+            out.append(kept)
+    return out
+
+
 def write_wafer_map_block(
-    ws, theme, rows: list, map_data: dict, start_row: int, table_name: str
+    ws,
+    theme,
+    rows: list,
+    map_data: dict,
+    start_row: int,
+    table_name: str,
+    freeze_panes: bool = False,
 ) -> int:
-    """One wafer block (issue #2): title band + info rows, then — when the
-    map has dies — the SW bin table in A:D (write_bin_table, filter
-    arrows, palette-filled Value cells), spacer E, and the die grid from
-    column F (Y-axis header) / G (square die cells, sbin number as the
-    cell VALUE, CF rule per sbin). Empty map → title + info rows only.
-    Returns the next free row (the caller adds the inter-block gap)."""
+    """One wafer block (issue #2): title band, then — when the map has
+    dies — bin-chart-style KPI cards (values FROM THE GRID, matching the
+    SW table by construction), the leftover identity info rows, and the
+    SW bin table in A:D (write_bin_table, filter arrows, palette-filled
+    Value cells) sharing its band row with the die-grid X headers: spacer
+    E, Y-axis header F, square die cells from G (sbin number as the cell
+    VALUE, CF rule per sbin). ``freeze_panes`` freezes at the first die
+    row / column G (first block only — the caller decides). Empty map ->
+    title + info rows only. Returns the next free row (the caller adds
+    the inter-block gap)."""
     info = map_data.get("Info") or (1.0, "", False, False, "", [])
     wafer_id = info[4] if len(info) > 4 else ""
     sites = info[5] if len(info) > 5 else []
@@ -771,7 +838,7 @@ def write_wafer_map_block(
     title = f"{wafer_id} – {site_info}" if wafer_id else site_info
 
     x_axis, y_axis, grid, total = build_wafer_grid(map_data)
-    info_rows = rows or []
+    info_rows = wafer_info_rows(rows)
     info_fmt = theme.cell_format(font="body", align="left", border=True)
 
     if not grid:
@@ -786,14 +853,30 @@ def write_wafer_map_block(
         return start_row + len(info_rows) + 1
 
     last_col0 = WAFER_FIRST_DIE_COL0 + len(x_axis) - 1
-    b = start_row + len(info_rows) + 2  # band / X-header row (1-based)
+    # band / X-header row (1-based): title, ONE blank row (bin-chart
+    # dashboard cadence), three KPI card rows (label/value/subtitle), the
+    # leftover info rows, ONE blank row
+    b = start_row + 7 + len(info_rows)
 
     ws.merge_range(
         start_row - 1, 0, start_row - 1, last_col0, title, theme.lookalike("title")
     )
+    write_kpi_cards(
+        ws,
+        start_row + 2,
+        wafer_kpi_from_grid(grid, map_data.get("BinPF") or {}),
+        1,  # one wafer lives in one file
+        theme,
+        note_widths=False,  # column E is the 24 px spacer — never the ledger
+    )
     for offset, row in enumerate(info_rows):
         for col, value in enumerate(row):
-            ws.write(start_row + offset, col, value, info_fmt)
+            ws.write(start_row + 5 + offset, col, value, info_fmt)
+
+    if freeze_panes:
+        # keep title + cards + info + band/X headers and columns A:F (the
+        # Y-axis header) visible while scrolling the die grid
+        ws.freeze_panes(b, WAFER_FIRST_DIE_COL0)
 
     # fixed squares: spacer E, Y-axis header F, die columns G.. — explicit
     # widths, never the ledger

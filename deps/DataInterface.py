@@ -892,6 +892,13 @@ class DataInterface:
             map_data["Palette"] = wafer_bin_palette(
                 map_data, self.SBIN_dict, getSetting().color.sbin_colors
             )
+            # issue #2 KPI cards: the exporter classifies mapped dies into
+            # pass / fail / unknown via BIN_PF — grid counts are the single
+            # source of both the cards and the SW bin table
+            map_data["BinPF"] = {
+                sbin: self.SBIN_dict.get(sbin, {}).get("BIN_PF", "")
+                for sbin in (map_data.get("Data") or {})
+            }
         return {"rows": rows, "map": map_data}
 
 

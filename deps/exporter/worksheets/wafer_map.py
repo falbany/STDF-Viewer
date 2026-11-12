@@ -24,12 +24,14 @@
 #
 Wafer Map worksheet writer (moved verbatim from generator.py,
 worksheets split 2026-11-12; issue #2 rewires the per-wafer body from the
-static PNG to the live cell-grid bin map — stacked wafer keeps the image).
+static PNG to the live cell-grid bin map. 2026-11-12 user ruling: NO PNG
+on the sheet at all — the stacked-wafer fail-count map (waferInd == -1)
+has no SW-bin equivalent, so its tuple is skipped (progress still ticks);
+the sheet therefore starts at A1).
 """
 from deps.SharedSrc import tab
 from deps.uic_stdExporter import ReportSelection
 from deps.exporter.charts import wafer_table_name, write_wafer_map_block
-from deps.exporter.sheets import insert_report_image
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.writer import FOOTER_TEXT
 
@@ -44,50 +46,41 @@ class WaferMapMixin:
 
         key = ReportSelection.Wafer
         row = self._row.get(key, 0)
+        first_block = True
         for index, wafer in enumerate(self.waferTuples):
             if self.forceQuit:
                 return
             if wafer[0] == -1:
-                # stacked wafer (fail-count colormap): image + classic info
-                # rows — out of the cell-map scope (issue #2 non-goal)
-                image_io = self.waitForImage(
-                    wafer, 0, self.selectedSites, self.selectedFiles, tab.Wafer
+                # stacked wafer (fail-count colormap): no SW-bin equivalent,
+                # and the sheet carries NO PNG at all (user ruling) — skip
+                # the block, keep the progress tick
+                self.loopCount += 1
+                self.sendProgress()
+                continue
+            # flagged fetch: one bundled payload (info rows + map data
+            # + palette) per wafer; the block writes title, KPI cards,
+            # info rows, SW table A:D and the die grid from column F
+            payload = self.waitForDataList(
+                [],
+                self.selectedSites,
+                self.selectedFiles,
+                tab.Wafer,
+                {"testTuples": [wafer], "waferMapData": wafer},
+            )
+            start_row = max(row, 1)  # block rows are 1-based; sheet starts A1
+            row = (
+                write_wafer_map_block(
+                    WaferSheet,
+                    self._theme,
+                    payload["rows"],
+                    payload["map"],
+                    start_row,
+                    wafer_table_name(index, wafer[2]),
+                    freeze_panes=first_block,
                 )
-                row += insert_report_image(WaferSheet, image_io, row) + 2
-                dataTable = self.waitForDataList(
-                    [],
-                    self.selectedSites,
-                    self.selectedFiles,
-                    tab.Wafer,
-                    {"testTuples": [wafer]},
-                )
-                for dataList in dataTable:
-                    self._write_body_row(WaferSheet, row, dataList)
-                    row += 1
-                row += 3
-            else:
-                # flagged fetch: one bundled payload (info rows + map data
-                # + palette) per wafer; the block writes title, info rows,
-                # SW table A:D and the die grid from column F
-                payload = self.waitForDataList(
-                    [],
-                    self.selectedSites,
-                    self.selectedFiles,
-                    tab.Wafer,
-                    {"testTuples": [wafer], "waferMapData": wafer},
-                )
-                start_row = max(row, 1)  # block rows are 1-based
-                row = (
-                    write_wafer_map_block(
-                        WaferSheet,
-                        self._theme,
-                        payload["rows"],
-                        payload["map"],
-                        start_row,
-                        wafer_table_name(index, wafer[2]),
-                    )
-                    + 3
-                )
+                + 3
+            )
+            first_block = False
             self.loopCount += 1
             self.sendProgress()
         self._row[key] = row

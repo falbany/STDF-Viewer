@@ -262,6 +262,7 @@ WAFER_MAP_PAYLOAD = {
     },
     "Statistic": {1: ("Good", 2, 66.7), 2: ("Fail", 1, 33.3)},
     "Palette": {1: "#00CC00", 2: "#CC0000"},
+    "BinPF": {1: "P", 2: "F"},
 }
 
 
@@ -987,8 +988,8 @@ class TestChartSheets:
             for c in row
             if c.value is not None
         }
-        assert "Yield: 60.00%" in wafer
         assert "WAFER_ID: W01" in wafer
+        assert "Yield" in wafer  # KPI card label — the % string is gone
         assert "TREND-ROW" in trend
 
     def test_bin_sheet_uniform_page_widths(self, generated):
@@ -1494,23 +1495,44 @@ class TestWaferCellMap:
         assert pics == 2
 
     def test_block_title_and_sw_table(self, generated):
+        # layout: title 1, blank 2, KPI cards 3-5, info 7, blank 8, b=9
+        # (band A:D + X headers share the row), die rows 10..12, SW header
+        # 10 (data 11..12, total 13) — the header row shares the first die
+        # row across the disjoint column zones (A:D vs G..)
         _, wb, _, _, _ = generated
         ws = wb["Wafer Map"]
         assert ws["A1"].value == "W01 – All Sites"
-        assert ws["A2"].value == "Yield: 60.00%"
-        assert [ws.cell(row=5, column=c).value for c in range(1, 5)] == list(
+        assert ws["A3"].value == "Yield"  # bin-chart-style KPI cards
+        assert ws["A7"].value == "WAFER_ID: W01"  # identity info survives
+        assert [ws.cell(row=10, column=c).value for c in range(1, 5)] == list(
             BIN_TABLE_HEADERS
         )
         assert "SW_0_W01" in ws.tables
 
+    def test_kpi_cards_derive_from_the_grid(self, generated):
+        # 2026-11-12 user ruling: cards == SW table (grid is the single
+        # source). Payload grid: 2 dies sbin 1 (P), 1 die sbin 2 (F)
+        _, wb, _, _, _ = generated
+        ws = wb["Wafer Map"]
+        assert ws["A4"].value == pytest.approx(2 / 3)
+        assert ws["C4"].value == 1
+        assert ws["E4"].value == 3
+        assert ws.cell(row=13, column=3).value == 3  # SW table Total
+
+    def test_freeze_panes_on_the_die_grid(self, generated):
+        # first block freezes at its first die row / column G: the title,
+        # cards, info rows and the band/X-header row stay visible
+        _, wb, _, _, _ = generated
+        assert wb["Wafer Map"].freeze_panes == "G10"
+
     def test_die_cell_holds_sbin_value(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["Wafer Map"]
-        assert ws["G4"].value == "-1"  # first X header (ascending)
-        assert ws["F5"].value == "1"  # top Y header = max Y
-        assert ws["G6"].value == 1  # die (-1, 0)
-        assert ws["H6"].value == 1  # die (0, 0)
-        assert ws["H7"].value == 2  # die (0, -1)
+        assert ws["G9"].value == "-1"  # first X header (ascending)
+        assert ws["F10"].value == "1"  # top Y header = max Y
+        assert ws["G11"].value == 1  # die (-1, 0)
+        assert ws["H11"].value == 1  # die (0, 0)
+        assert ws["H12"].value == 2  # die (0, -1)
 
     def test_die_columns_stay_square_after_autofit(self, generated):
         # Review Focus pin: _autofit_columns runs AFTER the blocks — the
@@ -1524,9 +1546,10 @@ class TestWaferCellMap:
         assert col_dim(ws, "F").width == 1097 / 256
         assert col_dim(ws, "A") is not None
 
-    def test_stacked_wafer_keeps_image(self, tmp_path, qapp):
-        # waferInd == -1: out of the bin-map scope — image path + classic
-        # unflagged rows, byte-identical to the pre-issue-#2 behavior
+    def test_stacked_wafer_skipped_no_png(self, tmp_path, qapp):
+        # 2026-11-12 user ruling: NO PNG on the Wafer sheet at all — the
+        # stacked fail-count map (waferInd == -1) has no SW-bin equivalent,
+        # so its tuple renders no block (the progress tick still fires)
         _, wb, report_path, _, _ = build_generated(
             tmp_path, qapp, wafer_tuples=[(-1, -1, "STACK")]
         )
@@ -1536,14 +1559,11 @@ class TestWaferCellMap:
                 for n in zf.namelist()
                 if n.startswith("xl/drawings/drawing") and n.endswith(".xml")
             )
-        assert pics == 3  # 2 trend + 1 wafer anchors
-        wafer = {
-            c.value
-            for row in wb["Wafer Map"].iter_rows()
-            for c in row
-            if c.value is not None
-        }
-        assert "WAFER-W01-ROW" in wafer
+        assert pics == 2  # 2 trend anchors only
+        ws = wb["Wafer Map"]
+        values = {c.value for row in ws.iter_rows() for c in row if c.value is not None}
+        assert "WAFER-W01-ROW" not in values  # no classic info row either
+        assert ws.max_row == 1  # empty sheet: the next wafer would start at A1
 
     def test_empty_payload_writes_title_and_rows_only(self, tmp_path, qapp):
         # Review Focus pin: a WIR/WCR-only wafer (empty map) must not break
@@ -1570,4 +1590,4 @@ class TestWaferCellMap:
         ws = wb["Wafer Map"]
         assert "A1:D1" in {str(r) for r in ws.merged_cells.ranges}
         assert not ws.tables
-        assert ws["A2"].value == "Yield: 60.00%"
+        assert ws["A2"].value == "WAFER_ID: W01"  # KPI cells drop out
