@@ -860,3 +860,20 @@ def group_order_by_temperature(
         temperature = resolve_dut_temperature(part_id, file_temperature)
         groups.setdefault(temperature, []).append((fid, dut_index))
     return groups
+
+
+def order_dut_block(worksheets: list, block: list) -> list:
+    """Stable reorder placing the DUT-derived `block` contiguously directly
+    after its first member (the base DUT sheet) — §7.4's tab-order ruling.
+
+    The base sheet is already in `worksheets` at its creation position;
+    chunk-overflow / split sheets sit at the workbook end. Everything
+    outside the block keeps its relative order. Identity when the block
+    has no more than one member (base-only exports render in place) or
+    nothing to place."""
+    if len(block) <= 1:
+        return worksheets
+    base, derived = block[0], block[1:]
+    base_at = worksheets.index(base)
+    without_derived = [ws for ws in worksheets if ws not in derived]
+    return without_derived[: base_at + 1] + derived + without_derived[base_at + 1 :]

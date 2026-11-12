@@ -11,10 +11,10 @@ import pytest
 from openpyxl import load_workbook
 from PyQt5 import QtCore
 
-from deps.exporter.generator import (
-    ModernReportGenerator,
+from deps.exporter.generator import ModernReportGenerator
+from deps.exporter.worksheets.file_info import file_temperatures_from_file_info
+from deps.exporter.worksheets.test_statistics import (
     apply_ftr_pseudo_limits,
-    file_temperatures_from_file_info,
     numericize_value,
     parse_vheader,
     stat_cf_ranges,

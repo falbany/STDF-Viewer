@@ -21,7 +21,8 @@ from PIL import Image as PILImage
 from PyQt5 import QtCore
 
 from deps.SharedSrc import REC, getSetting, tab
-from deps.exporter.generator import ModernReportGenerator, bin_banner_from_file_info
+from deps.exporter.generator import ModernReportGenerator
+from deps.exporter.worksheets.file_info import bin_banner_from_file_info
 from deps.exporter.theme import number_format_from_settings
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
 from tests.exporter.test_writer import col_dim
@@ -1409,7 +1410,7 @@ class TestDutBlockTabOrder:
     the workbook end."""
 
     def test_order_dut_block_places_block_after_base(self):
-        from deps.exporter.generator import order_dut_block
+        from deps.exporter.worksheets.dut_summary import order_dut_block
 
         fileinfo, dut, gdr, stat, trend, chunk, split_a = object(), object(), object(), object(), object(), object(), object()
         worksheets = [fileinfo, dut, gdr, stat, trend, chunk, split_a]
@@ -1417,14 +1418,14 @@ class TestDutBlockTabOrder:
         assert order_dut_block(worksheets, block) == [fileinfo, dut, chunk, split_a, gdr, stat, trend]
 
     def test_single_member_block_is_identity(self):
-        from deps.exporter.generator import order_dut_block
+        from deps.exporter.worksheets.dut_summary import order_dut_block
 
         fileinfo, dut, stat = object(), object(), object()
         worksheets = [fileinfo, dut, stat]
         assert order_dut_block(worksheets, [dut]) == worksheets
 
     def test_empty_block_is_identity(self):
-        from deps.exporter.generator import order_dut_block
+        from deps.exporter.worksheets.dut_summary import order_dut_block
 
         worksheets = [object(), object()]
         assert order_dut_block(worksheets, []) == worksheets
