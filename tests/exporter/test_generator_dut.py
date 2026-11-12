@@ -1500,20 +1500,20 @@ class TestWaferCellMap:
         assert pics == 2
 
     def test_block_title_and_sw_table(self, generated):
-        # 2026-11-13 layout: title 1, identity line 2 (WAFER_ID key A2 /
-        # value merged B2:D2), blank 3, STACKED KPI cards 4-12 (Yield
-        # 4-6, Fails 7-9, Total 10-12, each A:D), map anchored at row 4
-        # (X headers G4.., Y axis F5.., dies 5..7), properties 14/16/18,
-        # SW table from 20 (band 20, header 21, data 22..23, total 24)
+        # 2026-11-13 layout v2: title 1, identity line 2 (WAFER_ID key
+        # A2 / value merged B2:D2), map anchored at F3 (X headers G3..,
+        # Y axis F4.., dies 4..6), Yield card A4:D6, Fails A7:A9 + Total
+        # B7:D9 side by side, properties on lines 11-13 (border box),
+        # SW table from 15 (band 15, header 16, data 17..18, total 19)
         _, wb, _, _, _ = generated
         ws = wb["Wafer Map"]
         assert ws["A1"].value == "W01 – All Sites"
         assert ws["A2"].value == "WAFER_ID:"
         assert ws["B2"].value == "W01"
         assert ws["A4"].value == "Yield"  # bin-chart-style KPI cards
-        assert ws["A14"].value == "Wafer Center:"
-        assert ws["B14"].value == "(10, 20)"
-        assert [ws.cell(row=21, column=c).value for c in range(1, 5)] == list(
+        assert ws["A11"].value == "Wafer Center:"
+        assert ws["B11"].value == "(10, 20)"
+        assert [ws.cell(row=16, column=c).value for c in range(1, 5)] == list(
             BIN_TABLE_HEADERS
         )
         assert "SW_0_W01" in ws.tables
@@ -1525,36 +1525,36 @@ class TestWaferCellMap:
         # Count cells are FORMULAS over the die map, with cached results
         _, wb, report_path, _, _ = generated
         ws = wb["Wafer Map"]
-        assert ws["A5"].value == "=(C22)/COUNT($G$5:$I$7)"
-        assert ws["A8"].value == "=C23"
-        assert ws["A11"].value == "=COUNT($G$5:$I$7)"
-        assert ws["C22"].value == "=COUNTIF($G$5:$I$7,B22)"
-        assert ws["C23"].value == "=COUNTIF($G$5:$I$7,B23)"
-        assert ws["C24"].value == "=SUM(C22:C23)"
+        assert ws["A5"].value == "=(C17)/COUNT($G$4:$I$6)"
+        assert ws["A8"].value == "=C18"
+        assert ws["B8"].value == "=COUNT($G$4:$I$6)"
+        assert ws["C17"].value == "=COUNTIF($G$4:$I$6,B17)"
+        assert ws["C18"].value == "=COUNTIF($G$4:$I$6,B18)"
+        assert ws["C19"].value == "=SUM(C17:C18)"
         from openpyxl import load_workbook
 
         cached = load_workbook(report_path, data_only=True)["Wafer Map"]
         assert cached["A5"].value == pytest.approx(2 / 3)
         assert cached["A8"].value == 1
-        assert cached["A11"].value == 3
-        assert cached["C22"].value == 2
-        assert cached["C23"].value == 1
-        assert cached["C24"].value == 3  # SW table Total
+        assert cached["B8"].value == 3
+        assert cached["C17"].value == 2
+        assert cached["C18"].value == 1
+        assert cached["C19"].value == 3  # SW table Total
 
     def test_freeze_panes_on_the_die_grid(self, generated):
         # first block freezes at its die grid (title + identity + X-header
         # rows and columns A:F stay visible while scrolling)
         _, wb, _, _, _ = generated
-        assert wb["Wafer Map"].freeze_panes == "G5"
+        assert wb["Wafer Map"].freeze_panes == "G4"
 
     def test_die_cell_holds_sbin_value(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["Wafer Map"]
-        assert ws["G4"].value == "-1"  # first X header (ascending)
-        assert ws["F5"].value == "1"  # top Y header = max Y
-        assert ws["G6"].value == 1  # die (-1, 0)
-        assert ws["H6"].value == 1  # die (0, 0)
-        assert ws["H7"].value == 2  # die (0, -1)
+        assert ws["G3"].value == "-1"  # first X header (ascending)
+        assert ws["F4"].value == "1"  # top Y header = max Y
+        assert ws["G5"].value == 1  # die (-1, 0)
+        assert ws["H5"].value == 1  # die (0, 0)
+        assert ws["H6"].value == 2  # die (0, -1)
 
     def test_die_columns_stay_square_after_autofit(self, generated):
         # 2026-11-13 column plan pinned AFTER the autofit: A=30, B:D=8,

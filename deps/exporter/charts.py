@@ -460,6 +460,7 @@ def write_kpi_cards(
     card_spans: "tuple | None" = None,
     stacked: bool = False,
     card_defs: "tuple | None" = None,
+    card_rows: "tuple | None" = None,
 ) -> int:
     """Write the three dashboard KPI cards (seventh-wave mockup) starting
     at 1-based ``start_row`` (the label row) and return the next free row.
@@ -482,10 +483,16 @@ def write_kpi_cards(
     triples entirely — a value may be a ``(formula, cached_result)``
     tuple, written through the merged-range + write_formula pattern so
     the file opens on the cached number AND recalculates live.
-    ``note_widths=False`` skips the width ledger (the wafer block's
-    cards ride over the pinned columns — the autofit must never resize
-    them)."""
+    ``card_rows`` gives each card's row-slot index (× 3 rows) — the
+    wafer block's 2026-11-13 layout puts Yield in slot 0 (rows 4-6) and
+    Fails + Total side by side in slot 1 (rows 7-9): card_rows=(0, 1, 1).
+    A single-column span (first_col == last_col) writes plain cells
+    instead of a 1x1 merge. ``note_widths=False`` skips the width ledger
+    (the wafer block's cards ride over the pinned columns — the autofit
+    must never resize them)."""
     label_row, sub_row = start_row, start_row + 2
+    if card_rows is None:
+        card_rows = (0, 1, 2) if stacked else (0, 0, 0)
     yield_value = kpi.get("yield")
     effective_total = kpi.get("total", 0) - kpi.get("superseded", 0)
     cards = (
@@ -515,7 +522,7 @@ def write_kpi_cards(
     for index, (label, value, subtitle, is_percent) in enumerate(cards):
         first_col, last_col, fill_hex, border_hex = card_spans[index]
         first0, last0 = first_col - 1, last_col - 1
-        card_label_row = label_row + 3 * index if stacked else label_row
+        card_label_row = label_row + 3 * card_rows[index]
         card_value_row = card_label_row + 1
         card_sub_row = card_label_row + 2
         # row-merge formats: fill + accent sides per row band
@@ -560,28 +567,32 @@ def write_kpi_cards(
                 "right_color": accent.format(border_hex),
             },
         )
-        ws.merge_range(card_label_row - 1, first0, card_label_row - 1, last0, label, top_fmt)
+        def _put(row, text, fmt):
+            if last0 > first0:
+                ws.merge_range(row - 1, first0, row - 1, last0, text, fmt)
+            else:
+                ws.write(row - 1, first0, text, fmt)
+
+        _put(card_label_row, label, top_fmt)
         if note_widths:
             note_width(ws, first_col, label)
-        ws.merge_range(card_value_row - 1, first0, card_value_row - 1, last0, "", mid_fmt)
         if isinstance(value, tuple):
             # (formula, cached_result): xlsxwriter's merge_range would
             # dispatch '=' strings to write_formula with cached 0 — write
             # the anchor explicitly with the real cached result instead
+            ws.merge_range(card_value_row - 1, first0, card_value_row - 1, last0, "", mid_fmt)
             ws.write_formula(card_value_row - 1, first0, value[0], mid_fmt, value[1])
             note_value = str(value[1])
         else:
-            ws.write(card_value_row - 1, first0, value, mid_fmt)
+            _put(card_value_row, value, mid_fmt)
             note_value = str(value)
         if note_widths:
             note_width(ws, first_col, note_value)
-        ws.merge_range(
-            card_sub_row - 1, first0, card_sub_row - 1, last0, subtitle, bottom_fmt
-        )
+        _put(card_sub_row, subtitle, bottom_fmt)
         if note_widths:
             note_width(ws, first_col, subtitle)
 
-    return (label_row + 3 * len(cards)) if stacked else sub_row + 1
+    return label_row + 3 * (max(card_rows) + 1)
 
 
 def write_merged_headline(
@@ -925,22 +936,47 @@ def wafer_info_rows(rows: list) -> list:
 # row, dies from the next one, Y-axis header in F), the wafer properties
 # and the SW bin table below — blank rows separate every zone.
 WAFER_KPI_SPANS = (
-    (1, 4, "FFF3CD", KPI_BORDER_DARK_YELLOW),
-    (1, 4, "FFCCCC", KPI_BORDER_DARK_RED),
-    (1, 4, "E9EEF6", KPI_BORDER_DARK_BLUE),
+    (1, 4, "FFF3CD", KPI_BORDER_DARK_YELLOW),  # Yield: full A:D (rows 4-6)
+    (1, 1, "FFCCCC", KPI_BORDER_DARK_RED),  # Fails: column A (rows 7-9)
+    (2, 4, "E9EEF6", KPI_BORDER_DARK_BLUE),  # Total: B:D (rows 7-9)
 )
+WAFER_KPI_ROWS = (0, 1, 1)  # Yield slot 0 (4-6); Fails+Total share slot 1 (7-9)
 WAFER_LABEL_COL_WIDTH = 30  # column A — keys / labels (pinned post-autofit)
 WAFER_VALUE_COL_WIDTH = 8  # columns B:D — values
 WAFER_SPACER_PINNED_WIDTH = 3.5  # column E (2026-11-13: was the 2.71 square)
 
 
-def _wafer_kv_row(ws, row: int, key: str, value: str, theme) -> None:
+_PROP_GRAY = "#808080"
+
+
+def _wafer_prop_fmt(theme, sides: str) -> "object":
+    """Explanatory-Text format with the border sides of one cell of the
+    properties box (``sides`` = subset of "tlrb" — top/left/right/bottom;
+    the box hugs rows 11-13 × A:D)."""
+    extra = {
+        "font_name": "Calibri",
+        "font_size": 11,
+        "italic": True,
+        "font_color": _PROP_GRAY,
+    }
+    for side, code in (("top", "t"), ("left", "l"), ("right", "r"), ("bottom", "b")):
+        if code in sides:
+            extra[side] = 1
+            extra[f"{side}_color"] = _PROP_GRAY
+    return theme.cell_format(extra=extra)
+
+
+def _wafer_kv_row(ws, row: int, key: str, value: str, theme, sides: str = "") -> None:
     """One key/value property line: key in column A, value merged B:D, in
-    the Excel "Explanatory Text" lookalike (2026-11-13 user ruling)."""
-    fmt = theme.lookalike("explanatory")
-    ws.write(row - 1, 0, key, fmt)
+    the Excel "Explanatory Text" lookalike — ``sides`` (subset of "tlrb")
+    adds the box border pieces (2026-11-13 user ruling). The key cell
+    never carries the group's right edge; the merged value never the
+    left edge."""
+    key_sides = "".join(c for c in sides if c in "tlb")
+    ws.write(row - 1, 0, key, _wafer_prop_fmt(theme, key_sides))
     if value:
-        ws.merge_range(row - 1, 1, row - 1, 3, value, fmt)
+        value_sides = "".join(c for c in sides if c in "trb")
+        ws.merge_range(row - 1, 1, row - 1, 3, value, _wafer_prop_fmt(theme, value_sides))
 
 
 def write_wafer_map_block(
@@ -952,18 +988,17 @@ def write_wafer_map_block(
     table_name: str,
     freeze_panes: bool = False,
 ) -> int:
-    """One wafer block (issue #2, 2026-11-13 layout): title band, the
-    identity line (WAFER_ID etc. — key col A, value merged B:D) right
-    below it, three STACKED bin-chart-style KPI cards across A:D (values
-    FROM THE GRID, matching the SW table by construction), the die map
-    anchored at F{start+3} (X-coordinate headers on that row, square die
-    cells — sbin number as the cell VALUE, CF rule per sbin — from G,
-    Y-axis header in F), then the rendered wafer properties (Wafer
-    Center / Flat Direction / XY Direction) and the SW bin table in A:D
-    at the bottom — blank rows separate every zone. ``freeze_panes``
-    freezes at the die grid (first block only — the caller decides).
-    Empty map -> title + identity rows only. Returns the next free row
-    (the caller adds the inter-block gap)."""
+    """One wafer block (issue #2, 2026-11-13 layout v2): title band, the
+    identity line (WAFER_ID — key col A, value merged B:D) on row 2, the
+    die map anchored at F{start+2} (X headers on that row, square die
+    cells — sbin number as the cell VALUE, CF rule per sbin — from G, the
+    Y-axis header in F), KPI cards with Yield full-width A:D (rows 4-6)
+    and Fails (column A) + Total (B:D) side by side on rows 7-9, the
+    rendered wafer properties on fixed lines 11-13 inside a border box,
+    and the SW bin table from row 15. The A:D zone (cards/properties/
+    table) and the F.. map zone are vertically independent. Empty map ->
+    title + identity rows only. Returns the next free row (the caller
+    adds the inter-block gap)."""
     info = map_data.get("Info") or (1.0, "", False, False, "", [])
     wafer_id = info[4] if len(info) > 4 else ""
     sites = info[5] if len(info) > 5 else []
@@ -1004,12 +1039,16 @@ def write_wafer_map_block(
     counts = {sbin: sum(1 for v in grid.values() if v == sbin) for sbin in bins_present}
     pf_map = wafer_bin_pf_map(grid, map_data.get("BinPF") or {}, map_data.get("Palette"))
     kpi = wafer_kpi_from_grid(grid, map_data.get("BinPF") or {}, map_data.get("Palette"))
-    cards_start = start_row + len(identity_cells) + 2
-    cards_end = cards_start + 3 * 3 - 1  # three 3-row cards, 1-based
-    xh_row = start_row + 3  # map anchor row (1-based)
-    props_start = max(cards_end, xh_row + len(y_axis)) + 2
+    cards_start = start_row + len(identity_cells) + 2  # rows 4-6 / 7-9
+    cards_end = cards_start + 6 - 1  # two card slots x 3 rows, 1-based
+    xh_row = start_row + 2  # map anchor row (F3 on the first block)
     properties = map_data.get("Properties") or []
-    sw_start = props_start + 2 * max(len(properties) - 1, 0) + 2
+    # fixed slots: properties 11-13 (r+10..r+12), SW table 15 (r+14) —
+    # guarded to shift below the cards when several identity lines exist
+    props_start = max(start_row + 10, cards_end + 2)
+    # consecutive property lines: last one at props_start + n - 1, one
+    # blank row, then the table — fixed line 15 on the first block
+    sw_start = max(start_row + 14, props_start + len(properties) + 1)
     first_letter = xlutil.xl_col_to_name(WAFER_FIRST_DIE_COL0)
     last_letter = xlutil.xl_col_to_name(WAFER_FIRST_DIE_COL0 + len(x_axis) - 1)
     map_range = f"${first_letter}${xh_row + 1}:${last_letter}${xh_row + len(y_axis)}"
@@ -1052,7 +1091,7 @@ def write_wafer_map_block(
         theme,
         note_widths=False,  # pinned columns — never the ledger
         card_spans=WAFER_KPI_SPANS,
-        stacked=True,
+        card_rows=WAFER_KPI_ROWS,
         card_defs=card_defs,
     )
 
@@ -1101,10 +1140,16 @@ def write_wafer_map_block(
             },
         )
 
-    # wafer properties below the taller of (cards, map), each line
-    # separated by a blank row
+    # wafer properties on fixed lines 11-13 (one slot per rendered
+    # field), wrapped in a border box A:D around the group
     for offset, (key, value) in enumerate(properties):
-        _wafer_kv_row(ws, props_start + 2 * offset, key, value, theme)
+        row = props_start + offset
+        sides = "lr"
+        if offset == 0:
+            sides = "tlr"
+        if offset == len(properties) - 1:
+            sides += "b"
+        _wafer_kv_row(ws, row, key, value, theme, sides=sides)
 
     # SW bin table in A:D at the bottom (one blank row after the last
     # property) — counts from the DEDUPLICATED grid (never the raw
@@ -1128,4 +1173,4 @@ def write_wafer_map_block(
         count_map_range=map_range,
     )
 
-    return sw_start + len(bins_present) + 3
+    return max(sw_start + len(bins_present) + 3, xh_row + len(y_axis) + 1)

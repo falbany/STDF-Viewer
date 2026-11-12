@@ -1213,27 +1213,27 @@ class TestWriteWaferMapBlock:
     def test_block_writes_grid_cf_and_table(self, env):
         nxt = self.written(env)
         reloaded = env["reload"]()
-        # 2026-11-13 layout: title r=1 (merge A1:K1), identity line 2
-        # (WAFER_ID key A2 / value merged B2:D2), blank 3, STACKED KPI
-        # cards 4-12 (Yield 4-6, Fails 7-9, Total 10-12, each A:D), map
-        # anchored at row 4 (X headers G4..K4, Y axis F5..F9, dies 5..9),
-        # properties 14/16/18 (blank rows between), SW table from 20:
-        # band 20, header 21, data 22..23, total 24 -> returns 25
+        # 2026-11-13 layout v2: title r=1 (merge A1:K1), identity line 2
+        # (WAFER_ID key A2 / value merged B2:D2), map anchored at F3 (X
+        # headers G3..K3, Y axis F4..F8, dies 4..8), Yield card A4:D6,
+        # Fails A7:A9 + Total B7:D9 side by side, properties on fixed
+        # lines 11-13 in a border box, SW table from 15: band 15, header
+        # 16, data 17..18, total 19 -> returns 20
         assert "A1:K1" in {str(r) for r in reloaded.merged_cells.ranges}
         assert reloaded["A1"].value == "W01 – All Sites"
         assert reloaded["A2"].value == "WAFER_ID:"
         assert reloaded["B2"].value == "W01"
         assert "B2:D2" in {str(r) for r in reloaded.merged_cells.ranges}
-        assert reloaded["G4"].value == "-2"  # first X header (ascending)
-        assert reloaded["F5"].value == "2"  # top Y header = max Y
-        assert reloaded["I6"].value == 1  # die (x=0, y=1): sbin int
-        assert reloaded["I7"].value == 2  # duplicate (0,0): last wins
+        assert reloaded["G3"].value == "-2"  # first X header (ascending)
+        assert reloaded["F4"].value == "2"  # top Y header = max Y
+        assert reloaded["I5"].value == 1  # die (x=0, y=1): sbin int
+        assert reloaded["I6"].value == 2  # duplicate (0,0): last wins
         rngs = {str(rng) for rng in reloaded.conditional_formatting._cf_rules}
-        assert any("G5:K9" in rng for rng in rngs)
-        assert [reloaded.cell(row=21, column=c).value for c in range(1, 5)] == list(
+        assert any("G4:K8" in rng for rng in rngs)
+        assert [reloaded.cell(row=16, column=c).value for c in range(1, 5)] == list(
             BIN_TABLE_HEADERS
         )
-        assert nxt == 25
+        assert nxt == 20
 
     def test_empty_map_writes_title_and_rows_only(self, env):
         nxt = self.written(env, map_data={})
@@ -1266,7 +1266,7 @@ class TestWriteWaferMapBlock:
             r
             for cf in reloaded.conditional_formatting
             for r in cf.rules
-            if r.type == "cellIs" and str(cf.sqref) == "G5:K9" and r.operator == "equal"
+            if r.type == "cellIs" and str(cf.sqref) == "G4:K8" and r.operator == "equal"
             and r.formula == ["1"]
         ]
         fill_rgb = rule.dxf.fill.bgColor.rgb or rule.dxf.fill.fgColor.rgb
@@ -1287,57 +1287,69 @@ class TestWriteWaferMapBlock:
         )
         self.written(env, map_data=m)
         reloaded = env["reload"]()
-        # the dedup grid carries ONE bin -> SW data 22, Total 23 (a live
+        # the dedup grid carries ONE bin -> SW data 17, Total 18 (a live
         # SUM formula with cached 1)
-        assert reloaded["C22"].value == "=COUNTIF($G$5:$K$9,B22)"
-        assert reloaded["C23"].value == "=SUM(C22:C22)"
+        assert reloaded["C17"].value == "=COUNTIF($G$4:$K$8,B17)"
+        assert reloaded["C18"].value == "=SUM(C17:C17)"
         data_only = env.reload_data_only()
-        assert data_only["C22"].value == 1
-        assert data_only["C23"].value == 1
+        assert data_only["C17"].value == 1
+        assert data_only["C18"].value == 1
 
     def test_kpi_cards_carry_grid_values_matching_the_sw_table(self, env):
         # 2026-11-12 user ruling: the cards and the SW table share ONE
         # source (the deduplicated grid) — MAP's duplicate (0,0) counts
         # ONCE as sbin 2: 3 pass dies (sbin 1 = P), 2 fail (sbin 2 = F),
-        # 5 total, yield 0.6. 2026-11-13 layout: three STACKED A:D cards
-        # at rows 4-6 / 7-9 / 10-12. 2026-11-13 dynamic counts: the card
-        # values and the table's Count cells are FORMULAS over the die
-        # map, with cached results so previews show the numbers
+        # 5 total, yield 0.6. 2026-11-13 layout v2: Yield full-width rows
+        # 4-6, Fails (col A) + Total (B:D) side by side rows 7-9, and the
+        # card values plus the table Count cells are LIVE FORMULAS over
+        # the die map (cached results so previews show the numbers)
         self.written(env)
         reloaded = env["reload"]()
         data_only = env.reload_data_only()
         assert reloaded["A4"].value == "Yield"
-        assert reloaded["A5"].value == "=(C22)/COUNT($G$5:$K$9)"
+        assert reloaded["A5"].value == "=(C17)/COUNT($G$4:$K$8)"
         assert reloaded["A6"].value == "3 pass / 5 total parts"
         assert reloaded["A7"].value == "Fails"
-        assert reloaded["A8"].value == "=C23"
-        assert reloaded["A10"].value == "Total Parts"
-        assert reloaded["A11"].value == "=COUNT($G$5:$K$9)"
+        assert reloaded["A8"].value == "=C18"
+        assert reloaded["B7"].value == "Total Parts"
+        assert reloaded["B8"].value == "=COUNT($G$4:$K$8)"
         # SW table Count cells: live COUNTIF keyed on each row's Value
-        assert reloaded["C22"].value == "=COUNTIF($G$5:$K$9,B22)"
-        assert reloaded["C23"].value == "=COUNTIF($G$5:$K$9,B23)"
-        assert reloaded["C24"].value == "=SUM(C22:C23)"
+        assert reloaded["C17"].value == "=COUNTIF($G$4:$K$8,B17)"
+        assert reloaded["C18"].value == "=COUNTIF($G$4:$K$8,B18)"
+        assert reloaded["C19"].value == "=SUM(C17:C18)"
         # cached results (what previews/Excel show before a recalc)
         assert data_only["A5"].value == pytest.approx(0.6)
         assert data_only["A8"].value == 2
-        assert data_only["A11"].value == 5
-        assert data_only["C22"].value == 3
-        assert data_only["C23"].value == 2
-        assert data_only["C24"].value == 5
+        assert data_only["B8"].value == 5
+        assert data_only["C17"].value == 3
+        assert data_only["C18"].value == 2
+        assert data_only["C19"].value == 5
 
     def test_wafer_properties_below_the_cards(self, env):
-        # 2026-11-13: the rendered wafer properties sit under the cards,
-        # blank-row separated, key col A + value merged B:D
+        # 2026-11-13 v2: the rendered wafer properties sit on fixed lines
+        # 11-13, wrapped in a border box (A:D perimeter), key col A +
+        # value merged B:D, Explanatory-Text style
         self.written(env)
         reloaded = env["reload"]()
-        assert reloaded["A14"].value == "Wafer Center:"
-        assert reloaded["B14"].value == "(1.0, 2.0)"
-        assert "B14:D14" in {str(r) for r in reloaded.merged_cells.ranges}
-        assert reloaded["A16"].value == "Wafer Flat Direction:"
-        assert reloaded["B16"].value == "Down"
-        assert reloaded["A18"].value == "Wafer XY Direction:"
-        assert reloaded["B18"].value == "(Up, Left)"
-        assert reloaded["A14"].font.italic is True  # Explanatory Text look
+        assert reloaded["A11"].value == "Wafer Center:"
+        assert reloaded["B11"].value == "(1.0, 2.0)"
+        assert "B11:D11" in {str(r) for r in reloaded.merged_cells.ranges}
+        assert reloaded["A12"].value == "Wafer Flat Direction:"
+        assert reloaded["B12"].value == "Down"
+        assert reloaded["A13"].value == "Wafer XY Direction:"
+        assert reloaded["B13"].value == "(Up, Left)"
+        assert reloaded["A11"].font.italic is True  # Explanatory Text look
+        # border box around the group: top edge 11, bottom edge 13
+        assert reloaded["A11"].border.top.style == "thin"
+        assert reloaded["A11"].border.left.style == "thin"
+        assert reloaded["B11"].border.top.style == "thin"
+        assert reloaded["B11"].border.right.style == "thin"
+        assert reloaded["A12"].border.left.style == "thin"
+        assert reloaded["B12"].border.right.style == "thin"
+        assert reloaded["A13"].border.bottom.style == "thin"
+        assert reloaded["B13"].border.bottom.style == "thin"
+        assert reloaded["B13"].border.right.style == "thin"
+        assert reloaded["A14"].border.top.style is None  # box ends at 13
 
     def test_kpi_cards_never_note_widths_on_the_spacer(self, env):
         # the cards ride over columns A..F; the ledger must stay clean of
@@ -1349,7 +1361,7 @@ class TestWriteWaferMapBlock:
 
     def test_freeze_panes_at_the_die_grid(self, env):
         self.written(env, freeze_panes=True)
-        assert env["reload"]().freeze_panes == "G5"
+        assert env["reload"]().freeze_panes == "G4"
 
     def test_no_freeze_by_default(self, env):
         self.written(env)
