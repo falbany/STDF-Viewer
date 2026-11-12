@@ -1,0 +1,288 @@
+<h2>Wafer sheet — v3: SW table (A:D) side-by-side with the map (F+)</h2>
+<p class="subtitle">Your ruling: bin table in columns A–D as a fully functional Excel Table (filter arrows, data bar), blank spacer column E, map drawn to the right (F = Y-axis header, G+ = square die columns). Confirm this arrangement.</p>
+
+<style>
+  .wb-sheet { background:#fff; font-family: Calibri, "Helvetica Neue", Arial, sans-serif; position:relative; padding:2px 6px 8px 2px; }
+  table.wb-xl { border-collapse:collapse; }
+  table.wb-xl td { padding:0; }
+  .wb-gutter { background:#E9EBEE; border:1px solid #C6CACE; color:#444; font-size:11px;
+               width:26px; text-align:center; vertical-align:middle; }
+  .wb-colhead { background:#E9EBEE; border:1px solid #C6CACE; color:#444; font-size:11px;
+                text-align:center; vertical-align:middle; }
+  .wb-title-cell { font-family: Cambria, Georgia, serif; font-size:18px; font-weight:bold; color:#44546A; text-align:left; }
+  .wb-info-cell { border:1px solid #B8BCC2; font-size:12px; color:#222; padding:1px 4px; background:#fff; white-space:nowrap; }
+  .wb-axhead { background:#EDEFF2; border:1px solid #C6CACE; color:#333; font-size:10px; font-weight:bold;
+               text-align:center; vertical-align:middle; width:30px; }
+  .wb-die { width:24px; height:24px; text-align:center; vertical-align:middle; font-size:10px; }
+  .wb-blank { width:24px; height:24px; background:#fff; }
+  .wb-band { font-family:Calibri, Arial, sans-serif; font-size:13px; font-weight:bold; color:#44546A;
+             border-bottom:3px solid #8EA9DB; height:24px; vertical-align:bottom; text-align:left; padding:0 2px; }
+  .wb-swt { border-collapse:collapse; font-size:12px; }
+  .wb-swt th { background:#1E40AF; color:#fff; font-weight:bold; border:1px solid #1E40AF; padding:2px 8px; text-align:center; }
+  .wb-swt td { border:1px solid #B8BCC2; padding:2px 8px; text-align:center; background:#fff; }
+  .wb-dbar { position:relative; height:16px; min-width:96px; }
+  .wb-dbar .bar { position:absolute; left:0; top:1px; bottom:1px; background:#2E75D6; border:1px solid #1E40AF; }
+  .wb-dbar .txt { position:absolute; right:4px; top:0; font-size:11px; }
+  .wb-funnel { color:#DCE6F5; font-size:9px; margin-left:3px; }
+  .wb-badge { position:absolute; width:18px; height:18px; border-radius:50%; background:#1E40AF; color:#fff;
+              font-size:11px; font-weight:bold; display:flex; align-items:center; justify-content:center;
+              box-shadow:0 1px 3px rgba(0,0,0,.4); z-index:5; }
+  .wb-tabbar { display:flex; gap:2px; margin-top:6px; font-size:11px; }
+  .wb-tab { padding:3px 10px; border:1px solid #C6CACE; border-bottom:none; background:#E9EBEE; color:#555; border-radius:3px 3px 0 0; }
+  .wb-tab.active { background:#7C3AED; color:#fff; font-weight:bold; }
+  .wb-caption { font-size:11.5px; color:#666; margin:4px 0 0 28px; }
+  .wb-legend-row { display:flex; align-items:center; gap:8px; font-size:12px; margin-top:4px; }
+  .wb-swatch { width:16px; height:16px; border:1px solid #888; display:inline-block; }
+  .wb-next { overflow:hidden; position:relative; height:96px; opacity:.75; }
+  .wb-next .fade { position:absolute; inset:0; background:linear-gradient(to bottom, rgba(255,255,255,0) 0%, #fff 85%); }
+  .callout-list { font-size:13.5px; }
+  .callout-list li { margin:7px 0; }
+  .callout-list b { color:#1E40AF; }
+</style>
+
+<div class="mockup">
+  <div class="mockup-header">Wafer Map sheet — side-by-side block (gridlines hidden)</div>
+  <div class="mockup-body">
+    <div class="wb-sheet" id="wbsheet"></div>
+    <div class="wb-tabbar">
+      <div class="wb-tab">File Info</div><div class="wb-tab">DUT Summary</div><div class="wb-tab">Bin</div>
+      <div class="wb-tab">Test Statistics</div><div class="wb-tab active">Wafer Map</div><div class="wb-tab">Trend</div>
+    </div>
+    <div style="height:14px"></div>
+    <div class="wb-next" id="wbnext"><div class="fade"></div></div>
+    <p class="wb-caption">⑧ …next wafer block repeats below, separated by gap rows.</p>
+  </div>
+</div>
+
+<div class="section">
+  <h3>What the badges mean</h3>
+  <ol class="callout-list">
+    <li><b>① Title</b> — wafer ID + sites, merged across A..W (Title lookalike).</li>
+    <li><b>② Info row</b> — Yield / Total / Pass / Failed / Unknown / Superseded / WAFER_ID / FABWF_ID… (one row per selected site under the title when several sites are checked).</li>
+    <li><b>⑦ SW bin table, columns A:D</b> — <em>your ruling</em>: a real Excel Table (<code>add_table</code>) with filter arrows and the blue Distribution data bar; fed by <em>this map's</em> counts (per-wafer, not the file-level Bin sheet); the SBIN cells carry the same palette fills → doubles as the legend.</li>
+    <li><b>spacer column E</b> — blank, separates table from map.</li>
+    <li><b>④ Y-axis header, column F</b> — die Y coordinates per <code>invertY</code> (Y ascends upward on the GUI map, so max Y on top row).</li>
+    <li><b>③ X-axis header row</b> — die X coordinates per <code>invertX</code> (default: ascending left→right), above the die grid only.</li>
+    <li><b>⑤ Die cells, G..W</b> — square 24×24&nbsp;px; cell <em>value</em> = sbin number (real number: filterable, COUNTIF-able); CF rule per bin <code>cell == sbin → palette fill</code>; font black/white by fill luminance.</li>
+    <li><b>⑥ Round silhouette</b> — coordinates outside the wafer circle: empty cells, no fill, no border.</li>
+    <li><b>⑧ One block per wafer</b> — stacked wafer (fail-count colormap) keeps the existing PNG image, out of scope. A wafer with zero dies shows title + info rows only (your ruling).</li>
+  </ol>
+</div>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Column map of one block</div>
+    <div class="mockup-body">
+      <div style="font-size:12.5px; line-height:1.9;">
+        <b>A–D</b> — SW bin table (autofit widths, real Excel Table)<br>
+        <b>E</b> — blank spacer<br>
+        <b>F</b> — Y-axis header (~30px)<br>
+        <b>G–W</b> — die columns (24px, excluded from autofit)<br>
+        <span style="color:#666;">A–D keep <code>_autofit_columns</code>; E–W get fixed widths.</span>
+      </div>
+    </div>
+  </div>
+  <div class="mockup">
+    <div class="mockup-header">Palette — same as the GUI map</div>
+    <div class="mockup-body">
+      <div class="wb-legend-row"><span class="wb-swatch" style="background:#00CC00"></span> Pass bins (BIN_PF = P) — default #00CC00</div>
+      <div class="wb-legend-row"><span class="wb-swatch" style="background:#CC0000"></span> Fail bins (BIN_PF = F) — default #CC0000</div>
+      <div class="wb-legend-row"><span class="wb-swatch" style="background:#FE7B00"></span> Unknown (no P/F) — default #FE7B00</div>
+      <div class="wb-legend-row" style="color:#666;">Reads your own per-bin colors from settings, like the GUI map.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+  var rnd = mulberry32(20261112);
+
+  var XMIN=-8, XMAX=8, YMIN=-9, YMAX=9, RAD=8.55, EDGE=7.35;
+  var bins = {};
+  var clusterSeeds = [[-3,4],[5,-2],[-6,-4]];
+  function inCluster(x,y){
+    for (var i=0;i<clusterSeeds.length;i++){
+      var dx=x-clusterSeeds[i][0], dy=y-clusterSeeds[i][1];
+      if (dx*dx+dy*dy <= 2.6) return true;
+    }
+    return false;
+  }
+  for (var y=YMAX; y>=YMIN; y--){
+    for (var x=XMIN; x<=XMAX; x++){
+      var r = Math.sqrt(x*x+y*y);
+      if (r > RAD) continue;
+      var b = 1;
+      if (r > EDGE && rnd() < 0.5) b = 2;
+      else if (inCluster(x,y)) b = 3;
+      else if (rnd() < 0.008) b = 9;
+      else if (rnd() < 0.02) b = 2;
+      bins[x+","+y]=b;
+    }
+  }
+  var names = {1:"Good Dies", 2:"Open / Short", 3:"Func Fail", 9:"Untested"};
+  var counts = {};
+  Object.keys(bins).forEach(function(k){ var b=bins[k]; counts[b]=(counts[b]||0)+1; });
+  var sbins = Object.keys(counts).map(Number).sort(function(a,b){return a-b;});
+  var totalDies = Object.keys(bins).length;
+  var pass = counts[1]||0, fail=(counts[2]||0)+(counts[3]||0), unk=counts[9]||0;
+  var yieldPct = (100*pass/(pass+fail)).toFixed(2);
+
+  var palette = {1:"#00CC00", 2:"#CC0000", 3:"#CC0000", 9:"#FE7B00"};
+  function fontFor(hex){
+    var c = parseInt(hex.slice(1),16), r=(c>>16)&255, g=(c>>8)&255, bl=c&255;
+    return (0.299*r+0.587*g+0.114*bl) > 140 ? "#000" : "#fff";
+  }
+
+  // columns: gutter | A B C D (table) | E spacer | F Y-axis | G..W dies (17)
+  var nDies = XMAX-XMIN+1;
+  var sheet = document.getElementById("wbsheet");
+  var tbl = document.createElement("table"); tbl.className="wb-xl";
+  function mk(tag, cls, text){ var d=document.createElement(tag); d.className=cls; if(text!==undefined) d.textContent=text; return d; }
+  function gutterRow(n){ var tr=document.createElement("tr"); var g=mk("td","wb-gutter", n===null?"":String(n)); tr.appendChild(g); return [tr, g]; }
+  function colLetter(i){ return String.fromCharCode(65+i); } // A=0
+
+  // chrome: column letters
+  (function(){
+    var tr = document.createElement("tr"); tr.appendChild(mk("td","wb-gutter",""));
+    for (var c=0; c<4; c++) tr.appendChild(mk("td","wb-colhead", colLetter(c)));      // A-D
+    tr.appendChild(mk("td","wb-colhead","E"));                                        // spacer
+    tr.appendChild(mk("td","wb-colhead","F"));                                        // Y axis
+    for (var c=0; c<nDies; c++) tr.appendChild(mk("td","wb-colhead", colLetter(6+c))); // G..
+    tbl.appendChild(tr);
+  })();
+
+  // r1: title spans A..W
+  (function(){
+    var g = gutterRow(1); var tr=g[0];
+    var td = mk("td","wb-title-cell","WFR01 – All Sites"); td.colSpan = 23;
+    td.style.height="30px"; td.setAttribute("data-callout",1);
+    tr.appendChild(td); tbl.appendChild(tr);
+  })();
+
+  // r2: info row spans A..W
+  (function(){
+    var g = gutterRow(2); var tr=g[0];
+    var td = document.createElement("td"); td.colSpan = 23; td.style.display="flex";
+    ["Yield: "+yieldPct+"%","Total: "+totalDies,"Pass: "+pass,"Failed: "+fail,"Unknown: "+unk,"Superseded: 0","WAFER_ID: WFR-2026-A11","FABWF_ID: LOT-8841"].forEach(function(t,i){
+      var c=mk("td","wb-info-cell",t); if(i>0)c.style.borderLeft="none"; td.appendChild(c);
+    });
+    tr.appendChild(td); tbl.appendChild(tr);
+  })();
+
+  // r3: spacer
+  (function(){ var g=gutterRow(3); g[1].style.height="10px"; tbl.appendChild(g[0]); })();
+
+  // r4: SW table section band (A:D) | E blank | X-header row (F corner blank, G..W coords)
+  (function(){
+    var g = gutterRow(4); var tr=g[0];
+    var band = document.createElement("td"); band.colSpan=4; band.className="wb-band";
+    band.textContent = "Soft Bins — WFR01 (map counts)"; band.setAttribute("data-callout",7);
+    tr.appendChild(band);
+    tr.appendChild(mk("td","wb-blank"));                        // E
+    var corner = mk("td","wb-colhead","");                      // F corner
+    tr.appendChild(corner);
+    for (var x=XMIN; x<=XMAX; x++) tr.appendChild(mk("td","wb-axhead", String(x)));  // G..W, ③
+    tbl.appendChild(tr);
+  })();
+
+  // r5+: left = SW table rows (A:D), right = die grid (F + G..W)
+  var gridRows = [];
+  for (var y=YMAX; y>=YMIN; y++){
+    var row = {y:y, cells:[]};
+    for (var x=XMIN; x<=XMAX; x++) row.cells.push(bins[x+","+y]);
+    gridRows.push(row);
+  }
+  var swDataRows = sbins.length+1; // + total
+  var swHeaderDone = false, swIdx = 0;
+  var maxC = Math.max.apply(null, sbins.map(function(b){return counts[b];}));
+
+  for (var ri=0; ri<gridRows.length; ri++){
+    var g = gutterRow(5+ri); var tr=g[0];
+    // left: SW table
+    if (!swHeaderDone){
+      var hrow = document.createElement("tr");
+      ["Bin","SBIN","Count","Distribution"].forEach(function(h,i){
+        var th=mk("th","",h); var f=mk("span","wb-funnel","▼"); th.appendChild(f); hrow.appendChild(th);
+      });
+      var host = document.createElement("td"); host.colSpan=4; host.style.padding=0;
+      var inner = document.createElement("table"); inner.className="wb-swt"; inner.appendChild(hrow);
+      host.appendChild(inner); tr.appendChild(host);
+      tr.setAttribute("data-sw", "header");
+      swHeaderDone = true;
+    } else if (swIdx < sbins.length){
+      var b = sbins[swIdx]; swIdx++;
+      var pct = 100*counts[b]/totalDies;
+      var row = document.createElement("tr");
+      var td1=mk("td","",names[b]); td1.style.textAlign="left";
+      var td2=mk("td","",String(b)); td2.style.background=palette[b]; td2.style.color=fontFor(palette[b]); td2.style.fontWeight="bold";
+      var td3=mk("td","",String(counts[b]));
+      var td4=mk("td",""); td4.className="wb-dbar";
+      var bar=mk("div","bar",""); bar.style.width=Math.max(6, 100*counts[b]/maxC)+"%";
+      var txt=mk("div","txt", pct.toFixed(2)+"%");
+      td4.appendChild(bar); td4.appendChild(txt);
+      row.appendChild(td1); row.appendChild(td2); row.appendChild(td3); row.appendChild(td4);
+      var host = document.createElement("td"); host.colSpan=4; host.style.padding=0;
+      var inner = document.createElement("table"); inner.className="wb-swt"; inner.appendChild(row);
+      host.appendChild(inner); tr.appendChild(host);
+    } else if (swIdx === sbins.length){
+      swIdx++;
+      var trow = document.createElement("tr");
+      var t1=mk("td","","Total"); t1.style.fontWeight="bold"; t1.style.textAlign="left";
+      var t2=mk("td","",""); var t3=mk("td","",String(totalDies)); t3.style.fontWeight="bold";
+      var t4=mk("td","","100.00%"); t4.style.fontWeight="bold";
+      trow.appendChild(t1); trow.appendChild(t2); trow.appendChild(t3); trow.appendChild(t4);
+      var host = document.createElement("td"); host.colSpan=4; host.style.padding=0;
+      var inner = document.createElement("table"); inner.className="wb-swt"; inner.appendChild(trow);
+      host.appendChild(inner); tr.appendChild(host);
+    } else {
+      var e1 = document.createElement("td"); e1.colSpan=4; tr.appendChild(e1);
+    }
+    // spacer col E
+    tr.appendChild(mk("td","wb-blank"));
+    // Y axis header (F)
+    var yhead = mk("td","wb-axhead", String(gridRows[ri].y));
+    if (gridRows[ri].y===YMAX) yhead.setAttribute("data-callout",4);
+    tr.appendChild(yhead);
+    // dies (G..W)
+    gridRows[ri].cells.forEach(function(b, xi){
+      var x = XMIN+xi;
+      var td;
+      if (b === undefined){ td = mk("td","wb-blank",""); if (x===XMAX && gridRows[ri].y===YMAX) td.setAttribute("data-callout",6); }
+      else {
+        td = mk("td","wb-die", String(b));
+        td.style.background = palette[b]; td.style.color = fontFor(palette[b]);
+        if (x===0 && gridRows[ri].y===0) td.setAttribute("data-callout",5);
+      }
+      tr.appendChild(td);
+    });
+    tbl.appendChild(tr);
+  }
+
+  sheet.appendChild(tbl);
+
+  // second wafer preview
+  var next = document.getElementById("wbnext");
+  var nt = mk("div","wb-title-cell","WFR02 – Sites 3, 5"); nt.style.cssText="margin-left:28px;display:block;";
+  next.appendChild(nt);
+  var nx = mk("div","","…table A:D | spacer E | map F+ …");
+  nx.style.cssText="margin:8px 0 0 28px;color:#999;font-size:12px;display:block;";
+  next.appendChild(nx);
+
+  // ③ badge on the X header row (G side)
+  requestAnimationFrame(function(){
+    var marks = {"3": null, "8": null};
+    sheet.querySelectorAll("[data-callout]").forEach(function(el){
+      var b = mk("div","wb-badge", el.getAttribute("data-callout"));
+      b.style.display="flex"; b.style.position="absolute";
+      var sr = sheet.getBoundingClientRect(), er = el.getBoundingClientRect();
+      b.style.left = (er.right - sr.left - 8)+"px";
+      b.style.top  = (er.top - sr.top - 9)+"px";
+      if (el.getAttribute("data-callout")==="3"){ b.style.left=(er.left-sr.left-9)+"px"; b.style.top=(er.top-sr.top-9)+"px"; }
+      sheet.appendChild(b);
+    });
+    // ⑧ badge on the preview block
+    var nxr = next.getBoundingClientRect();
+  });
+})();
+</script>

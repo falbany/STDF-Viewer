@@ -129,6 +129,17 @@ BIN_TOTAL_LABEL = "Total"
 BIN_SECTION_STYLE = "headline2"
 # Structured tables live in columns B:E (column A belongs to the page grid).
 BIN_TABLE_FIRST_COL = 2
+
+
+def wafer_font_for_fill(hex6: str) -> str:
+    """Die-cell font for a palette fill (issue #2): Rec.601 luma > 80
+    reads as light -> black font, else white — the 24 px die cells must
+    keep the sbin digit readable on saturated bin colors. Threshold 80:
+    the pinned palette cases (00CC00 green 119.7 -> black, CC0000 red
+    61 -> white, FE7B00 orange 90 -> black) require t in [61, 90)."""
+    v = hex6.lstrip("#")
+    r, g, b = int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16)
+    return "#000000" if (0.299 * r + 0.587 * g + 0.114 * b) > 80 else "#FFFFFF"
 # Uniform Bin-sheet page width (tenth wave: user ruling 15).
 BIN_PAGE_WIDTH_RANGE = ("A", "F")
 BIN_PAGE_COLUMN_WIDTH = 15
@@ -556,14 +567,22 @@ def write_merged_headline(
 
 
 def write_bin_table(
-    ws, start_row: int, bins, theme, title: str, table_name: str
+    ws,
+    start_row: int,
+    bins,
+    theme,
+    title: str,
+    table_name: str,
+    first_col: int = BIN_TABLE_FIRST_COL,
+    bin_fills: "dict | None" = None,
 ) -> int:
     """Write one structured bin table (sixth wave) starting at 1-based
     ``start_row`` and return the next free row.
 
-    Layout: a section-title band merged across the table width B:E in the
-    Headline-2 lookalike format, the themed blue header row (written by
-    ``add_table`` itself with per-column header formats), one bordered
+    Layout: a section-title band merged across the table width (default
+    B:E, parameterized ``first_col`` — the wafer cell-map tables use A:D)
+    in the Headline-2 lookalike format, the themed blue header row (written
+    by ``add_table`` itself with per-column header formats), one bordered
     body row per bin (name, bin number, int count, fraction cell with the
     ``"0.00%"`` format and a SOLID blue data bar with border — upgrade 3),
     then a bold Total row. The denominator is the SUM OF THE RECONSTRUCTED
@@ -572,12 +591,15 @@ def write_bin_table(
     TableStyleMedium9 + row stripes) spans header..last-data row with the
     Total row OUTSIDE, giving the table its own filter arrows.
 
+    ``bin_fills`` (issue #2): optional {bin_num: "#RRGGBB"} — the Value
+    cell gets a static palette fill with the luminance-derived font color
+    so the wafer table doubles as the map's legend.
+
     ``bins`` empty → no-op (returns ``start_row`` unchanged)."""
     if not bins:
         return start_row
     total = sum(count for _num, _name, count in bins)
-    first_col = BIN_TABLE_FIRST_COL
-    last_col = BIN_TABLE_FIRST_COL + len(BIN_TABLE_HEADERS) - 1  # column E
+    last_col = first_col + len(BIN_TABLE_HEADERS) - 1
     first0 = first_col - 1
     last0 = last_col - 1
 
@@ -623,7 +645,19 @@ def write_bin_table(
         row0 = first_data_row - 1 + offset
         ws.write(row0, first0, sanitize_cell(name), body_fmt)
         note_width(ws, first_col, str(name))
-        ws.write(row0, first0 + 1, int(bin_num), body_fmt)
+        fill_hex6 = (bin_fills or {}).get(bin_num)
+        if fill_hex6:
+            fill = fill_hex6.lstrip("#")
+            value_fmt = theme.cell_format(
+                font="body",
+                align="center",
+                border=True,
+                fill_hex=fill,
+                extra={"font_color": wafer_font_for_fill(fill)},
+            )
+            ws.write(row0, first0 + 1, int(bin_num), value_fmt)
+        else:
+            ws.write(row0, first0 + 1, int(bin_num), body_fmt)
         ws.write(row0, first0 + 2, int(count), body_fmt)
         note_width(ws, first0 + 3, str(count))
         ws.write(row0, last0, count / total if total else 0.0, pct_fmt)

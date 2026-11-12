@@ -981,6 +981,39 @@ class TestWriteBinTable:
         assert rule.type == "dataBar"
         assert rule.dataBar.color.rgb.endswith("5B9BD5")
 
+    # wafer cell-map parameterization (issue #2) ---------------------------
+
+    def test_first_col_a_writes_at_column_a(self, env):
+        nxt = write_bin_table(
+            env["ws"], 15, AGG_BINS, env["theme"], TABLE_TITLE, TABLE_NAME, first_col=1
+        )
+        reloaded = env["reload"]()
+        assert "A15:D15" in {str(r) for r in reloaded.merged_cells.ranges}
+        assert [reloaded.cell(row=16, column=c).value for c in range(1, 5)] == list(
+            BIN_TABLE_HEADERS
+        )
+
+    def test_bin_fills_fill_value_cell_with_luminance_font(self, env):
+        write_bin_table(
+            env["ws"],
+            15,
+            AGG_BINS,
+            env["theme"],
+            TABLE_TITLE,
+            TABLE_NAME,
+            bin_fills={AGG_BINS[0][0]: "#CC0000"},
+        )
+        cell = env["reload"]().cell(row=17, column=3)  # first data row, Value col
+        assert cell.fill.fgColor.rgb == "FFCC0000"
+        assert cell.font.color.rgb == "FFFFFFFF"
+
+    def test_wafer_font_for_fill_thresholds(self):
+        from deps.exporter.charts import wafer_font_for_fill
+
+        assert wafer_font_for_fill("00CC00") == "#000000"  # bright green
+        assert wafer_font_for_fill("CC0000") == "#FFFFFF"  # dark red
+        assert wafer_font_for_fill("FE7B00") == "#000000"  # orange
+
 
 # --------------------------------------------------------------------------
 # complete_chart_flags (the two documented xlsxwriter gaps)
