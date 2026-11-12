@@ -72,6 +72,9 @@ from deps.uic_stdExporter import (
 from deps.exporter.charts import complete_chart_flags
 from deps.exporter.worksheets.bin_chart import BinChartMixin
 from deps.exporter.worksheets.dut_summary import DUTSummaryMixin, order_dut_block
+from deps.exporter.worksheets.histogram import HistogramMixin
+from deps.exporter.worksheets.trend_chart import TrendChartMixin
+from deps.exporter.worksheets.wafer_map import WaferMapMixin
 from deps.exporter.sheets import (
     insert_report_image,
 )
@@ -87,7 +90,6 @@ from deps.exporter.worksheets.file_info import (
 )
 from deps.exporter.worksheets.gdr_dtr import GdrDtrMixin
 from deps.exporter.worksheets.test_statistics import TestStatisticsMixin
-from deps.exporter.worksheets.wafer_map import WaferMapMixin
 
 # auto-fit column width = max content length * 1.1, capped (classic uses the
 # same *1.1 factor via xlsxwriter set_column; the cap is the modern bound).
@@ -103,6 +105,8 @@ class ModernReportGenerator(
     TestStatisticsMixin,
     BinChartMixin,
     WaferMapMixin,
+    TrendChartMixin,
+    HistogramMixin,
     reportGenerator,
 ):
     def __init__(
@@ -134,62 +138,6 @@ class ModernReportGenerator(
         thin border via writer.write_body_cell, optional band fill hex."""
         for column, value in enumerate(values, start=1):
             write_body_cell(ws, row, column, value, self._theme, fill=fill)
-
-    def writeTrendPlot(self, testTuple: tuple, head: int, site: int):
-        TrendSheet = self.sheetDict.get(ReportSelection.Trend, None)
-        if TrendSheet is None:
-            return
-
-        # get image and stat from main thread
-        image_io = self.waitForImage(
-            testTuple, head, [site], self.selectedFiles, tab.Trend
-        )
-        dataTable = self.waitForDataList(
-            [head], [site], self.selectedFiles, tab.Trend, {"testTuples": [testTuple]}
-        )
-        # insert into the work sheet
-        key = ReportSelection.Trend
-        row = self._row.get(key, 0)
-        row += insert_report_image(TrendSheet, image_io, row)
-        for dataList in dataTable:
-            self._write_body_row(TrendSheet, row, dataList)
-            row += 1
-        row += 2
-        self._row[key] = row
-
-        self.loopCount += 1
-        self.sendProgress()
-        self._autofit_columns(TrendSheet)
-        TrendSheet.hide_gridlines(2)
-        TrendSheet.set_footer(FOOTER_TEXT)
-        TrendSheet.set_tab_color(f"#{TAB_COLOR_HEXES['trend']}")
-
-    def writeHistogram(self, testTuple: tuple, head: int, site: int):
-        HistoSheet = self.sheetDict.get(ReportSelection.Histo, None)
-        if HistoSheet is None:
-            return
-
-        image_io = self.waitForImage(
-            testTuple, head, [site], self.selectedFiles, tab.Histo
-        )
-        dataTable = self.waitForDataList(
-            [head], [site], self.selectedFiles, tab.Histo, {"testTuples": [testTuple]}
-        )
-        key = ReportSelection.Histo
-        row = self._row.get(key, 0)
-        row += insert_report_image(HistoSheet, image_io, row)
-        for dataList in dataTable:
-            self._write_body_row(HistoSheet, row, dataList)
-            row += 1
-        row += 2
-        self._row[key] = row
-
-        self.loopCount += 1
-        self.sendProgress()
-        self._autofit_columns(HistoSheet)
-        HistoSheet.hide_gridlines(2)
-        HistoSheet.set_footer(FOOTER_TEXT)
-        HistoSheet.set_tab_color(f"#{TAB_COLOR_HEXES['histo']}")
 
     # ----------------------------------------------------------------------
     # report assembly
