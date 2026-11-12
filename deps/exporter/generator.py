@@ -121,11 +121,10 @@ from deps.exporter.writer import (
     write_plain_row,
 )
 from deps.exporter.worksheets.file_info import (
-    FILE_INFO_NUMERIC_LABELS,
-    _numeric_file_info_cell,
-    bin_banner_from_file_info,
+    FileInfoMixin,
     file_temperatures_from_file_info,
 )
+from deps.exporter.worksheets.gdr_dtr import GdrDtrMixin
 from deps.exporter.worksheets.test_statistics import (
     STAT_CPK_FORMAT,
     STAT_SPEC_FILL_HEX,
@@ -149,7 +148,7 @@ AUTOFIT_FACTOR = 1.1
 AUTOFIT_CAP = 60
 
 
-class ModernReportGenerator(reportGenerator):
+class ModernReportGenerator(FileInfoMixin, GdrDtrMixin, reportGenerator):
     def __init__(
         self,
         signals: signals,
@@ -210,90 +209,8 @@ class ModernReportGenerator(reportGenerator):
         }
 
     # ----------------------------------------------------------------------
-    # plain sheets (Task 7)
+    # Test Statistics (Task 7 extraction)
     # ----------------------------------------------------------------------
-
-    def writeFileInfo(self):
-        InfoSheet = self.sheetDict.get(ReportSelection.FileInfo, None)
-        if InfoSheet is None:
-            return
-
-        # get file info table
-        dataTable = self.waitForTableData(isFileInfo=True)
-        if self.forceQuit:
-            return
-
-        # numeric metadata rows (fix wave 2): labels are translated
-        # upstream with a trailing space after the colon — match on the
-        # whitespace-normalized label; count values become int cells, Yield
-        # becomes a 0.xx fraction with the "0.00%" display format
-        cell_number_formats: dict[tuple[int, int], str] = {}
-        rows = []
-        for row_index, row in enumerate(dataTable):
-            label = row[0] if row else ""
-            if " ".join(str(label).split()) not in FILE_INFO_NUMERIC_LABELS:
-                rows.append(row)
-                continue
-            converted = [label]
-            for col_index, value in enumerate(row[1:], start=1):
-                cell, fmt = _numeric_file_info_cell(value)
-                converted.append(cell)
-                if fmt is not None:
-                    cell_number_formats[(row_index, col_index)] = fmt
-            rows.append(converted)
-
-        # header spans every selected file column (fix wave 2): one
-        # "File #n" per selected fid, position-matched with
-        # getFileInfoForReport's per-file value order — the labels carry
-        # the ACTUAL file ids (selecting files 0 and 2 -> "File #1",
-        # "File #3"); applied unconditionally (single file -> "File #1")
-        spec = plain_table_spec(
-            self.tr("File Info"),
-            [self.tr("Property Name")]
-            + [f"File #{fid + 1}" for fid in self.selectedFiles],
-            rows,
-            self.tr,
-            cell_number_formats=cell_number_formats,
-        )
-        spec["tab_color"] = TAB_COLOR_HEXES["file_info"]
-        spec["repeat_header_row"] = 1
-        render_plain_table(InfoSheet, spec, self._theme)
-        self._autofit_columns(InfoSheet)
-
-        # ninth wave: stash the Bin-sheet banner text when the English
-        # Product ID / Sublot ID anchors resolve (missing labels keep the
-        # report_core fallback — translated UIs degrade)
-        banner = bin_banner_from_file_info(dataTable)
-        if banner:
-            self._bin_banner = banner
-
-        self.loopCount += 1
-        self.sendProgress()
-
-    def writeGDR_DTR(self):
-        GDR_DTR_Sheet = self.sheetDict.get(ReportSelection.GDR_DTR, None)
-        if GDR_DTR_Sheet is None:
-            return
-
-        dataTable = self.waitForTableData(isFileInfo=False)
-        if self.forceQuit:
-            return
-        # remove \n that added besides values
-        dataTable = [[ele.strip("\n") for ele in dataRow] for dataRow in dataTable]
-
-        spec = plain_table_spec(
-            self.tr("GDR & DTR Summary"),
-            [self.tr("Record Type"), self.tr("Value"), self.tr("Approx. Location")],
-            dataTable,
-            self.tr,
-        )
-        spec["tab_color"] = TAB_COLOR_HEXES["gdr"]
-        spec["repeat_header_row"] = 1
-        render_plain_table(GDR_DTR_Sheet, spec, self._theme)
-        self._autofit_columns(GDR_DTR_Sheet)
-
-        self.loopCount += 1
-        self.sendProgress()
 
     def writeStatistic(self, testTuples: list, heads: list[int], sites: list[int]):
         # Sheet for statistics of test items, e.g. cpk, mean, etc.

@@ -30,7 +30,11 @@ Pure module-level code moved verbatim from generator.py (worksheets split,
 2026-11-12); the FileInfoMixin writer joins this file in the extraction wave.
 """
 
+from deps.uic_stdExporter import ReportSelection
 from deps.exporter.helpers import parse_temperature_text
+from deps.exporter.sheets import plain_table_spec
+from deps.exporter.theme import TAB_COLOR_HEXES
+from deps.exporter.writer import render_plain_table
 
 # File Info rows whose values must be written as numeric cells (fix wave 2).
 # Labels arrive TRANSLATED from the main window (getFileInfoForReport) with
@@ -133,3 +137,64 @@ def _numeric_file_info_cell(value):
         return int(text), None
     except ValueError:
         return value, None
+
+
+class FileInfoMixin:
+    """File Info worksheet writer (moved verbatim from generator.py)."""
+
+    def writeFileInfo(self):
+        InfoSheet = self.sheetDict.get(ReportSelection.FileInfo, None)
+        if InfoSheet is None:
+            return
+
+        # get file info table
+        dataTable = self.waitForTableData(isFileInfo=True)
+        if self.forceQuit:
+            return
+
+        # numeric metadata rows (fix wave 2): labels are translated
+        # upstream with a trailing space after the colon — match on the
+        # whitespace-normalized label; count values become int cells, Yield
+        # becomes a 0.xx fraction with the "0.00%" display format
+        cell_number_formats: dict[tuple[int, int], str] = {}
+        rows = []
+        for row_index, row in enumerate(dataTable):
+            label = row[0] if row else ""
+            if " ".join(str(label).split()) not in FILE_INFO_NUMERIC_LABELS:
+                rows.append(row)
+                continue
+            converted = [label]
+            for col_index, value in enumerate(row[1:], start=1):
+                cell, fmt = _numeric_file_info_cell(value)
+                converted.append(cell)
+                if fmt is not None:
+                    cell_number_formats[(row_index, col_index)] = fmt
+            rows.append(converted)
+
+        # header spans every selected file column (fix wave 2): one
+        # "File #n" per selected fid, position-matched with
+        # getFileInfoForReport's per-file value order — the labels carry
+        # the ACTUAL file ids (selecting files 0 and 2 -> "File #1",
+        # "File #3"); applied unconditionally (single file -> "File #1")
+        spec = plain_table_spec(
+            self.tr("File Info"),
+            [self.tr("Property Name")]
+            + [f"File #{fid + 1}" for fid in self.selectedFiles],
+            rows,
+            self.tr,
+            cell_number_formats=cell_number_formats,
+        )
+        spec["tab_color"] = TAB_COLOR_HEXES["file_info"]
+        spec["repeat_header_row"] = 1
+        render_plain_table(InfoSheet, spec, self._theme)
+        self._autofit_columns(InfoSheet)
+
+        # ninth wave: stash the Bin-sheet banner text when the English
+        # Product ID / Sublot ID anchors resolve (missing labels keep the
+        # report_core fallback — translated UIs degrade)
+        banner = bin_banner_from_file_info(dataTable)
+        if banner:
+            self._bin_banner = banner
+
+        self.loopCount += 1
+        self.sendProgress()
