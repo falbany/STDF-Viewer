@@ -490,7 +490,7 @@ def write_kpi_cards(
     instead of a 1x1 merge. ``note_widths=False`` skips the width ledger
     (the wafer block's cards ride over the pinned columns — the autofit
     must never resize them)."""
-    label_row, sub_row = start_row, start_row + 2
+    label_row = start_row
     if card_rows is None:
         card_rows = (0, 1, 2) if stacked else (0, 0, 0)
     yield_value = kpi.get("yield")
