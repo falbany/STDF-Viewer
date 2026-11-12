@@ -31,6 +31,8 @@ import math
 import re
 import statistics
 
+import numpy as np
+
 from xlsxwriter.utility import xl_col_to_name
 
 from deps.SharedSrc import isPass
@@ -574,6 +576,28 @@ def stat_cpk_value(spec_min, spec_max, avg, std) -> "float | None":
 
 
 def has_numeric(values) -> bool:
-    """True when ``values`` carries at least one numeric cell — the
+    """True when ``values`` carries at least one numeric cell - the
     sparkline gate (rows without numeric die values get no sparkline)."""
     return bool(numeric_values(values))
+
+
+# Control characters Excel forbids inside sheet XML strings (copied out of
+# openpyxl when the package left that dependency behind — tab \011 and
+# newline \012 stay legal).
+ILLEGAL_CHARACTERS_RE = re.compile(r"[\000-\010]|[\013-\014]|[\016-\037]")
+
+
+def sanitize_cell(value):
+    """Make a value safe for Excel sheet XML: strip illegal control
+    characters from strings, map NaN (and None) to blank, pass scalars
+    through unchanged."""
+    if isinstance(value, str):
+        return ILLEGAL_CHARACTERS_RE.sub("", value)
+    if value is None:
+        return ""
+    try:
+        if np.isnan(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return value

@@ -1,4 +1,4 @@
-"""Tests for deps/exporter/matrix.py: DUT Summary spec builder."""
+"""Tests for deps/exporter/worksheets/dut_summary.py: DUT Summary spec builder."""
 
 import pytest
 
@@ -6,14 +6,20 @@ import numpy as np
 from openpyxl.utils import column_index_from_string
 
 from deps.SharedSrc import REC
-from deps.exporter.helpers import DUT_CHUNK_CAP, cp_cached, cpk_cached, die_col, resolve_dut_temperature
-from deps.exporter.matrix import (
+from deps.exporter.helpers import (
+    DUT_CHUNK_CAP,
+    cp_cached,
+    cpk_cached,
+    die_col,
+    resolve_dut_temperature,
+    sanitize_cell,
+)
+from deps.exporter.worksheets.dut_summary import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
     METADATA_ROWS,
     build_dut_summary_spec,
     group_order_by_temperature,
-    sanitize_cell,
 )
 
 # Layout (2026-11-10 adjustment): banner row 1, 13 metadata rows 2..14,

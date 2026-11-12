@@ -97,7 +97,7 @@ from deps.exporter.helpers import (
     stat_cp_value,
     stat_cpk_value,
 )
-from deps.exporter.matrix import (
+from deps.exporter.worksheets.dut_summary import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
     build_dut_summary_spec,

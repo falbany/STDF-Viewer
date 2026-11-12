@@ -1123,7 +1123,7 @@ class TestRemeasureFilterPrune:
         assert ws["O15"].value == "DUT #3"
 
     def test_prune_summary_view_removes_exactly_the_drops(self):
-        from deps.exporter.matrix import prune_summary_view
+        from deps.exporter.worksheets.dut_summary import prune_summary_view
 
         summary = make_summary()
         dropped = {(1, 0)}
@@ -1138,7 +1138,7 @@ class TestRemeasureFilterPrune:
         assert 0 in summary["dutInfo"][1]
 
     def test_prune_summary_view_empty_set_is_identity(self):
-        from deps.exporter.matrix import prune_summary_view
+        from deps.exporter.worksheets.dut_summary import prune_summary_view
 
         summary = make_summary()
         assert prune_summary_view(summary, set()) is summary

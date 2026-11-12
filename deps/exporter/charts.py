@@ -65,7 +65,7 @@ import zipfile
 
 import xlsxwriter.utility as xlutil
 
-from deps.exporter.matrix import sanitize_cell
+from deps.exporter.helpers import sanitize_cell
 from deps.exporter.theme import (
     FONT_NAME,
     KPI_BORDER_DARK_BLUE,

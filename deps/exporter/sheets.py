@@ -38,7 +38,7 @@ from math import ceil
 
 from PIL import Image as PILImage
 
-from deps.exporter.matrix import sanitize_cell
+from deps.exporter.helpers import sanitize_cell
 
 PX_PER_INCH = 96
 ROW_HEIGHT_IN = 0.21  # one default Excel row ≈ 0.21 inch (classic spacing math)

@@ -37,7 +37,7 @@ notation (helpers.get_column_letter / xl_cell_to_rowcol bridge the two).
 
 import xlsxwriter.utility as xlutil
 
-from deps.exporter.matrix import sanitize_cell
+from deps.exporter.helpers import sanitize_cell
 from deps.exporter.theme import (
     BANNER_FILL_HEX,
     GROUP_FILL_HEX,

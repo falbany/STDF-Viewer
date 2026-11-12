@@ -5,7 +5,7 @@
 # Author: falbany (fork)
 # Created Date: November 9th 2026
 # -----
-# Last Modified: Mon Nov 9 2026
+# Last Modified: Thu Nov 12 2026
 # Modified By: falbany (fork)
 # -----
 # Copyright (c) 2026 falbany (fork)
@@ -269,27 +269,6 @@ PART_ID_ROW = METADATA_START + next(
 
 # First two integers inside a preformatted "(X, Y)" string.
 _XY_INT_RE = re.compile(r"-?\d+")
-
-# Control characters Excel forbids inside sheet XML strings (copied out of
-# openpyxl when the package left that dependency behind — tab \011 and
-# newline \012 stay legal).
-ILLEGAL_CHARACTERS_RE = re.compile(r"[\000-\010]|[\013-\014]|[\016-\037]")
-
-
-def sanitize_cell(value):
-    """Make a value safe for Excel sheet XML: strip illegal control
-    characters from strings, map NaN (and None) to blank, pass scalars
-    through unchanged."""
-    if isinstance(value, str):
-        return ILLEGAL_CHARACTERS_RE.sub("", value)
-    if value is None:
-        return ""
-    try:
-        if np.isnan(value):
-            return ""
-    except (TypeError, ValueError):
-        pass
-    return value
 
 
 def build_dut_summary_spec(
