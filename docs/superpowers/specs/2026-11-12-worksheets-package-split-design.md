@@ -49,7 +49,7 @@ class ModernReportGenerator(
 | `worksheets/__init__.py` | package marker |
 | `worksheets/file_info.py` | `FILE_INFO_NUMERIC_LABELS`, `YIELD_FORMAT`, `_numeric_file_info_cell`, banner anchors, `bin_banner_from_file_info`, `file_temperatures_from_file_info`, `FileInfoMixin.writeFileInfo` |
 | `worksheets/gdr_dtr.py` | `GdrDtrMixin.writeGDR_DTR` |
-| `worksheets/dut_summary.py` | **all of `matrix.py`** (spec builder, FTR constants, `sanitize_cell`, `prune_summary_view`, `group_order_by_temperature`) + `order_dut_block` + `DUTSummaryMixin` (`writeDUT_Summary`, `_order_and_ids`, `_resolve_remeasure_drops`) |
+| `worksheets/dut_summary.py` | **all of `matrix.py`** (spec builder, FTR constants, `prune_summary_view`, `group_order_by_temperature`) + `order_dut_block` + `DUTSummaryMixin` (`writeDUT_Summary`, `_order_and_ids`, `_resolve_remeasure_drops`) |
 | `worksheets/test_statistics.py` | stat transforms (`transform_stat_header/row`, `parse_vheader`, `numericize_value`, `stat_cf_ranges`, `stat_row_is_ftr`, `apply_ftr_pseudo_limits`, `_stat_full_test_name`, `_norm_header_text`), `STAT_*` constants, `theme_group_fill_hex`, `_is_number`, `_stat_formula_values` (as module fn), `TestStatisticsMixin.writeStatistic` |
 | `worksheets/bin_chart.py` | `BinChartMixin.writeBinChart` |
 | `worksheets/wafer_map.py` | `WaferMapMixin.writeWaferMap` |
@@ -64,9 +64,11 @@ sheet creation, tab-order reorder — importing `order_dut_block` from
 
 ## Import fallout (update, do not shim)
 
-- `matrix.py` is **deleted**; importers of `sanitize_cell` — `charts.py`,
-  `writer.py`, `sheets.py` — repoint to `deps.exporter.worksheets.dut_summary`
-  (no cycle: `dut_summary` imports none of them).
+- `matrix.py` is **deleted**. `sanitize_cell` + `ILLEGAL_CHARACTERS_RE`
+  move to `helpers.py` (pure utils): `charts.py`, `writer.py`,
+  `sheets.py` repoint there. Rationale: `worksheets/dut_summary.py`
+  hosts the DUT mixin, which imports `render_matrix_sheet` from
+  `writer.py` — a `writer → dut_summary` import would then be circular.
 - `uic_stdExporter.py`'s lazy `ModernReportGenerator` import is unchanged.
 - Tests repoint: `deps.exporter.matrix` → `...worksheets.dut_summary`;
   `generator` imports of moved module functions → their new homes.
