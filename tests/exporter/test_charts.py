@@ -1105,6 +1105,11 @@ MAP = {
     "Statistic": {1: ("Good", 3, 60.0), 2: ("Fail", 2, 40.0)},
     "Palette": {1: "#00CC00", 2: "#CC0000"},
     "BinPF": {1: "P", 2: "F"},
+    "Properties": [
+        ("Wafer Center:", "(1.0, 2.0)"),
+        ("Wafer Flat Direction:", "Down"),
+        ("Wafer XY Direction:", "(Up, Left)"),
+    ],
 }
 
 
@@ -1162,6 +1167,18 @@ class TestWaferKpiHelpers:
         assert wafer_kpi_from_grid({}, {})["total"] == 0
         assert wafer_kpi_from_grid({}, {})["yield"] is None
 
+    def test_kpi_palette_fallback_when_pf_flags_absent(self):
+        # 2026-11-13: real STDFs often carry no usable SBR PF flag — the
+        # bins classify by the color the user sees in the GUI map
+        grid = {(0, 0): 1, (1, 0): 1, (2, 0): 2, (3, 0): 9}
+        kpi = wafer_kpi_from_grid(
+            grid,
+            {1: "", 2: " ", 9: "Unknown"},
+            {1: "#00CC00", 2: "#CC0000", 9: "#FE7B00"},
+        )
+        assert (kpi["pass"], kpi["failed"], kpi["unknown"]) == (2, 1, 1)
+        assert kpi["yield"] == 2 / 4
+
     def test_info_rows_drop_kpi_cells_keep_identity(self):
         rows = [["Yield: 87.42%", "Total: 412", "Pass: 360", "WAFER_ID: W01", "FABWF_ID: L1"]]
         assert wafer_info_rows(rows) == [["WAFER_ID: W01", "FABWF_ID: L1"]]
@@ -1188,32 +1205,38 @@ class TestWriteWaferMapBlock:
     def test_block_writes_grid_cf_and_table(self, env):
         nxt = self.written(env)
         reloaded = env["reload"]()
-        # layout: title r=1 (5 die cols -> merge A1:K1), blank 2, KPI cards
-        # 3-5, info row 7 (WAFER_ID survives the KPI filter), blank 8,
-        # b=9 (SW band A:D + X headers G..K share it), die rows 10..14
-        # (NY=5); SW table: header 10, data 11..12, total 13;
-        # write_bin_table returns 14 -> block returns max(14, 14) + 1 = 15
+        # 2026-11-13 layout: title r=1 (merge A1:K1), identity line 2
+        # (WAFER_ID key A2 / value merged B2:D2), blank 3, STACKED KPI
+        # cards 4-12 (Yield 4-6, Fails 7-9, Total 10-12, each A:D), map
+        # anchored at row 4 (X headers G4..K4, Y axis F5..F9, dies 5..9),
+        # properties 14/16/18 (blank rows between), SW table from 20:
+        # band 20, header 21, data 22..23, total 24 -> returns 25
         assert "A1:K1" in {str(r) for r in reloaded.merged_cells.ranges}
         assert reloaded["A1"].value == "W01 – All Sites"
-        assert reloaded["G9"].value == "-2"  # first X header (ascending)
-        assert reloaded["F10"].value == "2"  # top Y header = max Y
-        assert reloaded["I11"].value == 1  # die (x=0, y=1): sbin int
-        assert reloaded["I12"].value == 2  # duplicate (0,0): last wins
+        assert reloaded["A2"].value == "WAFER_ID:"
+        assert reloaded["B2"].value == "W01"
+        assert "B2:D2" in {str(r) for r in reloaded.merged_cells.ranges}
+        assert reloaded["G4"].value == "-2"  # first X header (ascending)
+        assert reloaded["F5"].value == "2"  # top Y header = max Y
+        assert reloaded["I6"].value == 1  # die (x=0, y=1): sbin int
+        assert reloaded["I7"].value == 2  # duplicate (0,0): last wins
         rngs = {str(rng) for rng in reloaded.conditional_formatting._cf_rules}
-        assert any("G10:K14" in rng for rng in rngs)
-        assert [reloaded.cell(row=10, column=c).value for c in range(1, 5)] == list(
+        assert any("G5:K9" in rng for rng in rngs)
+        assert [reloaded.cell(row=21, column=c).value for c in range(1, 5)] == list(
             BIN_TABLE_HEADERS
         )
-        assert nxt == 15
+        assert nxt == 25
 
     def test_empty_map_writes_title_and_rows_only(self, env):
         nxt = self.written(env, map_data={})
         reloaded = env["reload"]()
         assert "A1:D1" in {str(r) for r in reloaded.merged_cells.ranges}
-        # no table, no grid; the KPI cells drop out of the info row
+        assert "B2:D2" in {str(r) for r in reloaded.merged_cells.ranges}
+        # no table, no grid; the KPI cells drop out of the identity line
         assert not reloaded.tables
-        assert reloaded["A2"].value == "WAFER_ID: W01"
-        assert nxt == 3  # start_row 1 + 1 info row + 1
+        assert reloaded["A2"].value == "WAFER_ID:"
+        assert reloaded["B2"].value == "W01"
+        assert nxt == 3  # start_row 1 + 1 identity row + 1
 
     def test_die_columns_fixed_width(self, env):
         self.written(env)
@@ -1235,7 +1258,7 @@ class TestWriteWaferMapBlock:
             r
             for cf in reloaded.conditional_formatting
             for r in cf.rules
-            if r.type == "cellIs" and str(cf.sqref) == "G10:K14" and r.operator == "equal"
+            if r.type == "cellIs" and str(cf.sqref) == "G5:K9" and r.operator == "equal"
             and r.formula == ["1"]
         ]
         fill_rgb = rule.dxf.fill.bgColor.rgb or rule.dxf.fill.fgColor.rgb
@@ -1256,25 +1279,41 @@ class TestWriteWaferMapBlock:
         )
         self.written(env, map_data=m)
         reloaded = env["reload"]()
-        total_cell = reloaded.cell(row=12, column=3)  # Count col, Total row
+        # the dedup grid carries ONE bin -> SW data 22, Total 23
+        total_cell = reloaded.cell(row=23, column=3)  # Count col, Total row
         assert total_cell.value == 1
 
     def test_kpi_cards_carry_grid_values_matching_the_sw_table(self, env):
         # 2026-11-12 user ruling: the cards and the SW table share ONE
         # source (the deduplicated grid) — MAP's duplicate (0,0) counts
         # ONCE as sbin 2: 3 pass dies (sbin 1 = P), 2 fail (sbin 2 = F),
-        # 5 total, yield 0.6
+        # 5 total, yield 0.6. 2026-11-13 layout: three STACKED A:D cards
+        # at rows 4-6 / 7-9 / 10-12
         self.written(env)
         reloaded = env["reload"]()
-        assert reloaded["A3"].value == "Yield"
-        assert reloaded["A4"].value == 0.6
-        assert reloaded["A5"].value == "3 pass / 5 total parts"
-        assert reloaded["C3"].value == "Fails"
-        assert reloaded["C4"].value == 2
-        assert reloaded["E3"].value == "Total Parts"
-        assert reloaded["E4"].value == 5
-        # the SW table's Total (row 13, Count col) equals the card value
-        assert reloaded.cell(row=13, column=3).value == 5
+        assert reloaded["A4"].value == "Yield"
+        assert reloaded["A5"].value == 0.6
+        assert reloaded["A6"].value == "3 pass / 5 total parts"
+        assert reloaded["A7"].value == "Fails"
+        assert reloaded["A8"].value == 2
+        assert reloaded["A10"].value == "Total Parts"
+        assert reloaded["A11"].value == 5
+        # the SW table's Total (row 24, Count col) equals the card value
+        assert reloaded.cell(row=24, column=3).value == 5
+
+    def test_wafer_properties_below_the_cards(self, env):
+        # 2026-11-13: the rendered wafer properties sit under the cards,
+        # blank-row separated, key col A + value merged B:D
+        self.written(env)
+        reloaded = env["reload"]()
+        assert reloaded["A14"].value == "Wafer Center:"
+        assert reloaded["B14"].value == "(1.0, 2.0)"
+        assert "B14:D14" in {str(r) for r in reloaded.merged_cells.ranges}
+        assert reloaded["A16"].value == "Wafer Flat Direction:"
+        assert reloaded["B16"].value == "Down"
+        assert reloaded["A18"].value == "Wafer XY Direction:"
+        assert reloaded["B18"].value == "(Up, Left)"
+        assert reloaded["A14"].font.italic is True  # Explanatory Text look
 
     def test_kpi_cards_never_note_widths_on_the_spacer(self, env):
         # the cards ride over columns A..F; the ledger must stay clean of
@@ -1286,7 +1325,7 @@ class TestWriteWaferMapBlock:
 
     def test_freeze_panes_at_the_die_grid(self, env):
         self.written(env, freeze_panes=True)
-        assert env["reload"]().freeze_panes == "G10"
+        assert env["reload"]().freeze_panes == "G5"
 
     def test_no_freeze_by_default(self, env):
         self.written(env)

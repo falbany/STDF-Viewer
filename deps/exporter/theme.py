@@ -95,6 +95,15 @@ LOOKALIKE_DEFS = {
         "bottom": 5,  # thick (xlsxwriter border code)
         "bottom_color": "#8EA9DB",
     },
+    # Excel's built-in "Explanatory Text" style (builtinId 53) — Calibri
+    # italic in the theme gray; the wafer block's property key/value rows
+    # (2026-11-13 user ruling).
+    "explanatory": {
+        "font_name": "Calibri",
+        "font_size": 11,
+        "italic": True,
+        "font_color": "#808080",
+    },
 }
 
 

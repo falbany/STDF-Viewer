@@ -263,6 +263,11 @@ WAFER_MAP_PAYLOAD = {
     "Statistic": {1: ("Good", 2, 66.7), 2: ("Fail", 1, 33.3)},
     "Palette": {1: "#00CC00", 2: "#CC0000"},
     "BinPF": {1: "P", 2: "F"},
+    "Properties": [
+        ("Wafer Center:", "(10, 20)"),
+        ("Wafer Flat Direction:", "Down"),
+        ("Wafer XY Direction:", "(Up, Right)"),
+    ],
 }
 
 
@@ -988,7 +993,7 @@ class TestChartSheets:
             for c in row
             if c.value is not None
         }
-        assert "WAFER_ID: W01" in wafer
+        assert "WAFER_ID:" in wafer  # identity key (value merged B2:D2)
         assert "Yield" in wafer  # KPI card label — the % string is gone
         assert "TREND-ROW" in trend
 
@@ -1495,16 +1500,20 @@ class TestWaferCellMap:
         assert pics == 2
 
     def test_block_title_and_sw_table(self, generated):
-        # layout: title 1, blank 2, KPI cards 3-5, info 7, blank 8, b=9
-        # (band A:D + X headers share the row), die rows 10..12, SW header
-        # 10 (data 11..12, total 13) — the header row shares the first die
-        # row across the disjoint column zones (A:D vs G..)
+        # 2026-11-13 layout: title 1, identity line 2 (WAFER_ID key A2 /
+        # value merged B2:D2), blank 3, STACKED KPI cards 4-12 (Yield
+        # 4-6, Fails 7-9, Total 10-12, each A:D), map anchored at row 4
+        # (X headers G4.., Y axis F5.., dies 5..7), properties 14/16/18,
+        # SW table from 20 (band 20, header 21, data 22..23, total 24)
         _, wb, _, _, _ = generated
         ws = wb["Wafer Map"]
         assert ws["A1"].value == "W01 – All Sites"
-        assert ws["A3"].value == "Yield"  # bin-chart-style KPI cards
-        assert ws["A7"].value == "WAFER_ID: W01"  # identity info survives
-        assert [ws.cell(row=10, column=c).value for c in range(1, 5)] == list(
+        assert ws["A2"].value == "WAFER_ID:"
+        assert ws["B2"].value == "W01"
+        assert ws["A4"].value == "Yield"  # bin-chart-style KPI cards
+        assert ws["A14"].value == "Wafer Center:"
+        assert ws["B14"].value == "(10, 20)"
+        assert [ws.cell(row=21, column=c).value for c in range(1, 5)] == list(
             BIN_TABLE_HEADERS
         )
         assert "SW_0_W01" in ws.tables
@@ -1514,37 +1523,39 @@ class TestWaferCellMap:
         # source). Payload grid: 2 dies sbin 1 (P), 1 die sbin 2 (F)
         _, wb, _, _, _ = generated
         ws = wb["Wafer Map"]
-        assert ws["A4"].value == pytest.approx(2 / 3)
-        assert ws["C4"].value == 1
-        assert ws["E4"].value == 3
-        assert ws.cell(row=13, column=3).value == 3  # SW table Total
+        assert ws["A5"].value == pytest.approx(2 / 3)
+        assert ws["A8"].value == 1
+        assert ws["A11"].value == 3
+        assert ws.cell(row=24, column=3).value == 3  # SW table Total
 
     def test_freeze_panes_on_the_die_grid(self, generated):
-        # first block freezes at its first die row / column G: the title,
-        # cards, info rows and the band/X-header row stay visible
+        # first block freezes at its die grid (title + identity + X-header
+        # rows and columns A:F stay visible while scrolling)
         _, wb, _, _, _ = generated
-        assert wb["Wafer Map"].freeze_panes == "G10"
+        assert wb["Wafer Map"].freeze_panes == "G5"
 
     def test_die_cell_holds_sbin_value(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["Wafer Map"]
-        assert ws["G9"].value == "-1"  # first X header (ascending)
-        assert ws["F10"].value == "1"  # top Y header = max Y
-        assert ws["G11"].value == 1  # die (-1, 0)
-        assert ws["H11"].value == 1  # die (0, 0)
-        assert ws["H12"].value == 2  # die (0, -1)
+        assert ws["G4"].value == "-1"  # first X header (ascending)
+        assert ws["F5"].value == "1"  # top Y header = max Y
+        assert ws["G6"].value == 1  # die (-1, 0)
+        assert ws["H6"].value == 1  # die (0, 0)
+        assert ws["H7"].value == 2  # die (0, -1)
 
     def test_die_columns_stay_square_after_autofit(self, generated):
-        # Review Focus pin: _autofit_columns runs AFTER the blocks — the
-        # die/spacer columns must keep their 24 px squares (stored width
-        # 877/256, see the xlsxwriter chars->px->chars conversion) and the
-        # axis column its 30 px (1097/256); A:D keep the ledger
+        # 2026-11-13 column plan pinned AFTER the autofit: A=30, B:D=8,
+        # E=3.5 (stored through the xlsxwriter chars->px->chars round trip:
+        # 7862/256, 2230/256, 1097/256); F keeps its 30 px and the die
+        # columns their 24 px squares (877/256)
         _, wb, _, _, _ = generated
         ws = wb["Wafer Map"]
-        assert col_dim(ws, "G").width == 877 / 256
-        assert col_dim(ws, "E").width == 877 / 256
+        assert col_dim(ws, "A").width == 7862 / 256
+        assert col_dim(ws, "B").width == 2230 / 256
+        assert col_dim(ws, "D").width == 2230 / 256
+        assert col_dim(ws, "E").width == 1097 / 256
         assert col_dim(ws, "F").width == 1097 / 256
-        assert col_dim(ws, "A") is not None
+        assert col_dim(ws, "G").width == 877 / 256
 
     def test_stacked_wafer_skipped_no_png(self, tmp_path, qapp):
         # 2026-11-12 user ruling: NO PNG on the Wafer sheet at all — the
@@ -1589,5 +1600,7 @@ class TestWaferCellMap:
         _, wb, _, _, _ = build(tmp_path, qapp)
         ws = wb["Wafer Map"]
         assert "A1:D1" in {str(r) for r in ws.merged_cells.ranges}
+        assert "B2:D2" in {str(r) for r in ws.merged_cells.ranges}
         assert not ws.tables
-        assert ws["A2"].value == "WAFER_ID: W01"  # KPI cells drop out
+        assert ws["A2"].value == "WAFER_ID:"  # KPI cells drop out
+        assert ws["B2"].value == "W01"

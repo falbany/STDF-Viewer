@@ -16,7 +16,12 @@ import os, itertools
 import numpy as np
 from deps.DatabaseFetcherRust import DatabaseFetcherRust
 from deps.SharedSrc import *
-from deps.SharedSrc import getSetting, wafer_bin_palette  # noqa: F405 — explicit for the payload builder
+from deps.SharedSrc import (  # noqa: F405 — explicit for the payload builders
+    WAFER_INFO_FIELDS,
+    getSetting,
+    hasDisplayValue,
+    wafer_bin_palette,
+)
 
 
 # fork(falbany): re-measure filter — pure numpy mask shared by
@@ -899,6 +904,18 @@ class DataInterface:
                 sbin: self.SBIN_dict.get(sbin, {}).get("BIN_PF", "")
                 for sbin in (map_data.get("Data") or {})
             }
+            # 2026-11-13: the rendered wafer properties the block shows
+            # under the cards (same labels/format as the File Info sheet)
+            wafer_fields = self.waferInfoDict.get((waferTuple[0], waferTuple[1]), {})
+            properties = []
+            for label, name, components, unit, combine in WAFER_INFO_FIELDS:
+                if name not in ("CENTER_XY", "WF_FLAT", "POS_XY"):
+                    continue
+                values = [wafer_fields.get(field) for field in components]
+                if not all(hasDisplayValue(v) for v in values):
+                    continue
+                properties.append((label.strip(), str(combine(*values))))
+            map_data["Properties"] = properties
         return {"rows": rows, "map": map_data}
 
 

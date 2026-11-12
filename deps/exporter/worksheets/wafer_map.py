@@ -31,7 +31,13 @@ the sheet therefore starts at A1).
 """
 from deps.SharedSrc import tab
 from deps.uic_stdExporter import ReportSelection
-from deps.exporter.charts import wafer_table_name, write_wafer_map_block
+from deps.exporter.charts import (
+    WAFER_LABEL_COL_WIDTH,
+    WAFER_SPACER_PINNED_WIDTH,
+    WAFER_VALUE_COL_WIDTH,
+    wafer_table_name,
+    write_wafer_map_block,
+)
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.writer import FOOTER_TEXT
 
@@ -85,6 +91,12 @@ class WaferMapMixin:
             self.sendProgress()
         self._row[key] = row
         self._autofit_columns(WaferSheet)
+        # 2026-11-13 column plan — pinned AFTER the autofit so these win
+        # over the ledger (only A:D ever get notes, from the SW table):
+        # A=30 (keys/labels), B:D=8 (values), E=3.5 (spacer)
+        WaferSheet.set_column(0, 0, WAFER_LABEL_COL_WIDTH)
+        WaferSheet.set_column(1, 3, WAFER_VALUE_COL_WIDTH)
+        WaferSheet.set_column(4, 4, WAFER_SPACER_PINNED_WIDTH)
         WaferSheet.hide_gridlines(2)
         WaferSheet.set_footer(FOOTER_TEXT)
         WaferSheet.set_tab_color(f"#{TAB_COLOR_HEXES['wafer']}")
