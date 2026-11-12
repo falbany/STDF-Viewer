@@ -94,16 +94,8 @@ from deps.exporter.helpers import (
     stat_cp_value,
     stat_cpk_value,
 )
-from deps.exporter.worksheets.dut_summary import (
-    FTR_SPEC_MAX,
-    FTR_SPEC_MIN,
-    build_dut_summary_spec,
-    group_order_by_temperature,
-    prune_summary_view,
-)
+from deps.exporter.worksheets.dut_summary import DUTSummaryMixin, order_dut_block
 from deps.exporter.dedup import (  # fork(falbany): re-measure filter
-    compute_remeasure_drops,
-    dut_info_from_partial,
     drops_to_exclusion,
 )
 from deps.exporter.sheets import (
@@ -114,7 +106,6 @@ from deps.exporter.theme import ModernTheme, TAB_COLOR_HEXES
 from deps.exporter.writer import (
     FOOTER_TEXT,
     apply_autofit,
-    render_matrix_sheet,
     render_plain_table,
     reset_widths,
     write_body_cell,
@@ -122,7 +113,6 @@ from deps.exporter.writer import (
 )
 from deps.exporter.worksheets.file_info import (
     FileInfoMixin,
-    file_temperatures_from_file_info,
 )
 from deps.exporter.worksheets.gdr_dtr import GdrDtrMixin
 from deps.exporter.worksheets.test_statistics import (
@@ -139,7 +129,7 @@ from deps.exporter.worksheets.test_statistics import (
     transform_stat_header,
     transform_stat_row,
 )
-from deps.exporter.worksheets.dut_summary import order_dut_block
+from deps.exporter.worksheets.dut_summary import DUTSummaryMixin, order_dut_block
 
 # auto-fit column width = max content length * 1.1, capped (classic uses the
 # same *1.1 factor via xlsxwriter set_column; the cap is the modern bound).
@@ -148,7 +138,9 @@ AUTOFIT_FACTOR = 1.1
 AUTOFIT_CAP = 60
 
 
-class ModernReportGenerator(FileInfoMixin, GdrDtrMixin, reportGenerator):
+class ModernReportGenerator(
+    FileInfoMixin, GdrDtrMixin, DUTSummaryMixin, reportGenerator
+):
     def __init__(
         self,
         signals: signals,
@@ -331,169 +323,6 @@ class ModernReportGenerator(FileInfoMixin, GdrDtrMixin, reportGenerator):
             xlutil.xl_cell_to_rowcol(f"{STAT_VALUE_WIDTH_RANGE[1]}1")[1],
             STAT_VALUE_COLUMN_WIDTH,
         )
-
-    # ----------------------------------------------------------------------
-    # DUT Summary matrix + chart sheets (Task 8)
-    # ----------------------------------------------------------------------
-
-    def _resolve_remeasure_drops(self) -> "set | set()":
-        """The filter's drop-set, either direction of the sheet selection.
-
-        writeDUT_Summary stores its drop-set before writeStatistic runs
-        (DUT sheet selected → reuse it; an empty set means "ran, nothing
-        to drop" — never refetch). None means the DUT sheet did not
-        render: the light dutInfo-only fetch answers, and an empty fetch
-        degrades gracefully to an empty drop-set."""
-        if self._remeasure_drops is not None:
-            return self._remeasure_drops
-        partial = self.waitForDutInfo(
-            self.selectedHeads, self.selectedSites, self.selectedFiles
-        )
-        return compute_remeasure_drops(
-            dut_info_from_partial(partial or {}), self.selectedFiles
-        )
-
-    def _order_and_ids(self, summaryTable, order_filter=None):
-        """The classic `(fid, dutIndex)` display order and its per-column
-        part IDs (moved verbatim out of writeDUT_Summary).
-
-        `order_filter` (temperature split §7.4) keeps only the listed
-        pairs — None keeps everything. The "DUT #n" fallback numbers
-        within the KEPT order."""
-        order = []
-        for fid in sorted(summaryTable["dutInfo"].keys()):
-            for dutIndex in sorted(summaryTable["dutInfo"][fid].keys()):
-                pair = (fid, dutIndex)
-                if order_filter is None or pair in order_filter:
-                    order.append(pair)
-
-        # full part ID per ordered DUT (classic dataRow[1] indexing); a
-        # blank part ID falls back to "DUT #n"
-        dut_ids = []
-        for i, (fid, dutIndex) in enumerate(order):
-            info = summaryTable["dutInfo"][fid][dutIndex]
-            part_id = info[1] if len(info) > 1 and info[1] else ""
-            dut_ids.append(part_id if part_id else f"DUT #{i + 1}")
-        return order, dut_ids
-
-    def writeDUT_Summary(self):
-        DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
-        if DutSheet is None:
-            return
-
-        # a complex dict structure from the GUI thread
-        # key: Data, value:     testTuple -> {fid, testDataDict}
-        # key: TestInfo, value: testTuple -> testInfoDict
-        # key: dut2ind, value:  fid -> {dutIndex -> dataIndex}
-        # key: dutInfo, value:  fid -> {dutIndex -> dutSummary}
-        summaryTable = self.waitForDutSummary(
-            self.selectedHeads, self.selectedSites, self.selectedFiles, self.testTuples
-        )
-        if self.forceQuit:
-            return
-
-        # FTR cache (fourth wave): (test_num, full test name) of every test
-        # tuple whose record SUB_CODE is FTR (any fid) — the PRIMARY FTR
-        # detection signal for writeStatistic's pseudo-limits. Runs before
-        # the sheet rendering; a Stat-only selection never reaches here and
-        # keeps the report_core-initialized empty set (fallback signal).
-        self._ftr_tests = set()
-        for test_tuple in self.testTuples:
-            fid_data = summaryTable.get("Data", {}).get(test_tuple) or {}
-            if any(
-                (fid_data.get(fid) or {}).get("SUB_CODE") == REC.FTR for fid in fid_data
-            ):
-                self._ftr_tests.add((test_tuple[0], test_tuple[2]))
-
-        # re-measure filter (DUT Summary enhancements §7.2): the drop-set
-        # is computed BEFORE rendering and stored for writeStatistic's
-        # stats hook (Task 6) — the DUT sheet runs first in the report
-        # sequence, so a DUT-selected export never refetches here. An
-        # empty set means "ran, nothing to drop"; None (never stored)
-        # means the DUT sheet did not render (stat-only fallback fetch).
-        if getSetting().gen.hide_remeasured:
-            drops = compute_remeasure_drops(summaryTable["dutInfo"], self.selectedFiles)
-        else:
-            drops = set()
-        self._remeasure_drops = drops
-        if drops:
-            summaryTable = prune_summary_view(summaryTable, drops)
-
-        order, dut_ids = self._order_and_ids(summaryTable)
-
-        # per-file MIR Test Temperature (fix wave: the Temperature metadata
-        # row falls back to it when a part ID carries no _T<n>C tag). The
-        # File Info table is fetched even when that sheet is not selected —
-        # the GUI side answers from its immutable fileMetaData; the File
-        # Info sheet, when selected, fetched the identical table moments ago.
-        file_info_rows = self.waitForTableData(isFileInfo=True)
-        if self.forceQuit:
-            return
-        file_temperatures = file_temperatures_from_file_info(
-            file_info_rows, self.selectedFiles
-        )
-
-        specs = build_dut_summary_spec(
-            summaryTable,
-            self.testTuples,
-            order,
-            dut_ids,
-            sheet_name=self.tr("DUT Summary"),
-            # numeric cell formats are hardcoded scientific in the spec
-            # builder (2026-11-10) — no settings-derived float format anymore
-            tr=self.tr,
-            file_temperatures=file_temperatures,
-        )
-
-        # chunk 0 renders on the existing DUT Summary sheet; chunks 1+
-        # (die overflow beyond the Excel column cap) get their own sheets —
-        # spec names already carry the " (n)" suffixes. Column widths are
-        # pinned inside render_matrix_sheet (A=8, B=30, C..L=8, dies=8).
-        # Every sheet created here joins _dut_sheet_block (base sheet
-        # first, report_core appended it at creation) so the close-time
-        # reorder keeps the DUT block adjacent to the base sheet.
-        for chunk_index, spec in enumerate(specs):
-            ws = DutSheet if chunk_index == 0 else self._wb.add_worksheet(spec["name"])
-            render_matrix_sheet(ws, spec, self._theme)
-            if chunk_index > 0:
-                self._dut_sheet_block.append(ws)
-
-        # temperature split (§7.4): one extra worksheet per distinct
-        # temperature, ascending — additive; the base sheet above is
-        # untouched. Groups of the filtered view only; DUTs with no
-        # resolvable temperature stay in the base sheet only. No new
-        # progress ticks (splitting adds sheets, not fetches).
-        if getSetting().gen.split_temperature:
-            groups = group_order_by_temperature(order, summaryTable["dutInfo"], file_temperatures)
-            resolved = [temp for temp in groups if temp is not None]
-            if len(resolved) >= 2:
-                # sorted(resolved), not sorted(groups): the None key does
-                # not compare against floats
-                for temp in sorted(resolved):
-                    pairs = set(groups[temp])
-                    subset = prune_summary_view(summaryTable, set(order) - pairs)
-                    sub_order, sub_ids = self._order_and_ids(subset, order_filter=pairs)
-                    split_specs = build_dut_summary_spec(
-                        subset,
-                        self.testTuples,
-                        sub_order,
-                        sub_ids,
-                        sheet_name=f'{self.tr("DUT Summary")} - T{format_temperature_label(temp)}°C',
-                        tr=self.tr,
-                        file_temperatures=file_temperatures,
-                    )
-                    for spec in split_specs:
-                        ws = self._wb.add_worksheet(spec["name"])
-                        render_matrix_sheet(ws, spec, self._theme)
-                        self._dut_sheet_block.append(ws)
-
-        # classic cadence: one tick after the DUT info part...
-        self.loopCount += 1
-        self.sendProgress()
-        # ...and one per test column (rows span every chunk)
-        for _ in self.testTuples:
-            self.loopCount += 1
-            self.sendProgress()
 
     def writeBinChart(self):
         BinSheet = self.sheetDict.get(ReportSelection.Bin, None)
