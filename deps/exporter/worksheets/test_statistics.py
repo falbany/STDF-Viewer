@@ -33,7 +33,22 @@ extraction wave.
 
 import re
 
-from deps.exporter.helpers import get_column_letter, split_test_name
+import xlsxwriter.utility as xlutil
+
+from deps.SharedSrc import getSetting, tab
+from deps.uic_stdExporter import ReportSelection
+from deps.exporter.dedup import drops_to_exclusion
+from deps.exporter.helpers import (
+    apply_cp_formula,
+    apply_cpk_formula,
+    get_column_letter,
+    split_test_name,
+    stat_cp_value,
+    stat_cpk_value,
+)
+from deps.exporter.sheets import plain_table_spec
+from deps.exporter.theme import TAB_COLOR_HEXES
+from deps.exporter.writer import render_plain_table, write_plain_row
 from deps.exporter.worksheets.dut_summary import FTR_SPEC_MAX, FTR_SPEC_MIN
 
 # The GUI's waitForDataList rows (DataInterface.getStatistics) arrive as
@@ -337,3 +352,158 @@ def _is_number(value) -> bool:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
     return value == value  # NaN != NaN
+
+
+def _stat_formula_values(stat_row: list, header_info: dict) -> dict:
+    """Cached Cp/Cpk results for one transformed Test Statistics row,
+    keyed by 1-based column: the same values the live formulas compute
+    (sigma/mu from the row's numericized Average/St. Dev. cells, limits
+    from the EFFECTIVE SpecMin/SpecMax cells — FTR pseudo-limits already
+    applied by ``apply_ftr_pseudo_limits``). Uncomputable -> "" so the
+    cache stays blank (never xlsxwriter's default cached 0)."""
+    cp_col = header_info.get("cp_col")
+    cpk_col = header_info.get("cpk_col")
+    spec_cols = header_info.get("spec_cols")
+    if cp_col is None or cpk_col is None or spec_cols is None:
+        return {}
+
+    def _cell(index):
+        value = stat_row[index] if index < len(stat_row) else None
+        return value if _is_number(value) else None
+
+    spec_min = _cell(spec_cols[0])
+    spec_max = _cell(spec_cols[1])
+    avg = _cell(header_info.get("avg_col"))
+    std = _cell(header_info.get("std_col"))
+    cp_cache = stat_cp_value(spec_min, spec_max, std)
+    cpk_cache = stat_cpk_value(spec_min, spec_max, avg, std)
+    return {
+        cp_col + 1: "" if cp_cache is None else cp_cache,
+        cpk_col + 1: "" if cpk_cache is None else cpk_cache,
+    }
+
+
+class TestStatisticsMixin:
+    """Test Statistics worksheet writer (moved verbatim from generator.py;
+    the former staticmethod `_stat_formula_values` demotes to this module's
+    `_stat_formula_values` function)."""
+
+    def writeStatistic(self, testTuples: list, heads: list[int], sites: list[int]):
+        # Sheet for statistics of test items, e.g. cpk, mean, etc.
+        StatSheet = self.sheetDict.get(ReportSelection.Stat, None)
+        if StatSheet is None:
+            return
+
+        # re-measure filter (§7.2): Test Statistics honors the same kept-DUT
+        # set as the DUT Summary — the stored drop-set when the DUT sheet
+        # ran, a light dutInfo-only fetch otherwise (stat-only exports)
+        kargs = {"testTuples": testTuples}
+        if getSetting().gen.hide_remeasured:
+            drops = self._resolve_remeasure_drops()
+            if drops:
+                kargs["dut_exclusion"] = drops_to_exclusion(drops)
+
+        dataTable = self.waitForDataList(
+            heads, sites, self.selectedFiles, tab.Trend, kargs
+        )
+        if not dataTable:
+            return
+        # the GUI sends the (already translated) header row as the first
+        # element: [""] + headers — transform it for the modern sheet
+        # (third wave): the "" VHeader cell splits into Test#/Head/Sites/
+        # File ID, Low/High Limit rename to SpecMin/SpecMax, "Param" joins
+        # after "Test Name". English-only anchors — translated UIs degrade
+        # to untransformed columns (same ruling as the File Info wave).
+        headerRow, dataRows = dataTable[0], dataTable[1:]
+        header_info = transform_stat_header(headerRow)
+
+        # SpecMin/SpecMax stylization (B4): the transformed header gives the
+        # two column indices -> letters; the spec carries the scientific
+        # format + static yellow fill (render_plain_table's column_fills
+        # mechanism) and the per-row loop below applies the same to the rows
+        # it writes itself (the classic per-row cadence bypasses spec rows).
+        number_formats: dict[str, str] = {}
+        column_fills: dict[str, str] = {}
+        if header_info["spec_cols"] is not None:
+            for column_index in header_info["spec_cols"]:
+                letter = get_column_letter(column_index + 1)
+                number_formats[letter] = STAT_SPEC_FORMAT
+                column_fills[letter] = STAT_SPEC_FILL_HEX
+        # Cpk display format (fifth wave, controller ruling): "0.00" on the
+        # formula column, letter computed from the transformed header like
+        # the spec_cols formats above; ninth wave: the same "0.00" on the
+        # inserted Cp formula column
+        cpk_col = header_info.get("cpk_col")
+        if cpk_col is not None:
+            number_formats[get_column_letter(cpk_col + 1)] = STAT_CPK_FORMAT
+        cp_col = header_info.get("cp_col")
+        if cp_col is not None:
+            number_formats[get_column_letter(cp_col + 1)] = STAT_CPK_FORMAT
+
+        # Fail Num / Cpk conditional formatting (fourth wave): letters from
+        # the transformed header, data rows only — render_plain_table adds
+        # the rules from the spec
+        cf_ranges = stat_cf_ranges(header_info, len(dataRows))
+
+        # header only (identity tr: no re-translation of the GUI header)
+        spec = plain_table_spec(
+            self.tr("Test Statistics"), header_info["header"], [], tr=lambda s: s
+        )
+        spec["number_formats"] = number_formats
+        spec["column_fills"] = column_fills
+        spec["tab_color"] = TAB_COLOR_HEXES["stat"]
+        spec["repeat_header_row"] = 1
+        if cf_ranges:
+            spec["conditional_formatting"] = cf_ranges
+        render_plain_table(StatSheet, spec, self._theme)
+
+        # data rows keep the classic cadence: forceQuit check, one loopCount
+        # and one sendProgress per row — the transforms happen per row
+        # before writing, without altering the progress semantics
+        written_rows = []
+        for offset, dataRow in enumerate(dataRows):
+            if self.forceQuit:
+                return
+            stat_row = transform_stat_row(dataRow, header_info)
+            if stat_row_is_ftr(stat_row, header_info, self._ftr_tests):
+                apply_ftr_pseudo_limits(stat_row, header_info)
+            # live Cpk formula (fifth wave): AFTER the pseudo-limits, so FTR
+            # rows compute from the ±0.999999 synthetic limits exactly like
+            # the DUT Summary; row_number = 2 + data_row_index (header row 1).
+            # Ninth wave: the Cp formula lands on the placeholder cell the
+            # row transform inserted, reading σ from the numeric St. Dev.
+            # column (same limits feed both ratios).
+            apply_cpk_formula(stat_row, header_info, 2 + offset)
+            apply_cp_formula(stat_row, header_info, 2 + offset)
+            # cached formula results (xlsxwriter migration): the same
+            # values the Cp/Cpk formulas compute — σ/μ from the row's
+            # numericized cells, limits from the EFFECTIVE spec cells
+            # (FTR pseudo-limits already applied); uncomputable -> ""
+            formula_values = _stat_formula_values(stat_row, header_info)
+            written_rows.append(stat_row)
+            write_plain_row(
+                StatSheet,
+                2 + offset,
+                stat_row,
+                self._theme,
+                band=(theme_group_fill_hex if offset % 2 == 0 else None),
+                number_formats=number_formats,
+                column_fills=column_fills,
+                formula_values=formula_values,
+            )
+            self._row[ReportSelection.Stat] = 2 + offset
+            self.loopCount += 1
+            self.sendProgress()
+
+        # extend the auto-filter over the written rows (render_plain_table
+        # only knew about the header when it drew the sheet)
+        width = max([len(header_info["header"])] + [len(row) for row in written_rows])
+        StatSheet.autofilter(0, 0, len(written_rows), width - 1)
+        self._autofit_columns(StatSheet)
+        # sixth wave: value columns G..Q get a compact fixed width (autofit
+        # stays for A:F — the test-name column benefits)
+        StatSheet.set_column(
+            xlutil.xl_cell_to_rowcol(f"{STAT_VALUE_WIDTH_RANGE[0]}1")[1],
+            xlutil.xl_cell_to_rowcol(f"{STAT_VALUE_WIDTH_RANGE[1]}1")[1],
+            STAT_VALUE_COLUMN_WIDTH,
+        )
