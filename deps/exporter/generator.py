@@ -5,7 +5,7 @@
 # Author: falbany (fork)
 # Created Date: November 9th 2026
 # -----
-# Last Modified: Tue Nov 10 2026
+# Last Modified: Thu Nov 12 2026
 # Modified By: falbany (fork)
 # -----
 # Copyright (c) 2026 falbany (fork)
@@ -55,6 +55,13 @@ matrix renderer (die chunks beyond the Excel column cap get their own
 "(n)" sheets); the chart sheets (bin, wafer, trend, histogram) embed the
 GUI-provided PNGs and write their stat rows with the themed body style,
 mirroring the classic cursor gaps and progress cadence.
+
+Worksheets split (2026-11-12): the per-sheet writers moved verbatim to
+``deps/exporter/worksheets/*.py`` as mixins (file_info, gdr_dtr,
+dut_summary, test_statistics, bin_chart, wafer_map, trend_chart,
+histogram); this module composes them into ``ModernReportGenerator`` and
+keeps only the assembly — ``__init__`` state, the shared
+``_autofit_columns`` / ``_write_body_row`` helpers, and ``report_core``.
 """
 
 from itertools import product
@@ -62,7 +69,6 @@ from itertools import product
 import xlsxwriter
 from PyQt5 import QtCore
 
-from deps.SharedSrc import tab
 from deps.uic_stdExporter import (
     ReportSelection,
     dataChannel,
@@ -70,26 +76,20 @@ from deps.uic_stdExporter import (
     signals,
 )
 from deps.exporter.charts import complete_chart_flags
-from deps.exporter.worksheets.bin_chart import BinChartMixin
-from deps.exporter.worksheets.dut_summary import DUTSummaryMixin, order_dut_block
-from deps.exporter.worksheets.histogram import HistogramMixin
-from deps.exporter.worksheets.trend_chart import TrendChartMixin
-from deps.exporter.worksheets.wafer_map import WaferMapMixin
-from deps.exporter.sheets import (
-    insert_report_image,
-)
-from deps.exporter.theme import ModernTheme, TAB_COLOR_HEXES
+from deps.exporter.theme import ModernTheme
 from deps.exporter.writer import (
-    FOOTER_TEXT,
     apply_autofit,
     reset_widths,
     write_body_cell,
 )
-from deps.exporter.worksheets.file_info import (
-    FileInfoMixin,
-)
+from deps.exporter.worksheets.bin_chart import BinChartMixin
+from deps.exporter.worksheets.dut_summary import DUTSummaryMixin, order_dut_block
+from deps.exporter.worksheets.file_info import FileInfoMixin
 from deps.exporter.worksheets.gdr_dtr import GdrDtrMixin
+from deps.exporter.worksheets.histogram import HistogramMixin
 from deps.exporter.worksheets.test_statistics import TestStatisticsMixin
+from deps.exporter.worksheets.trend_chart import TrendChartMixin
+from deps.exporter.worksheets.wafer_map import WaferMapMixin
 
 # auto-fit column width = max content length * 1.1, capped (classic uses the
 # same *1.1 factor via xlsxwriter set_column; the cap is the modern bound).
