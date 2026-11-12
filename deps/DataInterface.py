@@ -868,11 +868,39 @@ class DataInterface:
             invertX = False
             invertY = False
         
-        return {"Bounds": bounds, 
-                "ID": (waferInd, fid), 
-                "Info": (ratio, die_size, 
-                         invertX, invertY, 
-                         waferID, selectSites), 
+        return {"Bounds": bounds,
+                "ID": (waferInd, fid),
+                "Info": (ratio, die_size,
+                         invertX, invertY,
+                         waferID, selectSites),
                 "Data": data,
                 "Statistic": statistic}
+
+
+    def getWaferReportPayload(self, waferTuple: tuple, selectSites: list, selectFiles: list) -> dict:
+        '''
+        Bundled per-wafer payload for the report exporter's cell-grid bin
+        map (issue #2): the info rows (sbin cells dropped) + the
+        getWaferMapData dict with the per-sbin palette hexes merged in —
+        one round-trip per wafer instead of separate stats/map fetches.
+        '''
+        stats = self.getWaferStatistics([waferTuple], selectSites)
+        rows = wafer_payload_rows(stats)
+        map_data = self.getWaferMapData(waferTuple, selectSites, selectFiles)
+        if map_data:
+            map_data["Palette"] = wafer_bin_palette(
+                map_data, self.SBIN_dict, getSetting().color.sbin_colors
+            )
+        return {"rows": rows, "map": map_data}
+
+
+def wafer_payload_rows(stats: dict) -> list:
+    '''
+    Flagged tab.Wafer info rows for the report exporter's cell-grid bin
+    map (issue #2): keep the info cells (bin_num == -1: Yield / Total /
+    Pass / Failed / Unknown / Superseded / WAFER_ID / ...), drop the
+    trailing per-sbin distribution cells — the exported SW bin table
+    carries the bin counts now.
+    '''
+    return [[ele[0] for ele in row if ele[1] == -1] for row in stats.get("Rows", [])]
 
