@@ -16,6 +16,7 @@ import os, itertools
 import numpy as np
 from deps.DatabaseFetcherRust import DatabaseFetcherRust
 from deps.SharedSrc import *
+from deps.SharedSrc import getSetting, wafer_bin_palette  # noqa: F405 — explicit for the payload builder
 
 
 # fork(falbany): re-measure filter — pure numpy mask shared by

@@ -988,7 +988,7 @@ class TestWriteBinTable:
     # wafer cell-map parameterization (issue #2) ---------------------------
 
     def test_first_col_a_writes_at_column_a(self, env):
-        nxt = write_bin_table(
+        write_bin_table(
             env["ws"], 15, AGG_BINS, env["theme"], TABLE_TITLE, TABLE_NAME, first_col=1
         )
         reloaded = env["reload"]()
