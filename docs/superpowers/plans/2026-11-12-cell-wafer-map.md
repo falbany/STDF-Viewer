@@ -200,7 +200,7 @@ Additional tests: `test_empty_map_writes_title_and_rows_only` (`write_wafer_map_
 ### Task 4: Rewire `writeWaferMap` (+ test-harness payload)
 
 **Files:**
-- Modify: `deps/exporter/generator.py:1127-1161` (`writeWaferMap`), the `.charts` import (line ~86), `re` import
+- Modify: `deps/exporter/worksheets/wafer_map.py:38-72` (`WaferMapMixin.writeWaferMap`, moved verbatim from generator.py in the 2026-11-12 worksheets split) + add `from deps.exporter.charts import write_wafer_map_block, wafer_table_name` to its imports
 - Modify: `tests/exporter/test_generator_dut.py` (harness `fake_wait_for_data_list` Wafer branch, `TestImageAnchors` pics assertion at ~line 636, new `TestWaferCellMap`)
 
 **Interfaces:**
@@ -244,7 +244,7 @@ for index, wafer in enumerate(self.waferTuples):
     self.sendProgress()
 ```
 
-Everything after the loop (`self._row[key] = row`, `_autofit_columns`, `hide_gridlines(2)`, `set_footer`, `set_tab_color`) unchanged.
+Everything after the loop (`self._row[key] = row`, `_autofit_columns`, `hide_gridlines(2)`, `set_footer`, `set_tab_color`) unchanged — these stay generator/mixin methods as they are today (`self._theme` binds in `report_core`, generator.py:123).
 
 - [ ] **Step 4: Run** `uv run pytest tests/exporter/test_generator_dut.py -v` — Expected: PASS
 
