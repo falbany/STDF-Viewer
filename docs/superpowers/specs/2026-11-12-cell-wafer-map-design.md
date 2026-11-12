@@ -1,7 +1,8 @@
 # Cell-grid Wafer Bin Map — Design
 
 Date: 2026-11-12 · Branch: `feature/xlsxwriter-exporter` · Issue: falbany/STDF-Viewer#2
-Companion mockup: `.superpowers/brainstorm/71325-1794514046/content/wafer-bin-map-mockup-v2.html` (user-approved layout)
+Companion mockup: `.superpowers/brainstorm/71325-1794514046/content/wafer-bin-map-mockup-v3.html`
+(side-by-side layout, user-ruled 2026-11-12; v2 was table-below-map and is superseded)
 
 ## Intent and why
 
@@ -9,9 +10,9 @@ The Wafer sheet renders each wafer as a **static PNG** plus a text info row. The
 filtered, counted, or re-colored by the user, and it is unreadable when zoomed. Replace it with a
 **live Excel cell grid**: one cell per die, the die's **soft-bin number as the cell value**, and
 **conditional formatting** filling each cell with the same per-sbin palette the GUI map uses.
-Below each map, a **per-wafer SW bin table** (matching the map's own counts) serves as legend and
-analysis surface. Real bin values in real cells make the map filterable, COUNTIF-able and
-re-colorable by the user.
+Beside each map (user ruling 2026-11-12), a **per-wafer SW bin table** (matching the map's own
+counts) serves as legend and analysis surface. Real bin values in real cells make the map
+filterable, COUNTIF-able and re-colorable by the user.
 
 ## Goals / Non-goals / Anti-goals
 
@@ -23,10 +24,19 @@ re-colorable by the user.
 - CF rule per sbin over the map range, colors = the user's per-bin palette (GUI
   `settings.color.sbin_colors`); font black/white by fill luminance.
 - Round wafer silhouette: coordinates outside the wafer are empty cells (no fill, no border).
-- Per-wafer SW bin table below each map, in the Bin sheet's `write_bin_table` look, counts equal
-  to the map's; sbin-number cells carry the same fills so the table doubles as the legend.
-- Square-ish cells (dies are square): row height 18 pt (24 px) ↔ column width ≈ 2.71
-  ((24−5)/7, Calibri-11 MDW), render-verified; map columns excluded from `_autofit_columns`.
+- Per-wafer SW bin table **beside** each map (user ruling 2026-11-12, supersedes the issue's
+  "below the map" builder call 5): a real Excel Table (`add_table`, filter arrows, data bar)
+  in columns **A:D**, blank spacer column **E**, map drawn to the right (**F** = Y-axis header
+  column, **G…** = die columns). Separate column ranges dissolve the width conflict (table
+  columns keep normal autofit widths; die columns are 24 px squares) and keep merged cells
+  out of the table, which Excel Tables forbid. Counts equal the map's; sbin-number cells carry
+  the same fills so the table doubles as the legend.
+- Square-ish cells (dies are square): row height 18 pt (24 px) ↔ die-column width ≈ 2.71
+  ((24−5)/7, Calibri-11 MDW), render-verified; fixed-width map columns (E onward) excluded
+  from `_autofit_columns`, table columns A:D keep it.
+- Empty wafer (zero dies at the selected sites, or non-int bounds → empty payload): the block
+  still shows **title + info rows only** (user ruling 2026-11-12); grid and SW table are
+  skipped, so a WIR/WCR-only wafer no longer breaks the export.
 
 **Non-goals**
 
@@ -57,8 +67,14 @@ re-colorable by the user.
   returns everything: `Data` {sbin → {x[], y[]}}, `Bounds` (xmax, xmin, ymax, ymin), `Statistic`
   {sbin → (sbinName, sbinCnt, percent)}, `Info` (ratio, die_size, invertX, invertY, waferID,
   sites). Superseded DUTs are already excluded (`Supersede=0` in the coords SQL).
-- Palette source: `settings.color.sbin_colors[bin]` (defaults `#00CC00` pass / `#CC0000` fail /
-  `#FE7B00` unknown, per `BIN_PF`); QColor → hex converted GUI-side.
+- Palette source: `settings.color.sbin_colors[bin]` — **already `#RRGGBB` strings** (validated by
+  `isHexColor`, deps/SharedSrc.py:89); the lookup happens GUI-side in the new branch (the GUI
+  chart does the same at ChartWidgets.py:1430 — there is no QColor→hex conversion step). A bin
+  missing from the settings dict falls back to the `BIN_PF` defaults from
+  `setSettingDefaultColor` (deps/SharedSrc.py:194): `#00CC00` pass / `#CC0000` fail / `#FE7B00`
+  unknown — an uncolored die in a QC report is worse than a default color.
+- `Data` x/y come back as **numpy int arrays** (deps/DatabaseFetcherRust.py:483): the grid
+  builder normalizes to Python ints before coordinate-keying.
 
 ## Approaches considered
 
@@ -76,52 +92,72 @@ re-colorable by the user.
 
 ## The decided how
 
-**Fetch.** `waitForDataList([], sites, files, tab.Wafer, {"testTuples": [wafer],
-"waferMapData": waferTuple})` → GUI side, when `waferMapData` is present, returns the
-`getWaferMapData` dict converted to plain hex colors (one payload per wafer; `waferInd == -1`
-never reaches this path — the stacked wafer branch of `writeWaferMap` keeps `waitForImage`).
+**Fetch.** One round-trip per wafer: `waitForDataList([], sites, files, tab.Wafer,
+{"testTuples": [wafer], "waferMapData": waferTuple})` → the GUI's tab.Wafer branch, when
+`waferMapData` is present, returns **one bundled payload** `{"rows": <info rows>,
+"map": <getWaferMapData dict with palette hexes merged in>}` — the info rows (today from
+`getWaferStatistics`) and the map data arrive together, and the GUI-side coordinate/die queries
+run once. The **unflagged classic path is untouched** (plain rows, trailing per-sbin cells
+included) — the legacy exporter in `uic_stdExporter.py` keeps working unchanged. In the flagged
+payload the info rows **drop their trailing per-sbin distribution cells** (issue ruling: "only
+the SW bin table" carries bin counts; the SW table now provides them). `waferInd == -1` (stacked
+wafer) never reaches this path — `writeWaferMap` keeps `waitForImage` for it.
 
-**Block layout per wafer** (issue builder call 5, as mocked up):
+**Block layout per wafer** (user ruling 2026-11-12, side-by-side — supersedes issue builder
+call 5's below-the-map sketch; see mockup v3):
 
 1. Title band — `{waferID} – {All Sites | Site 3, 5}` in the Title lookalike
-   (Cambria 18 bold `#44546A`), merged across the map width.
-2. Info rows — unchanged content from `getWaferStatistics`: Yield / Total / Pass / Failed /
-   Unknown / Superseded / WAFER_ID / FABWF_ID / FRAME_ID / MASK_ID (present keys only).
-3. Map grid — column A (or the map's first column) holds the Y-coordinate axis header, the top
-   grid row holds the X-coordinate axis header (light-gray bold header style, thin border —
-   my call, mockup-confirmed). Die cells: centered small font (8 pt, theme `FONT_SIZE`), value =
-   sbin number. CF rules written over the whole grid range, one `{"type": "cell",
-   "criteria": "==", "value": sbin}` rule per sbin present → `theme.cf_fill(palette_hex)`; each
-   rule's format also sets the luminance-derived font color. Empty bounding-box cells stay
-   unwritten (blank, no border).
-4. SW bin table — `write_bin_table` look fed by the payload's `Statistic` (bins sorted by sbin
-   number; denominator = the map's total die count); the Value (sbin) cells get a static
-   fill format matching the palette (CF there too, so user recolors propagate).
-5. Gap rows before the next wafer block (keep the current 3-row gap).
+   (Cambria 18 bold `#44546A`), merged across the block (A through the map's last column).
+2. Info rows — one row **per selected site** (`getWaferStatistics` iterates
+   `product(waferTuples, selectSites)`): Yield / Total / Pass / Failed / Unknown / Superseded /
+   WAFER_ID / FABWF_ID / FRAME_ID / MASK_ID (present keys only, sbin cells dropped).
+3. Left zone, columns **A:D** — the SW bin table via `write_bin_table` (parameterized first
+   column) fed by the payload's `Statistic` (bins sorted by sbin number; denominator = the
+   map's total die count): headline2 section band, blue header row with filter arrows, bordered
+   body rows, blue data-bar Distribution cells, bold Total row. The Value (sbin) cells carry
+   static palette fills (plus CF, so user recolors propagate).
+4. Spacer column **E** (fixed narrow width).
+5. Right zone from column **F** — the map grid: F holds the Y-coordinate axis header, the top
+   grid row (aligned with the table's section band) holds the X-coordinate axis header
+   (light-gray bold header style, thin border — my call, mockup-confirmed). Die cells from
+   column G: centered small font (8 pt, theme `FONT_SIZE`), value = sbin number. CF rules over
+   the whole grid range, one `{"type": "cell", "criteria": "==", "value": sbin}` rule per sbin
+   present → fill `theme.cf_fill(palette_hex)`; each rule's format also carries the
+   luminance-derived font color (new cached Format — `cf_fill` is background-only). Empty
+   bounding-box cells stay unwritten (blank, no border).
+6. Gap rows before the next wafer block (keep the current 3-row gap).
 
 **Orientation.** Axis header sequences ordered per `invertX`/`invertY` from `Info`: default
 X ascending left→right, Y ascending bottom→top (so max Y on the top Excel row); each invert
 flag reverses its sequence. Die placement uses the same ordered sequences (coordinate → index
 lookup), so the grid always matches the GUI map.
 
-**Squares.** Die rows 18 pt; die columns width ≈ 2.71; axis-header column/row may run slightly
-wider for 2-digit coords (accepted, builder call 8). Map columns are written with explicit
-widths and registered so `_autofit_columns` skips them (builder call 6).
+**Squares.** Die rows 18 pt; die columns width ≈ 2.71; the Y-axis header column F and the
+spacer E get fixed widths (F slightly wider for 2-digit coords — accepted, builder call 8).
+Columns E onward are written with explicit widths and registered so `_autofit_columns` skips
+them (builder call 6); table columns A:D keep the autofit ledger.
 
 **Anomalies.** Duplicate (x, y) among non-superseded DUTs: last write wins in the grid builder
 (builder call 7). Die counts for the SW table are taken from the same deduplicated grid model,
 never from raw `Data` lengths, so table = map by construction.
+
+**Empty payload.** When the bundled payload has no die rows (or the GUI returned nothing for
+non-int bounds), the block writes title + info rows only and skips grid and SW table (user
+ruling 2026-11-12); `writeWaferMap` must therefore fetch and inspect the payload *before*
+writing any block rows.
 
 ## Left to the builder (my calls unless noted)
 
 - Exact luminance formula/threshold for font black/white (simple Rec.601 luma > 140 is the
   default).
 - CF rule stop-if-true flags and rule ordering (bins are disjoint values; order irrelevant).
-- Whether the info rows stay one row of cells (current format) or one row per stat — keep
-  current one-row-of-cells content under the merged title (mockup shows this).
-- Gap row count, spacer conventions, and how the block's first column aligns with existing
-  sheet column A.
-- The payload's exact key names and the `kargs` flag name (`waferMapData` is the working name).
+- Parameterizing `write_bin_table`'s first column (currently hardcoded
+  `BIN_TABLE_FIRST_COL = 2`; the wafer tables need column A) and guaranteeing unique Excel
+  Table names per wafer (e.g. `SW_WFR01`).
+- Fixed widths for spacer E and axis-header column F; which row the map's X-header band shares
+  with the table's section band; gap row count.
+- The payload's exact key names and the `kargs` flag name (`waferMapData` is the working name);
+  how the exporter's progress-tick accounting absorbs the single-fetch change.
 
 ## Execution note
 
