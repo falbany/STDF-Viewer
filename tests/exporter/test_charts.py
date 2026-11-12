@@ -117,6 +117,14 @@ def env():
         return load_workbook_bytes(holder.book)["Sheet"]
 
     holder.reload = reload
+
+    def reload_data_only():
+        if holder.book is None:
+            wb.close()
+            holder.book = out.getvalue()
+        return load_workbook_bytes(holder.book, data_only=True)["Sheet"]
+
+    holder.reload_data_only = reload_data_only
     return holder
 
 
@@ -1279,27 +1287,43 @@ class TestWriteWaferMapBlock:
         )
         self.written(env, map_data=m)
         reloaded = env["reload"]()
-        # the dedup grid carries ONE bin -> SW data 22, Total 23
-        total_cell = reloaded.cell(row=23, column=3)  # Count col, Total row
-        assert total_cell.value == 1
+        # the dedup grid carries ONE bin -> SW data 22, Total 23 (a live
+        # SUM formula with cached 1)
+        assert reloaded["C22"].value == "=COUNTIF($G$5:$K$9,B22)"
+        assert reloaded["C23"].value == "=SUM(C22:C22)"
+        data_only = env.reload_data_only()
+        assert data_only["C22"].value == 1
+        assert data_only["C23"].value == 1
 
     def test_kpi_cards_carry_grid_values_matching_the_sw_table(self, env):
         # 2026-11-12 user ruling: the cards and the SW table share ONE
         # source (the deduplicated grid) — MAP's duplicate (0,0) counts
         # ONCE as sbin 2: 3 pass dies (sbin 1 = P), 2 fail (sbin 2 = F),
         # 5 total, yield 0.6. 2026-11-13 layout: three STACKED A:D cards
-        # at rows 4-6 / 7-9 / 10-12
+        # at rows 4-6 / 7-9 / 10-12. 2026-11-13 dynamic counts: the card
+        # values and the table's Count cells are FORMULAS over the die
+        # map, with cached results so previews show the numbers
         self.written(env)
         reloaded = env["reload"]()
+        data_only = env.reload_data_only()
         assert reloaded["A4"].value == "Yield"
-        assert reloaded["A5"].value == 0.6
+        assert reloaded["A5"].value == "=(C22)/COUNT($G$5:$K$9)"
         assert reloaded["A6"].value == "3 pass / 5 total parts"
         assert reloaded["A7"].value == "Fails"
-        assert reloaded["A8"].value == 2
+        assert reloaded["A8"].value == "=C23"
         assert reloaded["A10"].value == "Total Parts"
-        assert reloaded["A11"].value == 5
-        # the SW table's Total (row 24, Count col) equals the card value
-        assert reloaded.cell(row=24, column=3).value == 5
+        assert reloaded["A11"].value == "=COUNT($G$5:$K$9)"
+        # SW table Count cells: live COUNTIF keyed on each row's Value
+        assert reloaded["C22"].value == "=COUNTIF($G$5:$K$9,B22)"
+        assert reloaded["C23"].value == "=COUNTIF($G$5:$K$9,B23)"
+        assert reloaded["C24"].value == "=SUM(C22:C23)"
+        # cached results (what previews/Excel show before a recalc)
+        assert data_only["A5"].value == pytest.approx(0.6)
+        assert data_only["A8"].value == 2
+        assert data_only["A11"].value == 5
+        assert data_only["C22"].value == 3
+        assert data_only["C23"].value == 2
+        assert data_only["C24"].value == 5
 
     def test_wafer_properties_below_the_cards(self, env):
         # 2026-11-13: the rendered wafer properties sit under the cards,

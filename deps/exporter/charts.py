@@ -459,6 +459,7 @@ def write_kpi_cards(
     note_widths: bool = True,
     card_spans: "tuple | None" = None,
     stacked: bool = False,
+    card_defs: "tuple | None" = None,
 ) -> int:
     """Write the three dashboard KPI cards (seventh-wave mockup) starting
     at 1-based ``start_row`` (the label row) and return the next free row.
@@ -477,6 +478,10 @@ def write_kpi_cards(
     the 2-column KPI_CARD_SPANS). ``stacked=True`` lays the cards OUT
     vertically — card i starts at ``start_row + 3*i`` (the wafer block's
     2026-11-13 layout: three A:D cards under the title).
+    ``card_defs`` replaces the built (label, value, subtitle, is_percent)
+    triples entirely — a value may be a ``(formula, cached_result)``
+    tuple, written through the merged-range + write_formula pattern so
+    the file opens on the cached number AND recalculates live.
     ``note_widths=False`` skips the width ledger (the wafer block's
     cards ride over the pinned columns — the autofit must never resize
     them)."""
@@ -498,6 +503,8 @@ def write_kpi_cards(
         ),
         ("Total Parts", int(effective_total), f"across {n_files} file(s)", False),
     )
+    if card_defs is not None:
+        cards = card_defs
     if card_spans is None:
         card_spans = tuple(
             (first_col, first_col + 1, fill_hex, border_hex)
@@ -556,9 +563,18 @@ def write_kpi_cards(
         ws.merge_range(card_label_row - 1, first0, card_label_row - 1, last0, label, top_fmt)
         if note_widths:
             note_width(ws, first_col, label)
-        ws.merge_range(card_value_row - 1, first0, card_value_row - 1, last0, value, mid_fmt)
+        ws.merge_range(card_value_row - 1, first0, card_value_row - 1, last0, "", mid_fmt)
+        if isinstance(value, tuple):
+            # (formula, cached_result): xlsxwriter's merge_range would
+            # dispatch '=' strings to write_formula with cached 0 — write
+            # the anchor explicitly with the real cached result instead
+            ws.write_formula(card_value_row - 1, first0, value[0], mid_fmt, value[1])
+            note_value = str(value[1])
+        else:
+            ws.write(card_value_row - 1, first0, value, mid_fmt)
+            note_value = str(value)
         if note_widths:
-            note_width(ws, first_col, str(value))
+            note_width(ws, first_col, note_value)
         ws.merge_range(
             card_sub_row - 1, first0, card_sub_row - 1, last0, subtitle, bottom_fmt
         )
@@ -604,6 +620,7 @@ def write_bin_table(
     table_name: str,
     first_col: int = BIN_TABLE_FIRST_COL,
     bin_fills: "dict | None" = None,
+    count_map_range: "str | None" = None,
 ) -> int:
     """Write one structured bin table (sixth wave) starting at 1-based
     ``start_row`` and return the next free row.
@@ -623,6 +640,14 @@ def write_bin_table(
     ``bin_fills`` (issue #2): optional {bin_num: "#RRGGBB"} — the Value
     cell gets a static palette fill with the luminance-derived font color
     so the wafer table doubles as the map's legend.
+
+    ``count_map_range`` (issue #2, 2026-11-13): an ABSOLUTE die-map range
+    (e.g. ``"$G$5:$K$9"``) — when given, the Count cells become live
+    ``=COUNTIF(range, value-cell)`` formulas and the Total a
+    ``=SUM(count cells)`` (cached results written alongside, per the
+    xlsxwriter-migration convention), so the table recalculates when the
+    user edits die values. Default None keeps the static Bin-sheet
+    tables byte-identical.
 
     ``bins`` empty → no-op (returns ``start_row`` unchanged)."""
     if not bins:
@@ -687,7 +712,19 @@ def write_bin_table(
             ws.write(row0, first0 + 1, int(bin_num), value_fmt)
         else:
             ws.write(row0, first0 + 1, int(bin_num), body_fmt)
-        ws.write(row0, first0 + 2, int(count), body_fmt)
+        if count_map_range:
+            # live count: COUNTIF over the die map, keyed on this row's
+            # own Value cell (first0+1) — recalculates on die edits
+            value_letter = xlutil.xl_col_to_name(first0 + 1)
+            ws.write_formula(
+                row0,
+                first0 + 2,
+                f"=COUNTIF({count_map_range},{value_letter}{row0 + 1})",
+                body_fmt,
+                int(count),
+            )
+        else:
+            ws.write(row0, first0 + 2, int(count), body_fmt)
         note_width(ws, first0 + 3, str(count))
         ws.write(row0, last0, count / total if total else 0.0, pct_fmt)
         note_width(ws, last_col, f"{count / total if total else 0.0:.2%}")
@@ -713,7 +750,17 @@ def write_bin_table(
     total_row = last_data_row + 1
     total_label_fmt = theme.cell_format(font="bold_body", align="center", border=True)
     ws.write(total_row - 1, first0, BIN_TOTAL_LABEL, total_label_fmt)
-    ws.write(total_row - 1, first0 + 2, int(total), total_label_fmt)
+    if count_map_range:
+        count_letter = xlutil.xl_col_to_name(first0 + 2)
+        ws.write_formula(
+            total_row - 1,
+            first0 + 2,
+            f"=SUM({count_letter}{first_data_row}:{count_letter}{last_data_row})",
+            total_label_fmt,
+            int(total),
+        )
+    else:
+        ws.write(total_row - 1, first0 + 2, int(total), total_label_fmt)
     note_width(ws, first0 + 3, str(total))
     ws.write(
         total_row - 1,
@@ -805,6 +852,22 @@ def _pf_from_palette(hex6: str) -> str:
     return ""
 
 
+def wafer_bin_pf_map(grid: dict, bin_pf: dict, palette: "dict | None" = None) -> dict:
+    """{sbin: "P" | "F" | ""} for every mapped bin: the SBR PF flag
+    first, the palette-color fallback for bins without one (see
+    ``_pf_from_palette``). One classifier for BOTH the KPI cards and the
+    dynamic count formulas (pass/fail row selection)."""
+    bin_pf = bin_pf or {}
+    palette = palette or {}
+    out = {}
+    for sbin in set(grid.values()):
+        pf = str(bin_pf.get(sbin, "")).strip().upper()
+        if pf not in ("P", "F"):
+            pf = _pf_from_palette(palette.get(sbin, ""))
+        out[sbin] = pf
+    return out
+
+
 def wafer_kpi_from_grid(grid: dict, bin_pf: dict, palette: "dict | None" = None) -> dict:
     """KPI counts derived from the DEDUPLICATED die grid (2026-11-12 user
     ruling: the cards must match the SW bin table, whose counts come from
@@ -819,16 +882,9 @@ def wafer_kpi_from_grid(grid: dict, bin_pf: dict, palette: "dict | None" = None)
     counts: dict = {}
     for sbin in grid.values():
         counts[sbin] = counts.get(sbin, 0) + 1
-    palette = palette or {}
-    n_pass = n_fail = 0
-    for sbin, c in counts.items():
-        pf = str(bin_pf.get(sbin, "")).strip().upper()
-        if pf not in ("P", "F"):
-            pf = _pf_from_palette(palette.get(sbin, ""))
-        if pf == "P":
-            n_pass += c
-        elif pf == "F":
-            n_fail += c
+    pf_map = wafer_bin_pf_map(grid, bin_pf, palette)
+    n_pass = sum(c for sbin, c in counts.items() if pf_map[sbin] == "P")
+    n_fail = sum(c for sbin, c in counts.items() if pf_map[sbin] == "F")
     effective = total  # superseded == 0 on the map
     return {
         "total": total,
@@ -940,24 +996,70 @@ def write_wafer_map_block(
 
     # stacked KPI cards across A:D (Yield 4-6, Fails 7-9, Total 10-12 on
     # the first block); the cards' rows and the map's rows are disjoint
-    # column zones (A:D vs F..)
+    # column zones (A:D vs F..). 2026-11-13: the card VALUES are live
+    # formulas — Total Parts counts the die map, Yield/Fails reference
+    # the SW table's own COUNTIF cells (pass/fail rows selected via the
+    # shared PF classifier) — so the whole sheet recalculates on edits
+    bins_present = sorted({sbin for sbin in grid.values()})
+    counts = {sbin: sum(1 for v in grid.values() if v == sbin) for sbin in bins_present}
+    pf_map = wafer_bin_pf_map(grid, map_data.get("BinPF") or {}, map_data.get("Palette"))
+    kpi = wafer_kpi_from_grid(grid, map_data.get("BinPF") or {}, map_data.get("Palette"))
     cards_start = start_row + len(identity_cells) + 2
+    cards_end = cards_start + 3 * 3 - 1  # three 3-row cards, 1-based
+    xh_row = start_row + 3  # map anchor row (1-based)
+    props_start = max(cards_end, xh_row + len(y_axis)) + 2
+    properties = map_data.get("Properties") or []
+    sw_start = props_start + 2 * max(len(properties) - 1, 0) + 2
+    first_letter = xlutil.xl_col_to_name(WAFER_FIRST_DIE_COL0)
+    last_letter = xlutil.xl_col_to_name(WAFER_FIRST_DIE_COL0 + len(x_axis) - 1)
+    map_range = f"${first_letter}${xh_row + 1}:${last_letter}${xh_row + len(y_axis)}"
+    # the SW table's Count column is C (first_col=1: A name, B value,
+    # C count); its data rows start two rows below the table start
+    count_letter = xlutil.xl_col_to_name(2)
+    def _count_refs(bins):
+        return [
+            f"{count_letter}{sw_start + 2 + bins_present.index(b)}" for b in bins
+        ]
+    pass_bins = [b for b in bins_present if pf_map[b] == "P"]
+    fail_bins = [b for b in bins_present if pf_map[b] == "F"]
+    pass_refs, fail_refs = _count_refs(pass_bins), _count_refs(fail_bins)
+    effective_total = kpi["total"]
+    card_defs = (
+        (
+            "Yield",
+            (f"=({'+'.join(pass_refs) or '0'})/COUNT({map_range})", kpi["yield"]),
+            f"{kpi['pass']} pass / {effective_total} total parts",
+            True,
+        ),
+        (
+            "Fails",
+            ("=" + "+".join(fail_refs), kpi["failed"]) if fail_refs else kpi["failed"],
+            f"{kpi['unknown']} unknown · 0 superseded",
+            False,
+        ),
+        (
+            "Total Parts",
+            (f"=COUNT({map_range})", effective_total),
+            "across 1 file(s)",
+            False,
+        ),
+    )
     write_kpi_cards(
         ws,
         cards_start,
-        wafer_kpi_from_grid(grid, map_data.get("BinPF") or {}, map_data.get("Palette")),
+        kpi,
         1,  # one wafer lives in one file
         theme,
         note_widths=False,  # pinned columns — never the ledger
         card_spans=WAFER_KPI_SPANS,
         stacked=True,
+        card_defs=card_defs,
     )
-    cards_end = cards_start + 3 * 3 - 1  # three 3-row cards, 1-based
 
     if freeze_panes:
         # keep title + identity + X-header rows and columns A:F (the
         # Y-axis header) visible while scrolling the die grid
-        ws.freeze_panes(start_row + 3, WAFER_FIRST_DIE_COL0)
+        ws.freeze_panes(xh_row, WAFER_FIRST_DIE_COL0)
 
     # fixed squares: spacer E, Y-axis header F, die columns G.. — explicit
     # widths, never the ledger
@@ -967,7 +1069,6 @@ def write_wafer_map_block(
 
     # map anchor: X-coordinate headers on start_row+3 (F4's row for the
     # first block), dies from the next row, Y-axis header in F
-    xh_row = start_row + 3
     axis_fmt = theme.cell_format(
         font="bold_body", align="center", border=True, fill_hex="EDEFF2"
     )
@@ -987,9 +1088,6 @@ def write_wafer_map_block(
     # CF rule per sbin over the die range: cell == sbin -> palette fill
     # + luminance font
     palette = map_data.get("Palette") or {}
-    bins_present = sorted({sbin for sbin in grid.values()})
-    first_letter = xlutil.xl_col_to_name(WAFER_FIRST_DIE_COL0)
-    last_letter = xlutil.xl_col_to_name(last_col0)
     cf_range = f"{first_letter}{xh_row + 1}:{last_letter}{xh_row + len(y_axis)}"
     for sbin in bins_present:
         hex6 = palette.get(sbin, "#FE7B00").lstrip("#")
@@ -1005,21 +1103,19 @@ def write_wafer_map_block(
 
     # wafer properties below the taller of (cards, map), each line
     # separated by a blank row
-    props_start = max(cards_end, xh_row + len(y_axis)) + 2
-    properties = map_data.get("Properties") or []
     for offset, (key, value) in enumerate(properties):
         _wafer_kv_row(ws, props_start + 2 * offset, key, value, theme)
 
     # SW bin table in A:D at the bottom (one blank row after the last
     # property) — counts from the DEDUPLICATED grid (never the raw
-    # arrays), so table = map = cards by construction
-    counts = {sbin: sum(1 for v in grid.values() if v == sbin) for sbin in bins_present}
+    # arrays), so table = map = cards by construction; the Count cells
+    # are LIVE COUNTIF formulas over the die map (cached results written
+    # alongside), recalculating when the user edits die values
     statistic = map_data.get("Statistic") or {}
     bins_rows = [
         (sbin, statistic.get(sbin, (f"Bin {sbin}",))[0], counts[sbin])
         for sbin in bins_present
     ]
-    sw_start = props_start + 2 * max(len(properties) - 1, 0) + 2
     write_bin_table(
         ws,
         sw_start,
@@ -1029,6 +1125,7 @@ def write_wafer_map_block(
         table_name,
         first_col=1,
         bin_fills=palette,
+        count_map_range=map_range,
     )
 
     return sw_start + len(bins_present) + 3

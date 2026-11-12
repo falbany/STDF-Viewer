@@ -1520,13 +1520,26 @@ class TestWaferCellMap:
 
     def test_kpi_cards_derive_from_the_grid(self, generated):
         # 2026-11-12 user ruling: cards == SW table (grid is the single
-        # source). Payload grid: 2 dies sbin 1 (P), 1 die sbin 2 (F)
-        _, wb, _, _, _ = generated
+        # source). Payload grid: 2 dies sbin 1 (P), 1 die sbin 2 (F).
+        # 2026-11-13 dynamic counts: the card values and the table's
+        # Count cells are FORMULAS over the die map, with cached results
+        _, wb, report_path, _, _ = generated
         ws = wb["Wafer Map"]
-        assert ws["A5"].value == pytest.approx(2 / 3)
-        assert ws["A8"].value == 1
-        assert ws["A11"].value == 3
-        assert ws.cell(row=24, column=3).value == 3  # SW table Total
+        assert ws["A5"].value == "=(C22)/COUNT($G$5:$I$7)"
+        assert ws["A8"].value == "=C23"
+        assert ws["A11"].value == "=COUNT($G$5:$I$7)"
+        assert ws["C22"].value == "=COUNTIF($G$5:$I$7,B22)"
+        assert ws["C23"].value == "=COUNTIF($G$5:$I$7,B23)"
+        assert ws["C24"].value == "=SUM(C22:C23)"
+        from openpyxl import load_workbook
+
+        cached = load_workbook(report_path, data_only=True)["Wafer Map"]
+        assert cached["A5"].value == pytest.approx(2 / 3)
+        assert cached["A8"].value == 1
+        assert cached["A11"].value == 3
+        assert cached["C22"].value == 2
+        assert cached["C23"].value == 1
+        assert cached["C24"].value == 3  # SW table Total
 
     def test_freeze_panes_on_the_die_grid(self, generated):
         # first block freezes at its die grid (title + identity + X-header
