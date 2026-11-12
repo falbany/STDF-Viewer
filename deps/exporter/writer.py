@@ -85,6 +85,10 @@ FIXED_FORMAT_COLUMNS = {
     "Fails": 12,
 }
 
+# Sparkline
+DISPLAY_HIGH_POINT = True
+DISPLAY_LOW_POINT = True
+DISPLAY_NEGATIVE_POINTS = False
 
 # --------------------------------------------------------------------------
 # width ledger (the autofit engine — xlsxwriter cells cannot be re-read,
@@ -538,11 +542,11 @@ def _add_sparklines(ws, spec):
                 "range": f"{qualified}{spark['range']}",
                 "type": spark["type"],
                 "series_color": "#1E40AF",
-                "high_point": True,
-                "low_point": True,
+                "high_point": DISPLAY_HIGH_POINT,
+                "low_point": DISPLAY_LOW_POINT,
                 "high_color": "#DC2626",
                 "low_color": "#16A34A",
-                "negative_points": True,
+                "negative_points": DISPLAY_NEGATIVE_POINTS,
                 "negative_color": "#DC2626",
                 "empty_cells": "gap",
             },
