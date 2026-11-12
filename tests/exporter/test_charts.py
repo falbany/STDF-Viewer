@@ -30,6 +30,7 @@ import io
 import zipfile
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import xlsxwriter
 
@@ -45,12 +46,15 @@ from deps.exporter.charts import (
     aggregate_bin_counts,
     aggregate_kpi,
     build_bin_donut,
+    build_wafer_grid,
     complete_chart_flags,
     parse_bin_row,
     parse_kpi_row,
     write_bin_table,
     write_kpi_cards,
     write_merged_headline,
+    write_wafer_map_block,
+    wafer_table_name,
 )
 from deps.exporter.theme import ModernTheme
 from tests.exporter.conftest import load_workbook_bytes, read_xml, render_workbook
@@ -1083,3 +1087,144 @@ class TestCompleteChartFlags:
 
         wb = load_workbook(path)
         assert wb.sheetnames == ["Bin Chart"]
+
+
+# --------------------------------------------------------------------------
+# wafer cell-grid bin map (issue #2)
+# --------------------------------------------------------------------------
+
+MAP = {
+    "Bounds": (2, -2, 2, -2),  # xmax, xmin, ymax, ymin
+    "Info": (1.0, "", False, False, "W01", [-1]),
+    "Data": {
+        1: {"x": np.array([-1, 0, 1, 0]), "y": np.array([0, 0, 0, 1])},
+        2: {"x": np.array([0, 0]), "y": np.array([0, -1])},
+    },
+    "Statistic": {1: ("Good", 3, 60.0), 2: ("Fail", 2, 40.0)},
+    "Palette": {1: "#00CC00", 2: "#CC0000"},
+}
+
+
+class TestBuildWaferGrid:
+    def test_default_orientation_top_row_is_max_y(self):
+        x_axis, y_axis, grid, total = build_wafer_grid(MAP)
+        assert x_axis == [-2, -1, 0, 1, 2]  # ascending left→right
+        assert y_axis == [2, 1, 0, -1, -2]  # max Y on top
+        assert total == 5
+
+    def test_invert_x_flips_x_axis(self):
+        m = dict(MAP, Info=(1.0, "", True, False, "W01", [-1]))
+        x_axis, y_axis, _, _ = build_wafer_grid(m)
+        assert x_axis == [2, 1, 0, -1, -2]
+        assert y_axis == [2, 1, 0, -1, -2]
+
+    def test_invert_y_flips_y_axis(self):
+        m = dict(MAP, Info=(1.0, "", False, True, "W01", [-1]))
+        x_axis, y_axis, _, _ = build_wafer_grid(m)
+        assert x_axis == [-2, -1, 0, 1, 2]
+        assert y_axis == [-2, -1, 0, 1, 2]
+
+    def test_duplicate_xy_last_write_wins_and_counts(self):
+        m = dict(
+            MAP,
+            Data={
+                1: {"x": np.array([0, 0]), "y": np.array([0, 0])},
+                2: {"x": np.array([0]), "y": np.array([0])},
+            },
+        )
+        _, _, grid, total = build_wafer_grid(m)
+        assert grid[(0, 0)] == 2
+        assert total == 1  # raw array len 3, grid 1
+
+    def test_non_int_bounds_degrade_to_empty(self):
+        x_axis, y_axis, grid, total = build_wafer_grid(
+            {"Bounds": (2.5, -2, 2, -2), "Data": {1: {"x": np.array([0]), "y": np.array([0])}}}
+        )
+        assert (x_axis, y_axis, grid, total) == ([], [], {}, 0)
+
+
+class TestWriteWaferMapBlock:
+    def written(self, env, rows=None, map_data=None, start_row=1, name="SW_0_W01"):
+        return write_wafer_map_block(
+            env["ws"],
+            env["theme"],
+            rows if rows is not None else [["Yield: 60.00%", "Total: 5"]],
+            map_data if map_data is not None else MAP,
+            start_row,
+            name,
+        )
+
+    def test_block_writes_grid_cf_and_table(self, env):
+        nxt = self.written(env)
+        reloaded = env["reload"]()
+        # layout: title r=1 (5 die cols -> merge A1:K1), info r=2, blank 3,
+        # b=4, die rows 5..9 (NY=5); SW table: band 4, header 6, data 7..8,
+        # total 9; write_bin_table returns 10 -> block returns 11
+        assert "A1:K1" in {str(r) for r in reloaded.merged_cells.ranges}
+        assert reloaded["A1"].value == "W01 – All Sites"
+        assert reloaded["G4"].value == "-2"  # first X header (ascending)
+        assert reloaded["F5"].value == "2"  # top Y header = max Y
+        assert reloaded["I6"].value == 1  # die (x=0, y=1): sbin int
+        assert reloaded["I7"].value == 2  # duplicate (0,0): last wins
+        rngs = {str(rng) for rng in reloaded.conditional_formatting._cf_rules}
+        assert any("G5:K9" in rng for rng in rngs)
+        assert [reloaded.cell(row=6, column=c).value for c in range(1, 5)] == list(
+            BIN_TABLE_HEADERS
+        )
+        assert nxt == 11
+
+    def test_empty_map_writes_title_and_rows_only(self, env):
+        nxt = self.written(env, map_data={})
+        reloaded = env["reload"]()
+        assert "A1:D1" in {str(r) for r in reloaded.merged_cells.ranges}
+        # no table, no grid
+        assert not reloaded.tables
+        assert [reloaded.cell(row=2, column=c).value for c in (1, 2)] == [
+            "Yield: 60.00%",
+            "Total: 5",
+        ]
+        assert nxt == 3  # start_row 1 + 1 info row + 1
+
+    def test_die_columns_fixed_width(self, env):
+        self.written(env)
+        reloaded = env["reload"]()
+        # xlsxwriter 3.3.1 converts set_column chars -> px (int(w*7+0.5)+5)
+        # then stores px -> chars ((px*256//7)/256): 2.71 -> 24 px ->
+        # 877/256; 3.5 -> 30 px -> 1097/256. Pin the stored widths for the
+        # designed pixel sizes (24 px die/spacer squares, 30 px axis col).
+        die_width = 877 / 256  # 24 px
+        axis_width = 1097 / 256  # 30 px
+        assert reloaded.column_dimensions["G"].width == die_width
+        assert reloaded.column_dimensions["E"].width == die_width
+        assert reloaded.column_dimensions["F"].width == axis_width
+
+    def test_cf_rule_value_is_sbin_with_palette_fill(self, env):
+        self.written(env)
+        reloaded = env["reload"]()
+        (rule,) = [
+            r
+            for cf in reloaded.conditional_formatting
+            for r in cf.rules
+            if r.type == "cellIs" and str(cf.sqref) == "G5:K9" and r.operator == "equal"
+            and r.formula == ["1"]
+        ]
+        fill_rgb = rule.dxf.fill.bgColor.rgb or rule.dxf.fill.fgColor.rgb
+        assert str(fill_rgb).endswith("00CC00")
+
+    def test_wafer_table_name_sanitized(self):
+        assert wafer_table_name(0, "W 01/x") == "SW_0_W_01_x"
+
+    def test_sw_table_counts_come_from_the_grid(self, env):
+        # raw Data carries 3 dups on (0,0) but the grid dedupes to 1 die —
+        # the SW table's Total must read the grid, not the arrays
+        m = dict(
+            MAP,
+            Data={
+                1: {"x": np.array([0, 0]), "y": np.array([0, 0])},
+                2: {"x": np.array([0]), "y": np.array([0])},
+            },
+        )
+        self.written(env, map_data=m)
+        reloaded = env["reload"]()
+        total_cell = reloaded.cell(row=8, column=3)  # Count col, Total row
+        assert total_cell.value == 1

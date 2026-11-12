@@ -696,3 +696,167 @@ def write_bin_table(
     )
 
     return total_row + 1
+
+
+# --------------------------------------------------------------------------
+# wafer cell-grid bin map (issue #2)
+# --------------------------------------------------------------------------
+
+# Block geometry: A:D SW bin table, E spacer, F Y-axis header, G+ die
+# columns. Column E onward must NEVER hit the width ledger —
+# _autofit_columns would trample the 24 px squares.
+WAFER_SPACER_COL0 = 4  # column E
+WAFER_YAXIS_COL0 = 5  # column F
+WAFER_FIRST_DIE_COL0 = 6  # column G
+WAFER_DIE_WIDTH = 2.71  # (24 px - 5) / 7 Calibri-11 MDW — render-verified
+WAFER_YAXIS_WIDTH = 3.5  # slightly wider: 2-digit coords
+WAFER_DIE_ROW_PT = 18  # 24 px
+
+
+def wafer_table_name(index: int, wafer_id: str) -> str:
+    """Workbook-unique, letter-starting Excel Table name for one wafer's
+    SW bin table (Excel Table names carry no spaces/punctuation)."""
+    return f"SW_{index}_{re.sub(r'\W+', '_', str(wafer_id))[:40]}"
+
+
+def build_wafer_grid(map_data: dict):
+    """Deduplicated die grid for one wafer: (x_axis left→right, y_axis
+    top→bottom, {(x, y): sbin} with last-write-wins duplicates, total die
+    count from the DEDUPLICATED grid). Axis order follows the GUI map's
+    invertX / invertY (Info[2] / Info[3]): default X ascending, Y
+    descending (max Y on the top Excel row); each flag reverses its axis.
+    Bounds non-int or no die rows → ([], [], {}, 0) — the empty-wafer
+    block degrades to title + info rows."""
+    bounds = map_data.get("Bounds") or ()
+    if len(bounds) != 4 or any(not isinstance(v, int) for v in bounds):
+        return [], [], {}, 0
+    data = map_data.get("Data") or {}
+    if not data:
+        return [], [], {}, 0
+    x_max, x_min, y_max, y_min = bounds
+    x_axis = list(range(x_min, x_max + 1))
+    y_axis = list(range(y_max, y_min - 1, -1))
+    info = map_data.get("Info") or (0, 0, False, False, "", [])
+    if info[2]:  # invertX: the GUI view flips horizontally
+        x_axis.reverse()
+    if info[3]:  # invertY: the GUI view flips vertically
+        y_axis.reverse()
+    grid = {}
+    for sbin, xy in data.items():
+        xs, ys = xy.get("x"), xy.get("y")
+        if xs is None or ys is None:
+            continue
+        for x, y in zip(xs, ys):
+            grid[(int(x), int(y))] = sbin
+    return x_axis, y_axis, grid, len(grid)
+
+
+def _wafer_site_info(sites) -> str:
+    return "All Sites" if -1 in sites else f"Site {', '.join(map(str, sites))}"
+
+
+def write_wafer_map_block(
+    ws, theme, rows: list, map_data: dict, start_row: int, table_name: str
+) -> int:
+    """One wafer block (issue #2): title band + info rows, then — when the
+    map has dies — the SW bin table in A:D (write_bin_table, filter
+    arrows, palette-filled Value cells), spacer E, and the die grid from
+    column F (Y-axis header) / G (square die cells, sbin number as the
+    cell VALUE, CF rule per sbin). Empty map → title + info rows only.
+    Returns the next free row (the caller adds the inter-block gap)."""
+    info = map_data.get("Info") or (1.0, "", False, False, "", [])
+    wafer_id = info[4] if len(info) > 4 else ""
+    sites = info[5] if len(info) > 5 else []
+    site_info = _wafer_site_info(sites)
+    title = f"{wafer_id} – {site_info}" if wafer_id else site_info
+
+    x_axis, y_axis, grid, total = build_wafer_grid(map_data)
+    info_rows = rows or []
+    info_fmt = theme.cell_format(font="body", align="left", border=True)
+
+    if not grid:
+        # empty wafer (WIR/WCR-only or degenerate payload): title + info
+        # rows only — the export must not break
+        ws.merge_range(
+            start_row - 1, 0, start_row - 1, 3, title, theme.lookalike("title")
+        )
+        for offset, row in enumerate(info_rows):
+            for col, value in enumerate(row):
+                ws.write(start_row + offset, col, value, info_fmt)
+        return start_row + len(info_rows) + 1
+
+    last_col0 = WAFER_FIRST_DIE_COL0 + len(x_axis) - 1
+    b = start_row + len(info_rows) + 2  # band / X-header row (1-based)
+
+    ws.merge_range(
+        start_row - 1, 0, start_row - 1, last_col0, title, theme.lookalike("title")
+    )
+    for offset, row in enumerate(info_rows):
+        for col, value in enumerate(row):
+            ws.write(start_row + offset, col, value, info_fmt)
+
+    # fixed squares: spacer E, Y-axis header F, die columns G.. — explicit
+    # widths, never the ledger
+    ws.set_column(WAFER_SPACER_COL0, WAFER_SPACER_COL0, WAFER_DIE_WIDTH)
+    ws.set_column(WAFER_YAXIS_COL0, WAFER_YAXIS_COL0, WAFER_YAXIS_WIDTH)
+    ws.set_column(WAFER_FIRST_DIE_COL0, last_col0, WAFER_DIE_WIDTH)
+
+    # band row: SW-table band A:D (write_bin_table below) + X-axis header
+    # over the die columns (coords as labels)
+    axis_fmt = theme.cell_format(
+        font="bold_body", align="center", border=True, fill_hex="EDEFF2"
+    )
+    for col_offset, x in enumerate(x_axis):
+        ws.write(b - 1, WAFER_FIRST_DIE_COL0 + col_offset, str(x), axis_fmt)
+
+    # die grid: one cell per die, value = sbin number; empty bounding-box
+    # cells stay unwritten (round silhouette)
+    die_fmt = theme.cell_format(font="body", align="center")
+    for row_offset, y in enumerate(y_axis):
+        row0 = b + row_offset  # 0-based
+        ws.set_row(row0, WAFER_DIE_ROW_PT)
+        ws.write(row0, WAFER_YAXIS_COL0, str(y), axis_fmt)
+        for col_offset, x in enumerate(x_axis):
+            sbin = grid.get((x, y))
+            if sbin is not None:
+                ws.write(row0, WAFER_FIRST_DIE_COL0 + col_offset, int(sbin), die_fmt)
+
+    # CF rule per sbin over the die range: cell == sbin -> palette fill
+    # + luminance font
+    palette = map_data.get("Palette") or {}
+    bins_present = sorted({sbin for sbin in grid.values()})
+    first_letter = xlutil.xl_col_to_name(WAFER_FIRST_DIE_COL0)
+    last_letter = xlutil.xl_col_to_name(last_col0)
+    cf_range = f"{first_letter}{b + 1}:{last_letter}{b + len(y_axis)}"
+    for sbin in bins_present:
+        hex6 = palette.get(sbin, "#FE7B00").lstrip("#")
+        ws.conditional_format(
+            cf_range,
+            {
+                "type": "cell",
+                "criteria": "==",
+                "value": sbin,
+                "format": theme.cf_bin_fill(hex6, wafer_font_for_fill(f"#{hex6}")),
+            },
+        )
+
+    # SW bin table in A:D — counts from the DEDUPLICATED grid (never the
+    # raw arrays), so table = map by construction
+    statistic = map_data.get("Statistic") or {}
+    counts = {sbin: sum(1 for v in grid.values() if v == sbin) for sbin in bins_present}
+    bins_rows = [
+        (sbin, statistic.get(sbin, (f"Bin {sbin}",))[0], counts[sbin])
+        for sbin in bins_present
+    ]
+    write_bin_table(
+        ws,
+        b + 1,
+        bins_rows,
+        theme,
+        f"Soft Bins — {wafer_id} (map counts)",
+        table_name,
+        first_col=1,
+        bin_fills=palette,
+    )
+
+    return max(b + len(y_axis), b + len(bins_present) + 4) + 1

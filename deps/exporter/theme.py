@@ -238,6 +238,12 @@ class ModernTheme:
         merges the rule's fill itself; the format carries just the color)."""
         return self._format({"bg_color": f"#{hex6}"})
 
+    def cf_bin_fill(self, bg_hex: str, font_hex: str):
+        """Die-cell CF rule format (issue #2): palette fill + luminance
+        font — cf_fill is background-only, and the sbin digit must stay
+        readable on saturated bin colors."""
+        return self._format({"bg_color": f"#{bg_hex}", "font_color": font_hex})
+
     def cf_duplicate_preset(self):
         """Excel's builtin "Yellow Fill with Dark Yellow Text" preset for
         the duplicate-Part-ID highlight — hardcoded (like
