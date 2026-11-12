@@ -1158,8 +1158,9 @@ class TestWriteWaferMapBlock:
         nxt = self.written(env)
         reloaded = env["reload"]()
         # layout: title r=1 (5 die cols -> merge A1:K1), info r=2, blank 3,
-        # b=4, die rows 5..9 (NY=5); SW table: band 4, header 6, data 7..8,
-        # total 9; write_bin_table returns 10 -> block returns 11
+        # b=4 (SW band A:D + X headers G..K share it), die rows 5..9 (NY=5);
+        # SW table: header 5, data 6..7, total 8; write_bin_table returns 9
+        # -> block returns max(9, 9) + 1 = 10
         assert "A1:K1" in {str(r) for r in reloaded.merged_cells.ranges}
         assert reloaded["A1"].value == "W01 – All Sites"
         assert reloaded["G4"].value == "-2"  # first X header (ascending)
@@ -1168,10 +1169,10 @@ class TestWriteWaferMapBlock:
         assert reloaded["I7"].value == 2  # duplicate (0,0): last wins
         rngs = {str(rng) for rng in reloaded.conditional_formatting._cf_rules}
         assert any("G5:K9" in rng for rng in rngs)
-        assert [reloaded.cell(row=6, column=c).value for c in range(1, 5)] == list(
+        assert [reloaded.cell(row=5, column=c).value for c in range(1, 5)] == list(
             BIN_TABLE_HEADERS
         )
-        assert nxt == 11
+        assert nxt == 10
 
     def test_empty_map_writes_title_and_rows_only(self, env):
         nxt = self.written(env, map_data={})
@@ -1226,5 +1227,5 @@ class TestWriteWaferMapBlock:
         )
         self.written(env, map_data=m)
         reloaded = env["reload"]()
-        total_cell = reloaded.cell(row=8, column=3)  # Count col, Total row
+        total_cell = reloaded.cell(row=7, column=3)  # Count col, Total row
         assert total_cell.value == 1

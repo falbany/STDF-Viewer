@@ -21,6 +21,7 @@ from PIL import Image as PILImage
 from PyQt5 import QtCore
 
 from deps.SharedSrc import REC, getSetting, tab
+from deps.exporter.charts import BIN_TABLE_HEADERS
 from deps.exporter.generator import ModernReportGenerator
 from deps.exporter.worksheets.file_info import bin_banner_from_file_info
 from deps.exporter.theme import number_format_from_settings
@@ -249,6 +250,20 @@ def png_bytes(width=96, height=48):
 
 PNG_BYTES = png_bytes()
 
+# Flagged tab.Wafer payload (issue #2 cell-grid bin map): the GUI branch
+# returns {"rows", "map"} with palette hexes merged into the map dict.
+# 3x3 bounds; dies: (-1,0)->1, (0,0)->1, (0,-1)->2.
+WAFER_MAP_PAYLOAD = {
+    "Bounds": (1, -1, 1, -1),  # xmax, xmin, ymax, ymin
+    "Info": (1.0, "", False, False, "W01", [-1]),
+    "Data": {
+        1: {"x": np.array([-1, 0]), "y": np.array([0, 0])},
+        2: {"x": np.array([0]), "y": np.array([-1])},
+    },
+    "Statistic": {1: ("Good", 2, 66.7), 2: ("Fail", 1, 33.3)},
+    "Palette": {1: "#00CC00", 2: "#CC0000"},
+}
+
 
 def build_generated(
     tmp_path,
@@ -263,6 +278,7 @@ def build_generated(
     split_temperature=False,
     hide_remeasured=False,
     with_dut=True,
+    wafer_tuples=None,
     monkeypatch=None,
 ):
     """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus Stat when
@@ -272,12 +288,13 @@ def build_generated(
     source); `part_id_tagged` drops the _T<n>C tag from the part IDs.
     `duplicate_sn` shares SN541 between the first and third DUT;
     `hide_remeasured` flips the filter setting for the run (pass the test's
-    `monkeypatch` fixture so it auto-restores)."""
+    `monkeypatch` fixture so it auto-restores). `wafer_tuples` overrides the
+    wafer selection (e.g. [(-1, -1, "STACK")] for the stacked-wafer path)."""
     testTuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
     selectedFiles = [1]
     selectedHeads = [1]
     selectedSites = [-1]
-    waferTuples = [(0, 1, "W01")]  # (wafer index, file id, wafer name)
+    waferTuples = [(0, 1, "W01")] if wafer_tuples is None else wafer_tuples
     reportPath = str(tmp_path / "report.xlsx")
     # classic totalLoopCnt formula (stdfExporter.start): Trend 2*1*1
     # + Bin 1*1 + DUT (1 + 2) + Wafer len(waferTuples)
@@ -407,6 +424,13 @@ def build_generated(
         if chartType == tab.Bin:
             return bin_table("HB") if kargs.get("isHBIN") else bin_table("SB")
         if chartType == tab.Wafer:
+            if kargs.get("waferMapData") is not None:
+                # flagged cell-map fetch (issue #2): bundled payload
+                return {
+                    "rows": [["Yield: 60.00%", "Total: 5", "WAFER_ID: W01"]],
+                    "map": dict(WAFER_MAP_PAYLOAD),
+                }
+            # unflagged classic shape (legacy exporter + stacked wafer)
             return [["WAFER-W01-ROW", "Total DUTs", 3]]
         return [["TREND-ROW", "mean", 1.1]]
 
@@ -619,11 +643,11 @@ class TestDutTemperatureFallback:
 
 class TestChartSheets:
     def test_images_embedded(self, generated):
-        # fifth wave: Wafer/Trend keep the embedded PNGs — Bin no longer
-        # calls waitForImage at all. xlsxwriter: images live in xl/media/
-        # (the fixture sends the SAME PNG three times — xlsxwriter
-        # deduplicates the bytes to one media entry, referenced by three
-        # <xdr:pic> anchors across the drawings)
+        # issue #2: the Wafer sheet renders the cell-grid bin map — the
+        # per-wafer PNG is gone; only Trend keeps embedded PNGs. xlsxwriter:
+        # images live in xl/media/ (the fixture sends the SAME PNG —
+        # xlsxwriter deduplicates the bytes to one media entry, referenced
+        # by two <xdr:pic> anchors across the drawings)
         _, _, report_path, _, _ = generated
         with zipfile.ZipFile(report_path) as zf:
             media = [n for n in zf.namelist() if n.startswith("xl/media/")]
@@ -633,11 +657,11 @@ class TestChartSheets:
                 if n.startswith("xl/drawings/drawing") and n.endswith(".xml")
             )
         assert len(media) >= 1
-        assert pics == 3  # 2 trend + 1 wafer anchors
+        assert pics == 2  # 2 trend anchors (wafer PNG replaced by the grid)
 
     def test_bin_sheet_has_no_images(self, generated):
-        # the package's drawings carry exactly the three image anchors and
-        # the two donut graphicFrames — Bin contributes charts only
+        # the package's drawings carry exactly the two trend image anchors
+        # and the two donut graphicFrames — Bin contributes charts only
         _, _, report_path, _, _ = generated
         with zipfile.ZipFile(report_path) as zf:
             pics, frames = 0, 0
@@ -646,7 +670,7 @@ class TestChartSheets:
                     data = zf.read(n)
                     pics += data.count(b"<xdr:pic>")
                     frames += data.count(b"<xdr:graphicFrame")  # tag carries attributes
-        assert pics == 3
+        assert pics == 2
         assert frames == 2
 
     # -- dashboard header (seventh wave) ------------------------------------
@@ -948,6 +972,8 @@ class TestChartSheets:
         assert wb["Bin Chart"].sheet_view.showGridLines is False
 
     def test_wafer_and_trend_stat_rows_written(self, generated):
+        # issue #2: the wafer block's info rows come from the flagged
+        # payload (sbin cells dropped — the SW table carries the counts)
         _, wb, _, _, _ = generated
         wafer = {
             c.value
@@ -961,7 +987,8 @@ class TestChartSheets:
             for c in row
             if c.value is not None
         }
-        assert "WAFER-W01-ROW" in wafer
+        assert "Yield: 60.00%" in wafer
+        assert "WAFER_ID: W01" in wafer
         assert "TREND-ROW" in trend
 
     def test_bin_sheet_uniform_page_widths(self, generated):
@@ -1446,3 +1473,101 @@ class TestDutBlockTabOrder:
             "Bin Chart",
             "Wafer Map",
         ]
+
+
+# --------------------------------------------------------------------------
+# wafer cell-grid bin map (issue #2)
+# --------------------------------------------------------------------------
+
+
+class TestWaferCellMap:
+    def test_wafer_sheet_has_no_image_and_two_pics_total(self, generated):
+        # the per-wafer PNG is replaced by the cell grid: only the two
+        # trend anchors remain in the package drawings
+        _, _, report_path, _, _ = generated
+        with zipfile.ZipFile(report_path) as zf:
+            pics = sum(
+                zf.read(n).count(b"<xdr:pic>")
+                for n in zf.namelist()
+                if n.startswith("xl/drawings/drawing") and n.endswith(".xml")
+            )
+        assert pics == 2
+
+    def test_block_title_and_sw_table(self, generated):
+        _, wb, _, _, _ = generated
+        ws = wb["Wafer Map"]
+        assert ws["A1"].value == "W01 – All Sites"
+        assert ws["A2"].value == "Yield: 60.00%"
+        assert [ws.cell(row=5, column=c).value for c in range(1, 5)] == list(
+            BIN_TABLE_HEADERS
+        )
+        assert "SW_0_W01" in ws.tables
+
+    def test_die_cell_holds_sbin_value(self, generated):
+        _, wb, _, _, _ = generated
+        ws = wb["Wafer Map"]
+        assert ws["G4"].value == "-1"  # first X header (ascending)
+        assert ws["F5"].value == "1"  # top Y header = max Y
+        assert ws["G6"].value == 1  # die (-1, 0)
+        assert ws["H6"].value == 1  # die (0, 0)
+        assert ws["H7"].value == 2  # die (0, -1)
+
+    def test_die_columns_stay_square_after_autofit(self, generated):
+        # Review Focus pin: _autofit_columns runs AFTER the blocks — the
+        # die/spacer columns must keep their 24 px squares (stored width
+        # 877/256, see the xlsxwriter chars->px->chars conversion) and the
+        # axis column its 30 px (1097/256); A:D keep the ledger
+        _, wb, _, _, _ = generated
+        ws = wb["Wafer Map"]
+        assert col_dim(ws, "G").width == 877 / 256
+        assert col_dim(ws, "E").width == 877 / 256
+        assert col_dim(ws, "F").width == 1097 / 256
+        assert col_dim(ws, "A") is not None
+
+    def test_stacked_wafer_keeps_image(self, tmp_path, qapp):
+        # waferInd == -1: out of the bin-map scope — image path + classic
+        # unflagged rows, byte-identical to the pre-issue-#2 behavior
+        _, wb, report_path, _, _ = build_generated(
+            tmp_path, qapp, wafer_tuples=[(-1, -1, "STACK")]
+        )
+        with zipfile.ZipFile(report_path) as zf:
+            pics = sum(
+                zf.read(n).count(b"<xdr:pic>")
+                for n in zf.namelist()
+                if n.startswith("xl/drawings/drawing") and n.endswith(".xml")
+            )
+        assert pics == 3  # 2 trend + 1 wafer anchors
+        wafer = {
+            c.value
+            for row in wb["Wafer Map"].iter_rows()
+            for c in row
+            if c.value is not None
+        }
+        assert "WAFER-W01-ROW" in wafer
+
+    def test_empty_payload_writes_title_and_rows_only(self, tmp_path, qapp):
+        # Review Focus pin: a WIR/WCR-only wafer (empty map) must not break
+        # the export — title + info rows, no grid, no table
+        payload = dict(WAFER_MAP_PAYLOAD)
+        empty = dict(payload, Data={}, Statistic={}, Palette={})
+
+        def build(tmp_path, qapp):
+            # patch the module the HARNESS lives in: pytest's prepend import
+            # mode loads this file as exporter.test_generator_dut (no
+            # tests/__init__.py), so `import tests.exporter...` would create
+            # a second copy and the patch would land on the wrong one
+            import sys
+
+            mod = sys.modules[build_generated.__module__]
+            original = mod.WAFER_MAP_PAYLOAD
+            mod.WAFER_MAP_PAYLOAD = empty
+            try:
+                return build_generated(tmp_path, qapp)
+            finally:
+                mod.WAFER_MAP_PAYLOAD = original
+
+        _, wb, _, _, _ = build(tmp_path, qapp)
+        ws = wb["Wafer Map"]
+        assert "A1:D1" in {str(r) for r in ws.merged_cells.ranges}
+        assert not ws.tables
+        assert ws["A2"].value == "Yield: 60.00%"

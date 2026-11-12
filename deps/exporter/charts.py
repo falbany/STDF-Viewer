@@ -848,9 +848,11 @@ def write_wafer_map_block(
         (sbin, statistic.get(sbin, (f"Bin {sbin}",))[0], counts[sbin])
         for sbin in bins_present
     ]
+    # write_bin_table(start_row=b) puts its band at 1-based row b — sharing
+    # the X-header row (mockup v3: band ④ and X headers ③ on one line)
     write_bin_table(
         ws,
-        b + 1,
+        b,
         bins_rows,
         theme,
         f"Soft Bins — {wafer_id} (map counts)",
@@ -859,4 +861,4 @@ def write_wafer_map_block(
         bin_fills=palette,
     )
 
-    return max(b + len(y_axis), b + len(bins_present) + 4) + 1
+    return max(b + len(y_axis), b + len(bins_present) + 3) + 1

@@ -23,10 +23,12 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 Wafer Map worksheet writer (moved verbatim from generator.py,
-worksheets split 2026-11-12).
+worksheets split 2026-11-12; issue #2 rewires the per-wafer body from the
+static PNG to the live cell-grid bin map — stacked wafer keeps the image).
 """
 from deps.SharedSrc import tab
 from deps.uic_stdExporter import ReportSelection
+from deps.exporter.charts import wafer_table_name, write_wafer_map_block
 from deps.exporter.sheets import insert_report_image
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.writer import FOOTER_TEXT
@@ -42,27 +44,50 @@ class WaferMapMixin:
 
         key = ReportSelection.Wafer
         row = self._row.get(key, 0)
-        for wafer in self.waferTuples:
+        for index, wafer in enumerate(self.waferTuples):
             if self.forceQuit:
                 return
-            # wafer map is already associated with head
-            image_io = self.waitForImage(
-                wafer, 0, self.selectedSites, self.selectedFiles, tab.Wafer
-            )
-            row += insert_report_image(WaferSheet, image_io, row) + 2
-            # add wafer info
-            dataTable = self.waitForDataList(
-                [],
-                self.selectedSites,
-                self.selectedFiles,
-                tab.Wafer,
-                {"testTuples": [wafer]},
-            )
-            for dataList in dataTable:
-                self._write_body_row(WaferSheet, row, dataList)
-                row += 1
-            # gap between images
-            row += 3
+            if wafer[0] == -1:
+                # stacked wafer (fail-count colormap): image + classic info
+                # rows — out of the cell-map scope (issue #2 non-goal)
+                image_io = self.waitForImage(
+                    wafer, 0, self.selectedSites, self.selectedFiles, tab.Wafer
+                )
+                row += insert_report_image(WaferSheet, image_io, row) + 2
+                dataTable = self.waitForDataList(
+                    [],
+                    self.selectedSites,
+                    self.selectedFiles,
+                    tab.Wafer,
+                    {"testTuples": [wafer]},
+                )
+                for dataList in dataTable:
+                    self._write_body_row(WaferSheet, row, dataList)
+                    row += 1
+                row += 3
+            else:
+                # flagged fetch: one bundled payload (info rows + map data
+                # + palette) per wafer; the block writes title, info rows,
+                # SW table A:D and the die grid from column F
+                payload = self.waitForDataList(
+                    [],
+                    self.selectedSites,
+                    self.selectedFiles,
+                    tab.Wafer,
+                    {"testTuples": [wafer], "waferMapData": wafer},
+                )
+                start_row = max(row, 1)  # block rows are 1-based
+                row = (
+                    write_wafer_map_block(
+                        WaferSheet,
+                        self._theme,
+                        payload["rows"],
+                        payload["map"],
+                        start_row,
+                        wafer_table_name(index, wafer[2]),
+                    )
+                    + 3
+                )
             self.loopCount += 1
             self.sendProgress()
         self._row[key] = row
