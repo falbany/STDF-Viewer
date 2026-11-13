@@ -1615,6 +1615,14 @@ class MyWindow(QtWidgets.QMainWindow):
                     data.append([vh] + [ele[0] for ele in dataRow])
         
         elif tabType == tab.Wafer:
+            # fork(falbany): issue #2 cell-grid bin map — flagged fetch
+            # returns the bundled payload (info rows + map data + palette)
+            # for the new exporter; the classic body below stays untouched
+            # for the legacy exporter and the stacked wafer
+            if "waferMapData" in kargs:
+                return self.data_interface.getWaferReportPayload(
+                    kargs["waferMapData"], sites, fids
+                )
             waferTuples = kargs["testTuples"]
             d = self.data_interface.getWaferStatistics(waferTuples, sites)
             for vh, dataRow in zip(d["VHeader"], d["Rows"]):

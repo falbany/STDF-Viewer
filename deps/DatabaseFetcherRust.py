@@ -457,6 +457,15 @@ class DatabaseFetcherRust:
                     pass
                 else:
                     ext_info[field] = value
+            # wafer center / flat direction also live in File_Info (the
+            # exported wafer block renders them, 2026-11-13) — they are
+            # not part of the ext-row selection
+            for row_fid, field, _sub_fid, value in self._fetcher.get_file_info_rows():
+                if row_fid != fid or field not in ("CENTER_X", "CENTER_Y", "WF_FLAT"):
+                    continue
+                if value is None or value in ["", " "]:
+                    continue
+                ext_info.setdefault(field, value)
             for k, v in waferDict.items():
                 if k[-1] == fid:
                     v.update(ext_info)

@@ -179,6 +179,27 @@ def getSetting() -> SettingParams:
     return GlobalSetting
 
 
+def wafer_bin_palette(map_data: dict, SBIN_Info: dict, sbin_colors: dict) -> dict:
+    """
+    Per-sbin palette hexes for the exported wafer cell map (issue #2):
+    the user's configured color wins; a bin missing from the settings
+    falls back to the BIN_PF defaults (same constants as
+    setSettingDefaultColor) — an uncolored die in a QC report is worse
+    than a default color.
+    """
+    palette = {}
+    for sbin in (map_data.get("Data") or {}).keys():
+        color = sbin_colors.get(sbin)
+        if color:
+            palette[sbin] = color
+            continue
+        bin_pf = SBIN_Info.get(sbin, {}).get("BIN_PF", "")
+        palette[sbin] = (
+            "#00CC00" if bin_pf == "P" else ("#CC0000" if bin_pf == "F" else "#FE7B00")
+        )
+    return palette
+
+
 def setSettingDefaultColor(availableSites: list, SBIN_Info: dict, HBIN_Info: dict):
     """
     Update default color for hbin & sbin, needed
@@ -851,8 +872,9 @@ def showCompleteMessage(transFunc, outPath: str, title=None, infoText=None, icon
 
 __all__ = ["SettingParams", "tab", "REC", "symbolName", "symbolChar", "symbolChar2Name", 
            
-           "getSetting", "updateRecentFolder", 
-           "setSettingDefaultColor", "setSettingDefaultSymbol", "loadConfigFile", "dumpConfigFile", 
+           "getSetting", "updateRecentFolder",
+           "setSettingDefaultColor", "setSettingDefaultSymbol", "loadConfigFile", "dumpConfigFile",
+           "wafer_bin_palette",
            
            "WHITE_COLOR", "FAIL_DUT_COLOR", "OVRD_DUT_COLOR", "UNKN_DUT_COLOR", 
            "LOG_NAME", "FILE_FILTER", "SIMPLE_PROBE", "DUT_SUMMARY_QUERY", "DATALOG_QUERY",

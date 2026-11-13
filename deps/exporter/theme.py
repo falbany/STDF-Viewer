@@ -95,6 +95,15 @@ LOOKALIKE_DEFS = {
         "bottom": 5,  # thick (xlsxwriter border code)
         "bottom_color": "#8EA9DB",
     },
+    # Excel's built-in "Explanatory Text" style (builtinId 53) — Calibri
+    # italic in the theme gray; the wafer block's property key/value rows
+    # (2026-11-13 user ruling).
+    "explanatory": {
+        "font_name": "Calibri",
+        "font_size": 11,
+        "italic": True,
+        "font_color": "#808080",
+    },
 }
 
 
@@ -237,6 +246,12 @@ class ModernTheme:
         """Background-only Format for conditional-formatting rules (Excel
         merges the rule's fill itself; the format carries just the color)."""
         return self._format({"bg_color": f"#{hex6}"})
+
+    def cf_bin_fill(self, bg_hex: str, font_hex: str):
+        """Die-cell CF rule format (issue #2): palette fill + luminance
+        font — cf_fill is background-only, and the sbin digit must stay
+        readable on saturated bin colors."""
+        return self._format({"bg_color": f"#{bg_hex}", "font_color": font_hex})
 
     def cf_duplicate_preset(self):
         """Excel's builtin "Yellow Fill with Dark Yellow Text" preset for

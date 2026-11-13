@@ -34,11 +34,13 @@ def xlsxwriter_Workbook(out):
     return xlsxwriter.Workbook(out, {"in_memory": True, "strings_to_urls": False})
 
 
-def load_workbook_bytes(book_bytes: bytes):
-    """openpyxl read-back over saved xlsxwriter bytes."""
+def load_workbook_bytes(book_bytes: bytes, data_only: bool = False):
+    """openpyxl read-back over saved xlsxwriter bytes. ``data_only=True``
+    returns the CACHED formula results (xlsxwriter write_formula value=)
+    instead of the formula strings."""
     from openpyxl import load_workbook
 
-    return load_workbook(io.BytesIO(book_bytes))
+    return load_workbook(io.BytesIO(book_bytes), data_only=data_only)
 
 
 def read_xml(book_bytes: bytes, inner_path: str) -> str:
