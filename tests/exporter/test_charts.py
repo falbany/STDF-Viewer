@@ -42,6 +42,7 @@ from deps.exporter.charts import (
     BIN_LABEL_FONT,
     BIN_PAGE_COLUMN_WIDTH,
     BIN_TABLE_HEADERS,
+    WAFER_STACKED_LEGEND,
     WAFER_SUPERSEDED_BORDER_HEX,
     cm_to_px,
     aggregate_bin_counts,
@@ -1496,7 +1497,7 @@ class TestStackedWaferBlock:
         assert reloaded["G6"].value == "1"  # first X header, str(x)
         assert reloaded["F7"].value == "1"  # Y-axis header
         assert reloaded.tables == {}  # no SW bin table on the stacked sheet
-        assert nxt == 8  # dies end at xh_row 6 + 1 die row → next free 8
+        assert nxt == 11  # dies end 7, blank 8, legend 9-10 → next free 11
 
     def test_gradient_cf_rule_present(self, env):
         self.written(env)
@@ -1521,6 +1522,7 @@ class TestStackedWaferBlock:
         xml = read_xml(env["book"], "xl/worksheets/sheet1.xml")
         assert "conditionalFormatting" not in xml  # no grid → no CF rule
         assert "A1:D1" in {str(r) for r in reloaded.merged_cells.ranges}
+        assert reloaded["A9"].value is None  # no grid → no reading legend
         assert reloaded["A2"].value == "Total Failed DUTs:"
         assert reloaded["B2"].value == "0"
         assert reloaded["A3"].value == "Fail Coordinates:"
@@ -1562,3 +1564,15 @@ class TestStackedWaferBlock:
         assert reloaded["B3"].value == "4"
         assert reloaded["A4"].value == "Files:"
         assert reloaded["B4"].value == "2"
+
+    def test_legend_lines_under_grid(self, env):
+        # reading legend (2026-11-13 user ask): what the map aggregates +
+        # how to read the gradient and the blank vs 0 distinction — two
+        # italic lines merged across the map width, under the grid
+        nxt = self.written(env)
+        reloaded = env["reload"]()
+        assert reloaded["A9"].value == WAFER_STACKED_LEGEND[0]
+        assert reloaded["A10"].value == WAFER_STACKED_LEGEND[1]
+        merges = {str(r) for r in reloaded.merged_cells.ranges}
+        assert "A9:K9" in merges and "A10:K10" in merges
+        assert nxt == 11

@@ -75,6 +75,7 @@ native live cell grid.
 | Die cell value | Fail count (integer, live) |
 | Gradient | `3_color_scale`, Green `#00CC00` → Yellow `#FFFF00` → Red `#CC0000` |
 | Block extras | Info rows only; no KPI cards, no SW-bin table |
+| Reading legend | Two italic lines under the grid (what the map aggregates + how to read the gradient / blank-vs-0) — added 2026-11-13 on user ask, after implementation |
 | Renderer | New stacked block in `charts.py`, called from `writeWaferMap` |
 
 ## Constraints

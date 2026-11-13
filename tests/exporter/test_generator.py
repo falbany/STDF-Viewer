@@ -13,6 +13,7 @@ from PyQt5 import QtCore
 
 from deps.DataInterface import stacked_report_payload
 from deps.SharedSrc import getSetting
+from deps.exporter.charts import WAFER_STACKED_LEGEND
 from deps.exporter.generator import ModernReportGenerator
 from deps.exporter.worksheets.file_info import file_temperatures_from_file_info
 from deps.exporter.worksheets.test_statistics import (
@@ -603,6 +604,9 @@ class TestStackedWaferSheet:
         # its grid freezes like every wafer sheet (G7 = first die cell:
         # title + info lines + X-header row stay visible)
         assert stacked.freeze_panes == "G7"
+        # the reading legend rides under the grid (row 9: what the sheet
+        # aggregates)
+        assert stacked["A9"].value == WAFER_STACKED_LEGEND[0]
 
     def test_setting_independence(self, tmp_path, qapp, monkeypatch):
         for hide in (False, True):

@@ -1225,6 +1225,17 @@ def write_wafer_map_block(
     return max(sw_start + len(bins_present) + 3, xh_row + len(y_axis) + 1)
 
 
+# issue #5 reading legend (2026-11-13 user ask): two italic lines under
+# the stacked grid — what the map aggregates (cross-file fail-count
+# hot-spot view) and how to read the gradient plus the blank-vs-0
+# distinction (0 = probed & passed, blank = never probed). Lines sized
+# to render inside the A:map-width merge without wrapping.
+WAFER_STACKED_LEGEND = (
+    "Fail count per die, accumulated over every selected file (hot-spot view)",
+    "Green: few fails → Red: many · 0: probed, passed · blank: never probed",
+)
+
+
 def write_stacked_wafer_block(
     ws,
     theme,
@@ -1245,8 +1256,10 @@ def write_stacked_wafer_block(
     aggregations carry a count-0 bucket (getStackedWaferData seeds every
     probed coordinate): probed-but-passing dies render as 0 at the green
     end of the gradient, wafer-outline style; only never-probed gap
-    coordinates stay unwritten (CF ignores blanks). Empty grid → title +
-    info lines only. Returns the next free row."""
+    coordinates stay unwritten (CF ignores blanks). One blank row below
+    the grid, the two-line reading legend (WAFER_STACKED_LEGEND, merged
+    across the map width). Empty grid → title + info lines only. Returns
+    the next free row."""
     info = map_data.get("Info") or (1.0, "", False, False, "", [])
     wafer_id = info[4] if len(info) > 4 else ""
     sites = info[5] if len(info) > 5 else []
@@ -1317,4 +1330,13 @@ def write_stacked_wafer_block(
          "min_color": "#00CC00", "mid_color": "#FFFF00", "max_color": "#CC0000"},
     )
 
-    return xh_row + len(y_axis) + 1
+    # reading legend under the grid (one blank row after the last die
+    # row), the "Explanatory Text" lookalike like the properties box
+    legend_row = xh_row + len(y_axis) + 2  # 1-based; blank row sits at +1
+    for offset, line in enumerate(WAFER_STACKED_LEGEND):
+        ws.merge_range(
+            legend_row - 1 + offset, 0, legend_row - 1 + offset, last_col0,
+            line, _wafer_prop_fmt(theme, ""),
+        )
+
+    return xh_row + len(y_axis) + 4
