@@ -7,9 +7,11 @@ FETCH_SELECT_DUT_SUMMARY). No Qt, no workbook — pure functions.
 """
 
 from deps.exporter.dedup import (
+    compute_fid_ranks,
     compute_remeasure_drops,
     drops_to_exclusion,
     dut_info_from_partial,
+    file_dates_from_rows,
 )
 
 
@@ -118,6 +120,68 @@ class TestComputeRemeasureDrops:
 
     def test_empty_input(self):
         assert compute_remeasure_drops({}, [1]) == set()
+
+
+DATES = {
+    0: (1, "2026-01-03 10:00:00 (UTC+0)", "2026-01-03 08:00:00 (UTC+0)"),
+    1: (1, "2026-01-01 10:00:00 (UTC+0)", "2026-01-01 08:00:00 (UTC+0)"),
+    2: (1, "2026-01-02 10:00:00 (UTC+0)", ""),
+}
+
+
+class TestComputeFidRanks:
+    def test_merge_mode_ranks_by_fid(self):
+        dates = {0: (2, "t2", ""), 1: (1, "t1", "")}  # fid 0 has 2 subfids
+        assert compute_fid_ranks(dates) == {0: 0, 1: 1}
+
+    def test_open_mode_ranks_by_finish_t(self):
+        # later FINISH_T -> higher rank, regardless of fid
+        assert compute_fid_ranks(DATES) == {1: 0, 2: 1, 0: 2}
+
+    def test_missing_finish_falls_back_to_start(self):
+        dates = {0: (1, "", "2026-01-05"), 1: (1, "2026-01-01", "")}
+        assert compute_fid_ranks(dates) == {1: 0, 0: 1}
+
+    def test_missing_timestamps_fall_back_to_fid_order(self):
+        dates = {5: (1, "", ""), 2: (1, "", "")}
+        assert compute_fid_ranks(dates) == {2: 0, 5: 1}
+
+    def test_fid_tiebreaks_identical_timestamps(self):
+        dates = {3: (1, "same", "same"), 1: (1, "same", "same")}
+        assert compute_fid_ranks(dates) == {1: 0, 3: 1}
+
+
+class TestFileDatesFromRows:
+    def test_rows_shaped_to_dates(self):
+        rows = [(0, "FINISH_T", 0, "2026-01-03"), (0, "START_T", 0, "2026-01-03"),
+                (1, "FINISH_T", 0, "2026-01-01")]
+        out = file_dates_from_rows(rows, {0: 1, 1: 2})
+        assert out[0] == (1, "2026-01-03", "2026-01-03")
+        assert out[1] == (2, "2026-01-01", "")  # missing fields -> ""
+
+    def test_multisubfile_group_takes_latest_value(self):
+        rows = [(0, "FINISH_T", 0, "2026-01-01"), (0, "FINISH_T", 1, "2026-01-09")]
+        assert file_dates_from_rows(rows, {0: 2})[0][1] == "2026-01-09"
+
+
+class TestRankAwareDrops:
+    def test_open_mode_later_timestamp_wins(self):
+        # same Part ID; fid 1 measured EARLIER in time than fid 2 but has
+        # a higher fid — with open-mode ranks the fid-1 row must drop
+        info = dut_info([(1, 0, "SN", "Passed - 0x00"), (2, 0, "SN", "Failed - 0x08")])
+        ranks = compute_fid_ranks({1: (1, "2026-01-05", ""), 2: (1, "2026-01-09", "")})
+        assert compute_remeasure_drops(info, [1, 2], fid_ranks=ranks) == {(1, 0)}
+
+    def test_no_ranks_preserves_current_fid_order(self):
+        info = dut_info([(1, 0, "SN", "Passed - 0x00"), (2, 0, "SN", "Failed - 0x08")])
+        assert compute_remeasure_drops(info, [1, 2]) == {(1, 0)}
+
+    def test_ranks_resort_unsorted_input(self):
+        # dict insertion order fid 2 then fid 1: the rank scan must still
+        # pick the rank-latest occurrence
+        info = dut_info([(2, 0, "SN", "Failed - 0x08"), (1, 0, "SN", "Passed - 0x00")])
+        ranks = compute_fid_ranks({1: (1, "2026-01-09", ""), 2: (1, "2026-01-01", "")})
+        assert compute_remeasure_drops(info, [1, 2], fid_ranks=ranks) == {(2, 0)}
 
 
 class TestDutInfoFromPartial:
