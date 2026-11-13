@@ -14,6 +14,7 @@ import rust_stdf_helper
 from deps.SharedSrc import (WAFER_INFO_FIELDS,
                             formatFileGroupCompositeValues,
                             formatFileGroupValues, record_name_dict)
+from deps.exporter.dedup import file_dates_from_rows
 
 
 class DatabaseFetcherRust:
@@ -234,6 +235,19 @@ class DatabaseFetcherRust:
                 for fid, paths in enumerate(group_paths)
             )
         return info
+
+    def getFileDates(self) -> dict[int, tuple[int, str, str]]:
+        """Return `{fid: (n_subfids, FINISH_T, START_T)}` for the supersede
+        ordering (fork(falbany): wafer merge / re-measure "latest" rule).
+
+        Thin shaping over the raw `(Fid, Field, SubFid, Value)` File_Info
+        rows — n_subfids comes from this session's `file_paths` groups;
+        a file missing a field keeps `""` (see deps.exporter.dedup).
+        """
+        return file_dates_from_rows(
+            self._fetcher.get_file_info_rows(),
+            {fid: len(paths) for fid, paths in enumerate(self.file_paths)},
+        )
 
     def getTestFailCnt(self) -> dict:
         """Return ``{(TEST_NUM, TEST_NAME): [FailCount per file]}``.

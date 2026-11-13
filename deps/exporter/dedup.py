@@ -10,6 +10,11 @@ Matching is exact, case-sensitive string equality on non-empty Part
 IDs; the LAST occurrence in (Fid, DUTIndex) order wins — "remeasured",
 not "best result". STDF-flagged supersede rows (DUT Flag text starting
 with "Superseded", the loader's own `Supersede=1` truth) drop too.
+
+The (Fid, DUTIndex) order can be overridden with a per-Fid rank map
+(`compute_fid_ranks`, below): merge-utility loads rank by Fid, open-button
+loads rank by STDF timestamps — the app-default "latest" rule shared by
+the wafer merge (see the 2026-11-13 wafer-merge design).
 """
 
 # Partial DUT info (DatabaseFetcherRust.getPartialDUTInfoOnCondition):
@@ -35,15 +40,56 @@ def _part_id(info):
     return info[1] if len(info) > 1 and info[1] else None
 
 
-def compute_remeasure_drops(dutInfo: dict, selected_fids: list[int]) -> set[tuple[int, int]]:
+def file_dates_from_rows(rows: list[tuple], group_lengths: dict[int, int]) -> dict[int, tuple[int, str, str]]:
+    """`(Fid, Field, SubFid, Value)` rows -> `{fid: (n_subfids, FINISH_T, START_T)}`.
+
+    `rows` is what `DatabaseFetcher.get_file_info_rows()` returns;
+    `group_lengths` maps Fid -> number of SubFids in its load group.
+    A file missing a field gets `""`; per fid the LEXICOGRAPHICALLY
+    GREATEST Value across its subfids wins (timestamps sort correctly
+    as rendered, e.g. "2026-01-09 10:00:00 (UTC+0)").
+    """
+    finish: dict[int, str] = {}
+    start: dict[int, str] = {}
+    for fid, field, _subfid, value in rows:
+        if field == "FINISH_T":
+            if value > finish.get(fid, ""):
+                finish[fid] = value
+        elif field == "START_T":
+            if value > start.get(fid, ""):
+                start[fid] = value
+    return {fid: (group_lengths.get(fid, 1), finish.get(fid, ""), start.get(fid, ""))
+            for fid in group_lengths}
+
+
+def compute_fid_ranks(file_dates: dict[int, tuple[int, str, str]]) -> dict[int, int]:
+    """Ascending supersede rank per Fid — the app-default "latest" rule.
+
+    Merge-utility mode (any fid with more than one SubFid in File_List):
+    the user deliberately ordered the files, so rank = Fid. Open-button
+    mode: Fid is arbitrary open order and must not be trusted, so rank
+    follows MRR FINISH_T, falling back to MIR START_T when missing, with
+    Fid breaking perfect ties — ranks 0..n-1, later measurement higher.
+    """
+    if any(n > 1 for n, _finish, _start in file_dates.values()):
+        return {fid: fid for fid in file_dates}
+    ordered = sorted(file_dates,
+                     key=lambda fid: (file_dates[fid][1] or file_dates[fid][2] or "", fid))
+    return {fid: rank for rank, fid in enumerate(ordered)}
+
+
+def compute_remeasure_drops(dutInfo: dict, selected_fids: list[int],
+                            fid_ranks: "dict | None" = None) -> set[tuple[int, int]]:
     """`(fid, dutIndex)` pairs the filter drops, over the export selection.
 
     `dutInfo` is the classic DUT Summary fetch `{fid: {dutIndex: info}}`
-    (superseded DUTs included). Rules, in (Fid, DUTIndex) order:
+    (superseded DUTs included). Rules, in (rank(fid), DUTIndex) order:
     (a) any row whose DUT Flag text starts with "Superseded" drops;
     (b) any row with a non-empty Part ID drops when another row with the
-    same Part ID exists at a strictly greater `(fid, dutIndex)` within
-    `selected_fids`. Unselected fids neither suppress nor are dropped.
+    same Part ID exists at a strictly greater `(rank(fid), dutIndex)`
+    within `selected_fids`. Unselected fids neither suppress nor are
+    dropped. `fid_ranks` (optional) overrides the raw Fid ordering —
+    see `compute_fid_ranks`; without it the order is `(Fid, DUTIndex)`.
     """
     selected = set(selected_fids)
     # Part ID -> [(fid, dutIndex)] ascending, selection only
@@ -60,8 +106,10 @@ def compute_remeasure_drops(dutInfo: dict, selected_fids: list[int]) -> set[tupl
             if part_id is not None:
                 occurrences.setdefault(part_id, []).append(pair)
 
+    ranks = fid_ranks or {}
     drops = set(superseded)
     for pairs in occurrences.values():
+        pairs.sort(key=lambda p: (ranks.get(p[0], p[0]), p[1]))
         # ascending scan: every occurrence with a strictly later twin drops
         for index, pair in enumerate(pairs):
             if index + 1 < len(pairs):

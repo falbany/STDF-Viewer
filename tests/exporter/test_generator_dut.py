@@ -288,6 +288,7 @@ def build_generated(
     with_dut=True,
     wafer_tuples=None,
     monkeypatch=None,
+    file_dates=None,
 ):
     """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus Stat when
     `with_stat`, FileInfo when `with_file_info`) and return (generator,
@@ -347,6 +348,12 @@ def build_generated(
     # GUI side: classic-protocol summary table, chart PNGs, stat rows
     gen.waitForDutSummary = lambda heads, sites, fids, testTuples: make_summary(
         tagged=part_id_tagged, duplicate_sn=duplicate_sn, blank_ids=blank_ids, part_ids=part_ids
+    )
+    # the supersede-rank fetch (2026-11-13 wafer merge) must never reach
+    # the GUI in tests — an unstubbed waitFor* deadlocks the generator
+    # thread; `file_dates` overrides the canned single-file dates
+    gen.waitForFileDates = lambda fids: (
+        {1: (1, "2026-01-01 10:00:00 (UTC+0)", "")} if file_dates is None else file_dates
     )
     # the filter path must never reach the GUI for dutInfo when the DUT
     # sheet rendered; the stat-only selection stubs the light fetch with
@@ -1198,6 +1205,61 @@ class TestRemeasureFilterPrune:
 
         summary = make_summary()
         assert prune_summary_view(summary, set()) is summary
+
+
+class TestRemeasureRankOrder:
+    """2026-11-13 supersede ranks (issue #4): open-button mode orders the
+    files by STDF timestamps — the DUT Summary drop-set follows
+    (rank, dutIndex), not raw fid order, even when the earlier-timestamp
+    file carries the higher fid. One rank map feeds both the DUT Summary
+    (this test) and the wafer merge (test_generator.py)."""
+
+    def test_earlier_timestamp_drops_despite_higher_fid(self, tmp_path, qapp, monkeypatch):
+        monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
+        reportInfo = (
+            [ReportSelection.DUT], [], [1, 2], [1], [-1],
+            str(tmp_path / "report.xlsx"), [], 0,
+        )
+        gen = ModernReportGenerator(
+            signals(), QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, dataChannel()
+        )
+        gen._remeasure_drops = None  # report_core init: force the fallback fetch
+        # SN541 re-measured across files: fid 2 (higher fid) measured
+        # EARLIER (FINISH_T 01-01) than fid 1 (01-09) — the fid-2
+        # occurrence drops; raw fid order would have dropped (1, 0).
+        # waitForDutInfo answers the partial fetch shape (PartID, PartText,
+        # head-site, flag-text)
+        gen.waitForDutInfo = lambda heads, sites, fids: {
+            1: {0: ("SN541", "", "Head 1 - Site 1", "Passed - 0x00")},
+            2: {0: ("SN541", "", "Head 1 - Site 1", "Failed - 0x08")},
+        }
+        gen.waitForFileDates = lambda fids: {
+            1: (1, "2026-01-09 10:00:00 (UTC+0)", ""),
+            2: (1, "2026-01-01 10:00:00 (UTC+0)", ""),
+        }
+        assert gen._resolve_remeasure_drops() == {(2, 0)}
+
+    def test_merge_mode_ranks_by_fid_unchanged(self, tmp_path, qapp, monkeypatch):
+        # a merge-utility load (fid 2 has 2 SubFids) keeps the fid rule:
+        # the higher fid is "latest" regardless of timestamps
+        monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
+        reportInfo = (
+            [ReportSelection.DUT], [], [1, 2], [1], [-1],
+            str(tmp_path / "report.xlsx"), [], 0,
+        )
+        gen = ModernReportGenerator(
+            signals(), QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, dataChannel()
+        )
+        gen._remeasure_drops = None
+        gen.waitForDutInfo = lambda heads, sites, fids: {
+            1: {0: ("SN541", "", "Head 1 - Site 1", "Passed - 0x00")},
+            2: {0: ("SN541", "", "Head 1 - Site 1", "Failed - 0x08")},
+        }
+        gen.waitForFileDates = lambda fids: {
+            1: (1, "2026-01-09 10:00:00 (UTC+0)", ""),
+            2: (2, "2026-01-01 10:00:00 (UTC+0)", ""),  # 2 SubFids -> merge mode
+        }
+        assert gen._resolve_remeasure_drops() == {(1, 0)}
 
 
 class TestStatsExclusionChain:

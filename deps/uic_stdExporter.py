@@ -35,6 +35,7 @@ from xlsxwriter.worksheet import Worksheet
 from .ui.stdfViewer_exportUI import Ui_exportUI
 from .ui.stdfViewer_loadingUI import Ui_loadingUI
 from .SharedSrc import *
+from .exporter.dedup import compute_fid_ranks
 
 # pyqt5
 from PyQt5 import QtCore, QtWidgets
@@ -186,9 +187,11 @@ class signals(QtCore.QObject):
 
     # fork(falbany): light dutInfo-only fetch (re-measure filter, stat-only)
     retrieveDutInfoSignal = Signal(list, list, list)
-    
-    
-    
+
+    # fork(falbany): supersede ordering — File_Info timestamps + SubFid counts
+    retrieveFileDatesSignal = Signal(list)
+
+
 class reportGenerator(QtCore.QObject):
     def __init__(self, signals:signals, mutex:QtCore.QMutex, conditionWait:QtCore.QWaitCondition, reportInfo:tuple, channel:dataChannel):
         super().__init__()
@@ -216,6 +219,11 @@ class reportGenerator(QtCore.QObject):
         self.retrieveDataListSignal = signals.retrieveDataListSignal
         self.retrieveTableDataSignal = signals.retrieveTableDataSignal
         self.retrieveDutSummarySignal = signals.retrieveDutSummarySignal
+        # fork(falbany): retrieveDutInfoSignal was emitted by waitForDutInfo
+        # but never bound here (latent production crash on the stat-only
+        # fetch path) — bound alongside the supersede-ordering signal
+        self.retrieveDutInfoSignal = signals.retrieveDutInfoSignal
+        self.retrieveFileDatesSignal = signals.retrieveFileDatesSignal
         
     
     def waitForImage(self, testTuple: tuple, head: int, sites: list[int], fids: list[int], chartType: tab) -> io.BytesIO:
@@ -262,6 +270,27 @@ class reportGenerator(QtCore.QObject):
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         return self.channel.dataListChannel
+
+
+    def waitForFileDates(self, fids: list[int]) -> dict:
+        # fork(falbany): supersede ordering — per-Fid SubFid counts + STDF
+        # timestamps (merge mode ranks by fid, open mode by timestamps)
+        self.mutex.lock()
+        self.retrieveFileDatesSignal.emit(fids)
+        self.condWait.wait(self.mutex)
+        self.mutex.unlock()
+        return self.channel.dataListChannel
+
+
+    def _fid_ranks(self) -> dict:
+        # fork(falbany): supersede ranks — merge mode orders by fid, open
+        # mode by STDF timestamps; ONE fetch per export, shared by DUT
+        # Summary and the wafer merge (cache reset in report_core)
+        cached = getattr(self, "_fid_ranks_cache", None)
+        if cached is None:
+            cached = compute_fid_ranks(self.waitForFileDates(self.selectedFiles))
+            self._fid_ranks_cache = cached
+        return cached
             
         
     def sendProgress(self):
@@ -680,6 +709,7 @@ class progressDisplayer(QtWidgets.QDialog):
         self.signals.retrieveTableDataSignal.connect(self.getTableDataFromParent)
         self.signals.retrieveDutSummarySignal.connect(self.getDutSummaryFromParent)
         self.signals.retrieveDutInfoSignal.connect(self.getDutInfoFromParent)  # fork(falbany): re-measure filter
+        self.signals.retrieveFileDatesSignal.connect(self.getFileDatesFromParent)  # fork(falbany): supersede ordering
         
         
     # fork(falbany): pluggable report generator
@@ -801,6 +831,15 @@ class progressDisplayer(QtWidgets.QDialog):
     def getDutInfoFromParent(self, selectedHeads: list, selectedSites: list, selectedFiles: list):
         # fork(falbany): re-measure filter — light dutInfo-only fetch
         self.channel.dataListChannel = self.mainUI.getDutInfoForReport(selectedHeads, selectedSites, selectedFiles)
+        self.mutex.lock()   # wait the mutex to unlock once the thread paused
+        self.condWait.wakeAll()
+        self.mutex.unlock()
+
+
+    @Slot(list)
+    def getFileDatesFromParent(self, fids: list):
+        # fork(falbany): supersede ordering — File_Info timestamps + SubFid counts
+        self.channel.dataListChannel = self.mainUI.getFileDatesForReport(fids)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()
@@ -1247,6 +1286,11 @@ class stdfExporter(QtWidgets.QDialog):
             totalLoopCnt += (1 + len(testTuples))   # dut info part + test part
         if ReportSelection.Wafer in selectedContents:
             totalLoopCnt += len(waferTuples)
+            if getSetting().gen.hide_remeasured:
+                # 2026-11-13 wafer merge: one extra (Merged) sheet per
+                # real wafer ID spanning 2+ tuples (one progress tick each)
+                from .exporter.wafer_merge import merged_wafer_groups  # lazy, like the generator import below
+                totalLoopCnt += len(merged_wafer_groups(waferTuples))
         if ReportSelection.GDR_DTR in selectedContents:
             totalLoopCnt += 1
                     

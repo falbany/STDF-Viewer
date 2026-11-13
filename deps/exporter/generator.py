@@ -168,6 +168,10 @@ class ModernReportGenerator(
         # stores its drop-set — None (vs an empty set) is the stat-only
         # signal that triggers the light dutInfo-only fetch
         self._remeasure_drops: "set | None" = None
+        # supersede rank map (2026-11-13 wafer merge): None until the
+        # first _fid_ranks() call — ONE waitForFileDates round-trip per
+        # export, shared by the DUT Summary dedup and the wafer merge
+        self._fid_ranks_cache: "dict | None" = None
         # the DUT-derived sheet block (base + chunk overflow + temperature
         # splits, base first) for the close-time tab-order reorder (§7.4)
         self._dut_sheet_block: list = []

@@ -11,6 +11,7 @@ import pytest
 from openpyxl import load_workbook
 from PyQt5 import QtCore
 
+from deps.SharedSrc import getSetting
 from deps.exporter.generator import ModernReportGenerator
 from deps.exporter.worksheets.file_info import file_temperatures_from_file_info
 from deps.exporter.worksheets.test_statistics import (
@@ -23,6 +24,7 @@ from deps.exporter.worksheets.test_statistics import (
     transform_stat_row,
 )
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
+from tests.exporter.conftest import read_xml
 
 
 @pytest.fixture(scope="module")
@@ -349,6 +351,191 @@ class TestReportCore:
         gen, _, _, _, _ = generated
         # FileInfo +1, GDR_DTR +1, Stat +1 per data row -> 3
         assert gen.loopCount == gen.totalLoopCnt == 3
+
+
+class TestFidRanks:
+    def test_fid_ranks_fetched_once_and_cached(self, qapp):
+        # 2026-11-13 supersede ordering: ONE waitForFileDates round-trip
+        # per export, shared by the DUT Summary dedup and the wafer merge
+        sig = signals()
+        channel = dataChannel()
+        reportInfo = ([], [], [], [], [], "unused", [], 0)
+        gen = ModernReportGenerator(
+            sig, QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, channel
+        )
+        calls = []
+        gen.waitForFileDates = lambda fids: calls.append(fids) or {
+            0: (1, "2026-01-02", ""),
+            1: (1, "2026-01-05", ""),
+        }
+        ranks = gen._fid_ranks()
+        assert ranks == {0: 0, 1: 1}
+        gen._fid_ranks()  # second call must NOT refetch
+        assert len(calls) == 1
+
+
+def wafer_payload(dies: dict, wafer_id: str = "W08") -> dict:
+    """Flagged tab.Wafer payload (issue #2 shape): dies = {sbin: [(x, y), ...]}."""
+    data = {sbin: {"x": [x for x, _ in coords], "y": [y for _, y in coords]}
+            for sbin, coords in dies.items()}
+    n = sum(len(coords) for coords in dies.values())
+    stat = {sbin: (f"Bin {sbin}", len(coords), 100.0 * len(coords) / n)
+            for sbin, coords in dies.items()}
+    return {
+        "rows": [["Yield: 60.00%", "Total: 5", f"WAFER_ID: {wafer_id}"]],
+        "map": {
+            "Bounds": (1, -1, 1, -1),
+            "ID": (0, 0),
+            "Info": (1.0, "", False, False, wafer_id, [-1]),
+            "Data": data,
+            "Statistic": stat,
+            "Palette": {sbin: ("#00CC00" if sbin == 1 else "#CC0000") for sbin in dies},
+            "BinPF": {sbin: ("P" if sbin == 1 else "F") for sbin in dies},
+            "Properties": [("WAFER ID", wafer_id)],
+        },
+    }
+
+
+def build_wafer_report(
+    tmp_path,
+    qapp,
+    monkeypatch,
+    waferTuples,
+    payloads,
+    file_dates,
+    hide_remeasured,
+    selectedFiles=None,
+):
+    """Stage a Wafer-only export and run report_core() once. `payloads`
+    maps (waferInd, fid, ID) -> payload dict; `file_dates` feeds the
+    waitForFileDates stub. totalLoopCnt mirrors stdfExporter.start():
+    one tick per wafer tuple + one per merged group when hiding."""
+    selectedFiles = (
+        sorted({t[1] for t in waferTuples}) if selectedFiles is None else selectedFiles
+    )
+    totalLoopCnt = len(waferTuples)
+    if hide_remeasured:
+        from deps.exporter.wafer_merge import merged_wafer_groups
+
+        totalLoopCnt += len(merged_wafer_groups(waferTuples))
+    reportPath = str(tmp_path / "report.xlsx")
+    reportInfo = (
+        [ReportSelection.Wafer],
+        [],
+        selectedFiles,
+        [],
+        [-1],
+        reportPath,
+        waferTuples,
+        totalLoopCnt,
+    )
+    sig = signals()
+    channel = dataChannel()
+    gen = ModernReportGenerator(
+        sig, QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, channel
+    )
+    gen.waitForDataList = (
+        lambda heads, sites, fids, chartType, kargs: payloads[kargs["waferMapData"]]
+    )
+    gen.waitForFileDates = lambda fids: file_dates
+    if hide_remeasured:
+        monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
+    gen.report_core()
+    return gen, reportPath
+
+
+class TestMergedWaferSheets:
+    """2026-11-13 wafer merge (issue #4): with hide_remeasured ON, one
+    extra (Merged) sheet per real wafer ID spanning 2+ wafer tuples."""
+
+    # open-mode ranks: fid0=0, fid2=1, fid1=2 — fid 1 is the latest file
+    DATES = {0: (1, "2026-01-01", ""), 1: (1, "2026-01-09", ""), 2: (1, "2026-01-05", "")}
+
+    TUPLES = [(0, 0, "W08"), (1, 1, "W09"), (2, 1, "W08")]
+    PAYLOADS = {
+        (0, 0, "W08"): wafer_payload({1: [(-1, 0), (0, 0)]}),
+        (1, 1, "W09"): wafer_payload({1: [(0, 0)]}),
+        (2, 1, "W08"): wafer_payload({2: [(0, 0)]}),  # (0, 0) re-measured -> bin 2
+    }
+
+    def test_merged_sheet_emitted_after_last_tuple(self, tmp_path, qapp, monkeypatch):
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=True,
+        )
+        wb = load_workbook(reportPath)
+        # per-file sheets keep tuple order (third W08 collides -> _2);
+        # the merged sheet lands after the LAST tuple of its ID's group
+        assert wb.sheetnames == [
+            "Wafer W08", "Wafer W09", "Wafer W08_2", "Wafer W08 (Merged)",
+        ]
+
+    def test_setting_off_never_merges(self, tmp_path, qapp, monkeypatch):
+        gen, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=False,
+        )
+        wb = load_workbook(reportPath)
+        assert wb.sheetnames == ["Wafer W08", "Wafer W09", "Wafer W08_2"]
+        assert gen.loopCount == gen.totalLoopCnt  # progress math unchanged
+
+    def test_unselected_twin_never_merges(self, tmp_path, qapp, monkeypatch):
+        # getExportWaferTuples already filtered fid 1's tuple out (only
+        # fid 0 selected) — a one-tuple group never merges
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, [(0, 0, "W08")],
+            {(0, 0, "W08"): wafer_payload({1: [(0, 0)]})}, self.DATES,
+            hide_remeasured=True, selectedFiles=[0],
+        )
+        wb = load_workbook(reportPath)
+        assert wb.sheetnames == ["Wafer W08"]
+
+    def test_merged_sheet_recomputes_counts(self, tmp_path, qapp, monkeypatch):
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=True,
+        )
+        wb = load_workbook(reportPath)
+        merged = wb["Wafer W08 (Merged)"]
+        # merged grid = union of dies minus the (0,0) overlap = 2 dies:
+        # (-1,0) bin 1 (P) + (0,0) bin 2 (F) — winner fid 2's result
+        assert merged["A6"].value == "1 pass / 2 total parts"
+        assert merged["A9"].value == "0 unknown · 1 superseded"
+        assert merged["B9"].value == "across 2 file(s)"
+        data_only = load_workbook(reportPath, data_only=True)["Wafer W08 (Merged)"]
+        assert data_only["B8"].value == 2  # Total Parts counts the union
+        assert data_only["A8"].value == 1  # Fails = the re-measured die
+        assert data_only["A5"].value == 0.5  # Yield = 1 / 2
+
+    def test_merged_progress_ticks(self, tmp_path, qapp, monkeypatch):
+        gen, _ = build_wafer_report(
+            tmp_path, qapp, monkeypatch, [(0, 0, "W08"), (2, 1, "W08")],
+            {
+                (0, 0, "W08"): wafer_payload({1: [(-1, 0), (0, 0)]}),
+                (2, 1, "W08"): wafer_payload({2: [(0, 0)]}),
+            },
+            self.DATES, hide_remeasured=True,
+        )
+        # 2 per-file ticks + 1 merged tick
+        assert gen.loopCount == gen.totalLoopCnt == 3
+
+    def test_orange_border_only_on_merged(self, tmp_path, qapp, monkeypatch):
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, [(0, 0, "W08"), (2, 1, "W08")],
+            {
+                (0, 0, "W08"): wafer_payload({1: [(-1, 0), (0, 0)]}),
+                (2, 1, "W08"): wafer_payload({2: [(0, 0)]}),
+            },
+            self.DATES, hide_remeasured=True,
+        )
+        wb = load_workbook(reportPath)
+        with open(reportPath, "rb") as fh:
+            styles = read_xml(fh.read(), "xl/styles.xml")
+        assert "C55A11" in styles  # merged sheet carries the border format
+        # die (0, 0) sits at H5 (bounds -1..1): thick orange on the merged
+        # sheet only — the per-file sheet of the same coordinate is clean
+        assert wb["Wafer W08 (Merged)"]["H5"].border.top.style == "thick"
+        assert wb["Wafer W08"]["H5"].border.top.style is None
 
 
 class TestPlainSheets:

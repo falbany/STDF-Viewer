@@ -944,7 +944,8 @@ class DUTSummaryMixin:
             self.selectedHeads, self.selectedSites, self.selectedFiles
         )
         return compute_remeasure_drops(
-            dut_info_from_partial(partial or {}), self.selectedFiles
+            dut_info_from_partial(partial or {}), self.selectedFiles,
+            fid_ranks=self._fid_ranks(),  # 2026-11-13: shared supersede ranks
         )
 
     def _order_and_ids(self, summaryTable, order_filter=None):
@@ -1006,7 +1007,10 @@ class DUTSummaryMixin:
         # empty set means "ran, nothing to drop"; None (never stored)
         # means the DUT sheet did not render (stat-only fallback fetch).
         if getSetting().gen.hide_remeasured:
-            drops = compute_remeasure_drops(summaryTable["dutInfo"], self.selectedFiles)
+            drops = compute_remeasure_drops(
+                summaryTable["dutInfo"], self.selectedFiles,
+                fid_ranks=self._fid_ranks(),  # 2026-11-13: shared supersede ranks
+            )
         else:
             drops = set()
         self._remeasure_drops = drops

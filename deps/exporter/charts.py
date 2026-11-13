@@ -799,20 +799,27 @@ WAFER_DIE_WIDTH = 2.71  # (24 px - 5) / 7 Calibri-11 MDW — render-verified
 WAFER_YAXIS_WIDTH = 3.5  # slightly wider: 2-digit coords
 WAFER_DIE_ROW_PT = 18  # 24 px
 
+# 2026-11-13 wafer merge (issue #4): the thick border flagging a
+# re-measured die on the merged sheet (per-file sheets never border)
+WAFER_SUPERSEDED_BORDER_HEX = "C55A11"
 
-def wafer_table_name(index: int, wafer_id: str) -> str:
+
+def wafer_table_name(index: int, wafer_id: str, suffix: str = "") -> str:
     """Workbook-unique, letter-starting Excel Table name for one wafer's
-    SW bin table (Excel Table names carry no spaces/punctuation)."""
-    return f"SW_{index}_{re.sub(r'\W+', '_', str(wafer_id))[:40]}"
+    SW bin table (Excel Table names carry no spaces/punctuation).
+    ``suffix`` marks the merged-sheet variant (e.g. "_M")."""
+    return f"SW_{index}_{re.sub(r'\W+', '_', str(wafer_id))[:40]}{suffix}"
 
 
-def wafer_sheet_name(index: int, wafer_id: str, taken: set) -> str:
+def wafer_sheet_name(index: int, wafer_id: str, taken: set, suffix: str = "") -> str:
     """Unique, legal worksheet name for one wafer (2026-11-13 user
     ruling: one wafer per worksheet, "Wafer " + wafer ID): Excel caps
     names at 31 chars and forbids :\\/?*[] — illegal characters become
-    underscores and collisions take a numeric suffix (_2, _3...)."""
+    underscores and collisions take a numeric suffix (_2, _3...).
+    ``suffix`` (e.g. " (Merged)") joins the name BEFORE the cap and
+    collision logic."""
     safe = re.sub(r"[\[\]:\\/\?\*]", "_", str(wafer_id)).strip() or str(index)
-    name = f"Wafer {safe}"[:31].rstrip() or f"Wafer {index}"
+    name = f"Wafer {safe}{suffix}"[:31].rstrip() or f"Wafer {index}"
     candidate, suffix = name, 2
     while candidate in taken:
         tail = f"_{suffix}"
@@ -1002,6 +1009,8 @@ def write_wafer_map_block(
     start_row: int,
     table_name: str,
     freeze_panes: bool = False,
+    superseded_coords: "set | None" = None,
+    source_files: "int | None" = None,
 ) -> int:
     """One wafer block (issue #2, 2026-11-13 layout v2): title band, the
     identity line (WAFER_ID — key col A, value merged B:D) on row 2, the
@@ -1013,7 +1022,14 @@ def write_wafer_map_block(
     and the SW bin table from row 15. The A:D zone (cards/properties/
     table) and the F.. map zone are vertically independent. Empty map ->
     title + identity rows only. Returns the next free row (the caller
-    adds the inter-block gap)."""
+    adds the inter-block gap).
+
+    2026-11-13 wafer merge (issue #4): ``superseded_coords`` (merged
+    sheets only) draws a thick orange border around re-measured dies —
+    the bin FILL still comes from the per-sbin CF rules, which define no
+    border, so the static border survives. ``source_files`` (merged
+    sheets only) restates the Total Parts subtitle's file count; the
+    default keeps the per-file "across 1 file(s)"."""
     info = map_data.get("Info") or (1.0, "", False, False, "", [])
     wafer_id = info[4] if len(info) > 4 else ""
     sites = info[5] if len(info) > 5 else []
@@ -1088,13 +1104,13 @@ def write_wafer_map_block(
         (
             "Fails",
             ("=" + "+".join(fail_refs), kpi["failed"]) if fail_refs else kpi["failed"],
-            f"{kpi['unknown']} unknown · 0 superseded",
+            f"{kpi['unknown']} unknown · {len(superseded_coords) if superseded_coords else 0} superseded",
             False,
         ),
         (
             "Total Parts",
             (f"=COUNT({map_range})", effective_total),
-            "across 1 file(s)",
+            "across %d file(s)" % source_files if source_files is not None else "across 1 file(s)",
             False,
         ),
     )
@@ -1130,6 +1146,21 @@ def write_wafer_map_block(
         ws.write(xh_row - 1, WAFER_FIRST_DIE_COL0 + col_offset, str(x), axis_fmt)
 
     die_fmt = theme.cell_format(font="body", align="center")
+    # one cached border format per block, ONLY when superseded dies exist
+    # (xlsxwriter border index 5 = "thick" — the spec's bold orange border)
+    sup_die_fmt = None
+    if superseded_coords:
+        sup_die_fmt = theme.cell_format(
+            font="body",
+            align="center",
+            extra={
+                "top": 5, "bottom": 5, "left": 5, "right": 5,
+                "top_color": f"#{WAFER_SUPERSEDED_BORDER_HEX}",
+                "bottom_color": f"#{WAFER_SUPERSEDED_BORDER_HEX}",
+                "left_color": f"#{WAFER_SUPERSEDED_BORDER_HEX}",
+                "right_color": f"#{WAFER_SUPERSEDED_BORDER_HEX}",
+            },
+        )
     for row_offset, y in enumerate(y_axis):
         row0 = xh_row + row_offset  # 0-based; first die row = 1-based xh_row+1
         ws.set_row(row0, WAFER_DIE_ROW_PT)
@@ -1137,7 +1168,10 @@ def write_wafer_map_block(
         for col_offset, x in enumerate(x_axis):
             sbin = grid.get((x, y))
             if sbin is not None:
-                ws.write(row0, WAFER_FIRST_DIE_COL0 + col_offset, int(sbin), die_fmt)
+                if sup_die_fmt is not None and (x, y) in superseded_coords:
+                    ws.write(row0, WAFER_FIRST_DIE_COL0 + col_offset, int(sbin), sup_die_fmt)
+                else:
+                    ws.write(row0, WAFER_FIRST_DIE_COL0 + col_offset, int(sbin), die_fmt)
 
     # CF rule per sbin over the die range: cell == sbin -> palette fill
     # + luminance font
