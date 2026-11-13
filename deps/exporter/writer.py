@@ -98,7 +98,7 @@ FIXED_FORMAT_COLUMNS = {
 # Sparkline
 DISPLAY_HIGH_POINT = True
 DISPLAY_LOW_POINT = True
-DISPLAY_NEGATIVE_POINTS = True  # 2026-11-11 user ruling: negative points displayed (red)
+DISPLAY_NEGATIVE_POINTS = False
 
 # --------------------------------------------------------------------------
 # width ledger (the autofit engine — xlsxwriter cells cannot be re-read,
