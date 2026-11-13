@@ -1363,13 +1363,14 @@ class TestMatrixSparklines:
         assert "DUT Summary!M17:O17" in xml or "'DUT Summary'!M17:O17" in xml
         assert "DUT Summary!M19:O19" in xml or "'DUT Summary'!M19:O19" in xml
         # pinned visual tokens (2026-11-11 user ruling: high RED, low
-        # GREEN — swapped — and negative points displayed, also red)
+        # GREEN — swapped; 2026-11-13 ruling: negative points NOT
+        # displayed — xlsxwriter omits the negative attribute when off)
         assert 'colorSeries rgb="FF1E40AF"' in xml
         assert 'colorHigh rgb="FFDC2626"' in xml
         assert 'colorLow rgb="FF16A34A"' in xml
         assert 'colorNegative rgb="FFDC2626"' in xml
         assert 'high="1"' in xml and 'low="1"' in xml
-        assert 'negative="1"' in xml
+        assert 'negative="1"' not in xml
         assert 'displayEmptyCellsAs="gap"' in xml
 
     def test_column_type_for_ftr_row(self):
