@@ -431,10 +431,14 @@ def build_generated(
             return bin_table("HB") if kargs.get("isHBIN") else bin_table("SB")
         if chartType == tab.Wafer:
             if kargs.get("waferMapData") is not None:
-                # flagged cell-map fetch (issue #2): bundled payload
+                # flagged cell-map fetch (issue #2): bundled payload — the
+                # wafer ID rides through so each sheet shows its own block
+                wafer_id = str(kargs["waferMapData"][2])
+                payload = dict(WAFER_MAP_PAYLOAD)
+                payload["Info"] = (1.0, "", False, False, wafer_id, [-1])
                 return {
-                    "rows": [["Yield: 60.00%", "Total: 5", "WAFER_ID: W01"]],
-                    "map": dict(WAFER_MAP_PAYLOAD),
+                    "rows": [["Yield: 60.00%", "Total: 5", f"WAFER_ID: {wafer_id}"]],
+                    "map": payload,
                 }
             # unflagged classic shape (legacy exporter + stacked wafer)
             return [["WAFER-W01-ROW", "Total DUTs", 3]]
@@ -502,7 +506,7 @@ def generated_with_file_info(tmp_path, qapp):
 class TestSheetInventory:
     def test_sheets_classic_order_without_histogram(self, generated):
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer Map"]
+        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
 
     def test_unselected_and_overflow_sheets_absent(self, generated):
         _, wb, _, _, _ = generated
@@ -983,7 +987,7 @@ class TestChartSheets:
         _, wb, _, _, _ = generated
         wafer = {
             c.value
-            for row in wb["Wafer Map"].iter_rows()
+            for row in wb["Wafer W01"].iter_rows()
             for c in row
             if c.value is not None
         }
@@ -1249,7 +1253,7 @@ class TestStatFtrCacheDetection:
             "Test Statistics",
             "Trend Chart",
             "Bin Chart",
-            "Wafer Map",
+            "Wafer W01",
         ]
 
     def test_ftr_cache_built_from_dut_summary(self, generated):
@@ -1416,7 +1420,7 @@ class TestTemperatureSplit:
     def test_split_off_unchanged(self, tmp_path, qapp):
         generated = build_generated(tmp_path, qapp, part_ids=list(self.SPLIT_IDS))
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer Map"]
+        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
 
     def test_single_temperature_no_split_sheets(self, tmp_path, qapp, monkeypatch):
         generated = build_generated(
@@ -1425,7 +1429,7 @@ class TestTemperatureSplit:
             split_temperature=True, monkeypatch=monkeypatch,
         )
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer Map"]
+        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
 
     def test_split_does_not_touch_stats_kargs(self, tmp_path, qapp, monkeypatch):
         generated = self.split_generated(tmp_path, qapp, monkeypatch, with_stat=True)
@@ -1477,7 +1481,7 @@ class TestDutBlockTabOrder:
             "DUT Summary - T125.5°C",
             "Trend Chart",
             "Bin Chart",
-            "Wafer Map",
+            "Wafer W01",
         ]
 
 
@@ -1506,7 +1510,7 @@ class TestWaferCellMap:
         # B7:D9 side by side, properties on lines 11-13 (border box),
         # SW table from 15 (band 15, header 16, data 17..18, total 19)
         _, wb, _, _, _ = generated
-        ws = wb["Wafer Map"]
+        ws = wb["Wafer W01"]
         assert ws["A1"].value == "W01 – All Sites"
         assert ws["A2"].value == "WAFER_ID:"
         assert ws["B2"].value == "W01"
@@ -1524,7 +1528,7 @@ class TestWaferCellMap:
         # 2026-11-13 dynamic counts: the card values and the table's
         # Count cells are FORMULAS over the die map, with cached results
         _, wb, report_path, _, _ = generated
-        ws = wb["Wafer Map"]
+        ws = wb["Wafer W01"]
         assert ws["A5"].value == "=(C17)/COUNT($G$4:$I$6)"
         assert ws["A8"].value == "=C18"
         assert ws["B8"].value == "=COUNT($G$4:$I$6)"
@@ -1533,7 +1537,7 @@ class TestWaferCellMap:
         assert ws["C19"].value == "=SUM(C17:C18)"
         from openpyxl import load_workbook
 
-        cached = load_workbook(report_path, data_only=True)["Wafer Map"]
+        cached = load_workbook(report_path, data_only=True)["Wafer W01"]
         assert cached["A5"].value == pytest.approx(2 / 3)
         assert cached["A8"].value == 1
         assert cached["B8"].value == 3
@@ -1545,11 +1549,11 @@ class TestWaferCellMap:
         # first block freezes at its die grid (title + identity + X-header
         # rows and columns A:F stay visible while scrolling)
         _, wb, _, _, _ = generated
-        assert wb["Wafer Map"].freeze_panes == "G4"
+        assert wb["Wafer W01"].freeze_panes == "G4"
 
     def test_die_cell_holds_sbin_value(self, generated):
         _, wb, _, _, _ = generated
-        ws = wb["Wafer Map"]
+        ws = wb["Wafer W01"]
         assert ws["G3"].value == "-1"  # first X header (ascending)
         assert ws["F4"].value == "1"  # top Y header = max Y
         assert ws["G5"].value == 1  # die (-1, 0)
@@ -1562,7 +1566,7 @@ class TestWaferCellMap:
         # 7862/256, 2230/256, 1097/256); F keeps its 30 px and the die
         # columns their 24 px squares (877/256)
         _, wb, _, _, _ = generated
-        ws = wb["Wafer Map"]
+        ws = wb["Wafer W01"]
         assert col_dim(ws, "A").width == 7862 / 256
         assert col_dim(ws, "B").width == 2230 / 256
         assert col_dim(ws, "D").width == 2230 / 256
@@ -1584,10 +1588,74 @@ class TestWaferCellMap:
                 if n.startswith("xl/drawings/drawing") and n.endswith(".xml")
             )
         assert pics == 2  # 2 trend anchors only
-        ws = wb["Wafer Map"]
-        values = {c.value for row in ws.iter_rows() for c in row if c.value is not None}
-        assert "WAFER-W01-ROW" not in values  # no classic info row either
-        assert ws.max_row == 1  # empty sheet: the next wafer would start at A1
+        # one-wafer-per-worksheet ruling: a stacked-only dataset produces
+        # NO wafer sheet at all (the pre-created sheet is dropped)
+        assert not [n for n in wb.sheetnames if n.startswith("Wafer ")]
+
+    def test_one_worksheet_per_wafer(self, tmp_path, qapp):
+        # 2026-11-13 ruling: one wafer per worksheet — sheets land in
+        # wafer order at the workbook end (the classic "Wafer Map" slot),
+        # each with its own block and freeze panes
+        _, wb, _, _, _ = build_generated(
+            tmp_path, qapp, wafer_tuples=[(0, 1, "W01"), (1, 1, "W02")]
+        )
+        assert wb.sheetnames[-2:] == ["Wafer W01", "Wafer W02"]
+        assert wb["Wafer W01"]["A1"].value == "W01 – All Sites"
+        assert wb["Wafer W02"]["A1"].value == "W02 – All Sites"
+        assert wb["Wafer W01"].freeze_panes == "G4"
+        assert wb["Wafer W02"].freeze_panes == "G4"
+        # cosmetics per sheet
+        for name in ("Wafer W01", "Wafer W02"):
+            ws = wb[name]
+            assert ws.sheet_view.showGridLines is False
+            assert ws.column_dimensions["A"].width == 7862 / 256
+
+    def test_wafer_sheet_names_sanitized_and_unique(self, tmp_path, qapp):
+        # illegal sheet-name characters become underscores; same-ID wafers
+        # from different files take a numeric suffix
+        _, wb, _, _, _ = build_generated(
+            tmp_path, qapp, wafer_tuples=[(0, 1, "A/B:C"), (1, 1, "A/B:C")]
+        )
+        assert wb.sheetnames[-2:] == ["Wafer A_B_C", "Wafer A_B_C_2"]
+
+    def test_multi_wafer_formulas_are_per_sheet(self, tmp_path, qapp):
+        # each block's COUNTIF/SUM formulas reference ITS OWN sheet's map
+        # range — no cross-wafer drift
+        _, wb, report_path, _, _ = build_generated(
+            tmp_path, qapp, wafer_tuples=[(0, 1, "W01"), (1, 1, "W02")]
+        )
+        from openpyxl import load_workbook
+
+        cached = load_workbook(report_path, data_only=True)
+        for name in ("Wafer W01", "Wafer W02"):
+            ws, cached_ws = wb[name], cached[name]
+            assert ws["C17"].value == "=COUNTIF($G$4:$I$6,B17)"
+            assert cached_ws["C17"].value == 2
+            assert cached_ws["C19"].value == 3  # that sheet's SW table Total
+
+    def test_empty_wafer_keeps_its_sheet(self, tmp_path, qapp):
+        # 2026-11-13 ruling: a WIR/WCR-only wafer still gets its
+        # worksheet — title + identity line, no grid, no table
+        payload = dict(WAFER_MAP_PAYLOAD)
+        empty = dict(payload, Data={}, Statistic={}, Palette={}, Properties=[])
+
+        def build(tmp_path, qapp):
+            import sys
+
+            mod = sys.modules[build_generated.__module__]
+            original = mod.WAFER_MAP_PAYLOAD
+            mod.WAFER_MAP_PAYLOAD = empty
+            try:
+                return build_generated(tmp_path, qapp)
+            finally:
+                mod.WAFER_MAP_PAYLOAD = original
+
+        _, wb, _, _, _ = build(tmp_path, qapp)
+        assert wb.sheetnames[-1] == "Wafer W01"  # single-wafer fixture
+        ws = wb["Wafer W01"]
+        assert "A1:D1" in {str(r) for r in ws.merged_cells.ranges}
+        assert ws["A2"].value == "WAFER_ID:"
+        assert not ws.tables
 
     def test_empty_payload_writes_title_and_rows_only(self, tmp_path, qapp):
         # Review Focus pin: a WIR/WCR-only wafer (empty map) must not break
@@ -1611,7 +1679,7 @@ class TestWaferCellMap:
                 mod.WAFER_MAP_PAYLOAD = original
 
         _, wb, _, _, _ = build(tmp_path, qapp)
-        ws = wb["Wafer Map"]
+        ws = wb["Wafer W01"]
         assert "A1:D1" in {str(r) for r in ws.merged_cells.ranges}
         assert "B2:D2" in {str(r) for r in ws.merged_cells.ranges}
         assert not ws.tables

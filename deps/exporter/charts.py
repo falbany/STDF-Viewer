@@ -806,6 +806,21 @@ def wafer_table_name(index: int, wafer_id: str) -> str:
     return f"SW_{index}_{re.sub(r'\W+', '_', str(wafer_id))[:40]}"
 
 
+def wafer_sheet_name(index: int, wafer_id: str, taken: set) -> str:
+    """Unique, legal worksheet name for one wafer (2026-11-13 user
+    ruling: one wafer per worksheet, "Wafer " + wafer ID): Excel caps
+    names at 31 chars and forbids :\\/?*[] — illegal characters become
+    underscores and collisions take a numeric suffix (_2, _3...)."""
+    safe = re.sub(r"[\[\]:\\/\?\*]", "_", str(wafer_id)).strip() or str(index)
+    name = f"Wafer {safe}"[:31].rstrip() or f"Wafer {index}"
+    candidate, suffix = name, 2
+    while candidate in taken:
+        tail = f"_{suffix}"
+        candidate = name[: 31 - len(tail)] + tail
+        suffix += 1
+    return candidate
+
+
 def build_wafer_grid(map_data: dict):
     """Deduplicated die grid for one wafer: (x_axis left→right, y_axis
     top→bottom, {(x, y): sbin} with last-write-wins duplicates, total die
