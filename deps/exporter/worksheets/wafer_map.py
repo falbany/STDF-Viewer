@@ -25,15 +25,21 @@
 Wafer Map worksheet writer: ONE WORKSHEET PER WAFER (2026-11-13 user
 ruling) — each wafer gets its own styled sheet ("Wafer " + wafer ID,
 sanitized/unique), replacing the pre-created single "Wafer Map" sheet.
-No PNG anywhere (stacked wafer skipped); every sheet renders the live
-cell-grid bin map with its own freeze panes, pinned columns and
-cosmetics.
+No PNG anywhere; every sheet renders the live cell-grid bin map with its
+own freeze panes, pinned columns and cosmetics.
 
 2026-11-13 wafer merge (issue #4): with "Hide re-measured DUTs (keep
 latest)" checked, a real WAFER_ID spanning 2+ wafer tuples gets ONE
 extra "(Merged)" sheet right after the last tuple of its group — the
 per-file payloads fused die-by-die (latest file wins), re-measured dies
 thick-orange-bordered, counts recomputed from the merged grid.
+
+2026-11-13 stacked wafer map (issue #5): the stacked tuple
+(`waferIndex == -1`) renders ONE sheet — "Wafer Stacked Map (All
+Wafers)" — FIRST among the wafer sheets (GUI ruling: stacked sits on
+top of Wafer Selection), whenever Wafer Map content is selected and
+independent of the hide-remeasured setting: the cross-wafer fail-count
+heatmap as a live cell grid under one green→yellow→red color-scale.
 """
 from deps.SharedSrc import getSetting, tab
 from deps.uic_stdExporter import ReportSelection
@@ -43,6 +49,7 @@ from deps.exporter.charts import (
     WAFER_VALUE_COL_WIDTH,
     wafer_sheet_name,
     wafer_table_name,
+    write_stacked_wafer_block,
     write_wafer_map_block,
 )
 from deps.exporter.theme import TAB_COLOR_HEXES
@@ -90,15 +97,25 @@ class WaferMapMixin:
             else set()
         )
         fetched = []  # (tuple index, wafer tuple, payload) in tuple order
+        stacked_payload = None  # the (-1, -1) tuple's payload (issue #5)
+        stacked_index = 0
         # pass 1 — fetch payloads in tuple order (no ticks here); the
         # stacked tuple keeps its tick exactly as today
         for index, wafer in enumerate(self.waferTuples):
             if self.forceQuit:
                 return
             if wafer[0] == -1:
-                # stacked wafer (fail-count colormap): no SW-bin equivalent,
-                # and the report carries NO PNG at all (user ruling) — skip
-                # the sheet, keep the progress tick
+                # stacked wafer (fail-count colormap, issue #5): fetch the
+                # aggregation here, write its sheet FIRST in pass 2 — the
+                # tick stays with the tuple exactly as today
+                stacked_payload = self.waitForDataList(
+                    [],
+                    self.selectedSites,
+                    self.selectedFiles,
+                    tab.Wafer,
+                    {"testTuples": [wafer], "waferMapData": wafer},
+                )
+                stacked_index = index
                 self.loopCount += 1
                 self.sendProgress()
                 continue
@@ -112,8 +129,25 @@ class WaferMapMixin:
                 {"testTuples": [wafer], "waferMapData": wafer},
             )
             fetched.append((index, wafer, payload))
-        # pass 2 — write per-file sheets in the SAME order as today; after
-        # the LAST tuple of a merge group, write its merged sheet
+        # pass 2 — the stacked sheet first (issue #5: one sheet, first
+        # among the wafer sheets, no workbook surgery needed since it is
+        # written before every per-file sheet), then per-file sheets in
+        # the SAME order as today; after the LAST tuple of a merge group,
+        # write its merged sheet
+        if stacked_payload is not None:
+            name = wafer_sheet_name(
+                stacked_index, "Stacked Map (All Wafers)", taken
+            )
+            taken.add(name)
+            StackedSheet = self._wb.add_worksheet(name)
+            write_stacked_wafer_block(
+                StackedSheet,
+                self._theme,
+                stacked_payload["rows"],
+                stacked_payload["map"],
+                1,
+            )
+            self._style_wafer_sheet(StackedSheet)
         group_last = {
             wafer[2]: index
             for index, wafer, _ in fetched  # later tuples overwrite: last wins

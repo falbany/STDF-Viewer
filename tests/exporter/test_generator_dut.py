@@ -1732,10 +1732,13 @@ class TestWaferCellMap:
         assert col_dim(ws, "F").width == 1097 / 256
         assert col_dim(ws, "G").width == 877 / 256
 
-    def test_stacked_wafer_skipped_no_png(self, tmp_path, qapp):
-        # 2026-11-12 user ruling: NO PNG on the Wafer sheet at all — the
-        # stacked fail-count map (waferInd == -1) has no SW-bin equivalent,
-        # so its tuple renders no block (the progress tick still fires)
+    def test_stacked_wafer_no_png(self, tmp_path, qapp):
+        # 2026-11-12 user ruling, still true: NO PNG on the wafer sheets —
+        # the trend anchors are the only pictures. Issue #5 (2026-11-13)
+        # replaces the old "stacked tuple skipped" ruling: the stacked
+        # fail-count map now renders its OWN sheet ("Wafer Stacked Map
+        # (All Wafers)") — even in a stacked-only tuple list — and the
+        # progress tick still fires
         _, wb, report_path, _, _ = build_generated(
             tmp_path, qapp, wafer_tuples=[(-1, -1, "STACK")]
         )
@@ -1746,9 +1749,10 @@ class TestWaferCellMap:
                 if n.startswith("xl/drawings/drawing") and n.endswith(".xml")
             )
         assert pics == 2  # 2 trend anchors only
-        # one-wafer-per-worksheet ruling: a stacked-only dataset produces
-        # NO wafer sheet at all (the pre-created sheet is dropped)
-        assert not [n for n in wb.sheetnames if n.startswith("Wafer ")]
+        # issue #5: the stacked tuple renders its own sheet — first among
+        # the wafer sheets (sheet order itself is pinned by the generator
+        # tests); the stub payload degrades through the stacked block
+        assert "Wafer Stacked Map (All Wafers)" in wb.sheetnames
 
     def test_one_worksheet_per_wafer(self, tmp_path, qapp):
         # 2026-11-13 ruling: one wafer per worksheet — sheets land in

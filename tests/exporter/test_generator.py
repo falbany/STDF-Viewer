@@ -11,6 +11,7 @@ import pytest
 from openpyxl import load_workbook
 from PyQt5 import QtCore
 
+from deps.DataInterface import stacked_report_payload
 from deps.SharedSrc import getSetting
 from deps.exporter.generator import ModernReportGenerator
 from deps.exporter.worksheets.file_info import file_temperatures_from_file_info
@@ -396,6 +397,27 @@ def wafer_payload(dies: dict, wafer_id: str = "W08") -> dict:
     }
 
 
+def stacked_payload(dies: dict, sites=(-1,), files=(0, 1)) -> dict:
+    """Flagged tab.Wafer payload for the stacked tuple (issue #5 shape):
+    the raw getWaferMapData stacked branch output (Data keyed by COUNT;
+    dies = {count: [(x, y), ...]}) piped through the real Task 1
+    composer — bounds derive from the coords actually present."""
+    data = {count: {"x": [x for x, _ in coords], "y": [y for _, y in coords]}
+            for count, coords in dies.items()}
+    xs = [x for coords in dies.values() for x, _ in coords]
+    ys = [y for coords in dies.values() for _, y in coords]
+    return stacked_report_payload(
+        {
+            "Bounds": (max(xs), min(xs), max(ys), min(ys)),
+            "ID": (-1, -1),
+            "Data": data,
+            "Statistic": {count: count for count in dies},
+        },
+        list(sites),
+        list(files),
+    )
+
+
 def build_wafer_report(
     tmp_path,
     qapp,
@@ -536,6 +558,84 @@ class TestMergedWaferSheets:
         # sheet only — the per-file sheet of the same coordinate is clean
         assert wb["Wafer W08 (Merged)"]["H5"].border.top.style == "thick"
         assert wb["Wafer W08"]["H5"].border.top.style is None
+
+
+class TestStackedWaferSheet:
+    """Issue #5: the stacked wafer tuple renders ONE sheet — 'Wafer
+    Stacked Map (All Wafers)' — FIRST among the wafer sheets, whenever
+    Wafer Map content is selected, independent of hide_remeasured."""
+
+    # getExportWaferTuples order: the stacked tuple always comes first
+    TUPLES = [(-1, -1, "Stacked Wafer Map"), (0, 0, "W08")]
+    PAYLOADS = {
+        (-1, -1, "Stacked Wafer Map"): stacked_payload(
+            {1: [(1, 1), (2, 1), (3, 1)], 3: [(4, 1)]}
+        ),
+        (0, 0, "W08"): wafer_payload({1: [(0, 0)]}),
+    }
+    DATES = {0: (1, "2026-01-01", "")}
+
+    def test_stacked_sheet_first(self, tmp_path, qapp, monkeypatch):
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=False,
+        )
+        wb = load_workbook(reportPath)
+        assert wb.sheetnames == ["Wafer Stacked Map (All Wafers)", "Wafer W08"]
+
+    def test_stacked_sheet_rendered(self, tmp_path, qapp, monkeypatch):
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=False,
+        )
+        wb = load_workbook(reportPath)
+        stacked = wb["Wafer Stacked Map (All Wafers)"]
+        # 3 info cells: title row 1, info lines 2-4, X headers row 6, dies
+        # row 7 — the canned payload's fail counts as ints (x=1..3 → 1,
+        # x=4 → 3), G-anchored
+        assert stacked["A1"].value == "Stacked Wafer Map – All Sites"
+        assert [stacked.cell(row=7, column=c).value for c in range(7, 11)] == [1, 1, 1, 3]
+
+    def test_setting_independence(self, tmp_path, qapp, monkeypatch):
+        for hide in (False, True):
+            gen, reportPath = build_wafer_report(
+                tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS,
+                self.DATES, hide_remeasured=hide,
+            )
+            wb = load_workbook(reportPath)
+            assert wb.sheetnames[0] == "Wafer Stacked Map (All Wafers)"
+            assert gen.loopCount == gen.totalLoopCnt
+
+    def test_progress_unchanged(self, tmp_path, qapp, monkeypatch):
+        # the stacked tuple already consumed one tick as a skip — it
+        # consumes exactly one as a rendered sheet too (totalLoopCnt's
+        # formula, len(waferTuples), is untouched)
+        gen, _ = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=False,
+        )
+        assert gen.loopCount == gen.totalLoopCnt == 2
+
+    def test_orange_border_absent_on_stacked(self, tmp_path, qapp, monkeypatch):
+        # issue #4's superseded border exists in this export (merged W08
+        # group) but never reaches the stacked sheet — its CF rule defines
+        # no border and no die cell carries one (issue #4's tree assumed;
+        # TestMergedWaferSheets in this module already requires it)
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch,
+            [(-1, -1, "Stacked Wafer Map"), (0, 0, "W08"), (2, 1, "W08")],
+            {**self.PAYLOADS, (2, 1, "W08"): wafer_payload({2: [(0, 0)]})},
+            self.DATES, hide_remeasured=True,
+        )
+        wb = load_workbook(reportPath)
+        with open(reportPath, "rb") as fh:
+            styles = read_xml(fh.read(), "xl/styles.xml")
+        assert "C55A11" in styles  # the merged sheet carries the border
+        stacked = wb["Wafer Stacked Map (All Wafers)"]
+        for coord in ("G7", "H7", "I7", "J7"):
+            border = stacked[coord].border
+            for side in (border.top, border.bottom, border.left, border.right):
+                assert side.style is None
 
 
 class TestPlainSheets:
