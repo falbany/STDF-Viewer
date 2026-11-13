@@ -105,7 +105,7 @@ def make_dut_info(
     fid=1,
     part_id="",
     part_txt="",
-    head_site="1--1",
+    head_site="Head 1 - Site 1",
     tests_executed=42,
     test_time="123 ms",
     hw_bin="Bin 1",
@@ -117,8 +117,9 @@ def make_dut_info(
     """dutInfo tuple: [File ID, Part ID, Part Text, Head-Site, Tests Executed,
     Test Time, HW Bin, SW Bin, Wafer ID, (X, Y), DUT Flag] (indices 0..10).
 
-    Test Time / HW Bin / SW Bin use the raw DB shapes ("123 ms", "Bin 1",
-    "Bin 2" — see schema.rs FETCH_SELECT_DUT_SUMMARY)."""
+    Head-Site / Test Time / HW Bin / SW Bin use the raw DB shapes
+    ("Head 1 - Site 1", "123 ms", "Bin 1", "Bin 2" — see schema.rs
+    FETCH_SELECT_DUT_SUMMARY)."""
     return (
         fid,
         part_id,
@@ -189,7 +190,7 @@ def make_summary(tagged=True, duplicate_sn=False, blank_ids=False, part_ids=None
     ptr_values, ptr_flags = pad([1.0, 1.2, np.nan], [0, 0, -1])
     ftr_values, ftr_flags = pad([0.0, 1.0, 0.0], [0, 0x80, 0])
     tests = [
-        # parametric with limits (data row 16)
+        # parametric with limits (data row 17)
         dict(
             name="0_TXCC/VCCC_ASIC",
             num=10,
@@ -199,7 +200,7 @@ def make_summary(tagged=True, duplicate_sn=False, blank_ids=False, part_ids=None
             rec=REC.PTR,
             data={1: (ptr_values, ptr_flags)},
         ),
-        # FTR (data row 17): die cells from the flag list
+        # FTR (data row 18): die cells from the flag list
         dict(
             name="2_Func/scanchain",
             num=12,
@@ -527,50 +528,66 @@ class TestDutSummarySheet:
         assert ws["M1"].value == 1  # banner labels are plain ints
         assert ws["A1"].fill.fgColor.rgb == "FFCBD5E1"
 
-    def test_repeated_header_row_fifteen(self, generated):
+    def test_repeated_header_row_sixteen(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        assert ws["A15"].value == "Test#"
-        assert ws["A15"].fill.fgColor.rgb == "FF1E40AF"
-        assert ws["M15"].value == "SN541"  # part ID base
+        assert ws["A16"].value == "Test#"
+        assert ws["A16"].fill.fgColor.rgb == "FF1E40AF"
+        assert ws["M16"].value == "SN541"  # part ID base
 
     def test_metadata_block_layout(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        # 13 metadata rows (2..14), Test# 10000.., numeric cells parsed bare
+        # 14 metadata rows (2..15, issue #1 split), Test# 10000.., numeric
+        # cells parsed bare
         assert ws["A2"].value == 10000
         assert ws["B2"].value == "METADATA"
         assert ws["C2"].value == "File ID"
-        # Test Time row (13): parsed to bare ints under MIN/MAX formulas
-        assert ws["C13"].value == "Test Time"
-        assert ws["D13"].value == "ms"
-        assert ws["G13"].value == '=IFERROR(MIN(M13:O13),"")'
-        # always-fold rows stay hidden (Head-Site 11, Test Time 13); the DUT
-        # Flag row (14) is VISIBLE since the fourth wave (status CF)
-        for row in (11, 13):
+        # Test Time row (14): parsed to bare ints under MIN/MAX formulas
+        assert ws["C14"].value == "Test Time"
+        assert ws["D14"].value == "ms"
+        assert ws["G14"].value == '=IFERROR(MIN(M14:O14),"")'
+        # hidden rows: Head/Site 11/12 (constant "Head 1 - Site 1" stubs),
+        # Test Time 14 (always); the DUT Flag row (15) is VISIBLE since the
+        # fourth wave (status CF)
+        for row in (11, 12, 14):
             assert ws.row_dimensions[row].hidden is True
-        assert ws.row_dimensions[14].hidden is not True
-        assert ws["C14"].value == "DUT Flag"
-        assert ws["M14"].value == "Passed"
+        assert ws.row_dimensions[15].hidden is not True
+        assert ws["C15"].value == "DUT Flag"
+        assert ws["M15"].value == "Passed"
 
-    def test_first_test_formulas_at_row_sixteen(self, generated):
+    def test_head_site_rows_parsed_numeric(self, generated):
+        # issue #1: the combined Head-Site text row became two numeric rows
+        # (Head 11, Site 12) with bare-integer die cells
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        assert ws["G16"].value.startswith("=IFERROR(MIN(M16:")
-        assert ws["H16"].value.startswith("=IFERROR(MAX(M16:")
-        assert ws["L16"].value.startswith("=IFERROR(SUMPRODUCT(")
+        assert ws["C11"].value == "Head"
+        assert ws["D11"].value == "INT"
+        assert ws["M11"].value == 1
+        assert ws["O11"].value == 1
+        assert ws["C12"].value == "Site"
+        assert ws["D12"].value == "INT"
+        assert ws["M12"].value == 1
+        assert ws["O12"].value == 1
+
+    def test_first_test_formulas_at_row_seventeen(self, generated):
+        _, wb, _, _, _ = generated
+        ws = wb["DUT Summary"]
+        assert ws["G17"].value.startswith("=IFERROR(MIN(M17:")
+        assert ws["H17"].value.startswith("=IFERROR(MAX(M17:")
+        assert ws["L17"].value.startswith("=IFERROR(SUMPRODUCT(")
 
     def test_die_values_parametric_and_ftr(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        assert ws["M16"].value == 1.0
-        assert ws["N16"].value == 1.2
+        assert ws["M17"].value == 1.0
+        assert ws["N17"].value == 1.2
         # FTR row: die cells from the flag list (0 pass / 1 fail)
-        assert ws["B17"].value == "2_Func"
-        assert ws["C17"].value == "PAT_TOP"
-        assert ws["D17"].value == "P/F"
-        assert ws["M17"].value == 0
-        assert ws["N17"].value == 1
+        assert ws["B18"].value == "2_Func"
+        assert ws["C18"].value == "PAT_TOP"
+        assert ws["D18"].value == "P/F"
+        assert ws["M18"].value == 0
+        assert ws["N18"].value == 1
 
     def test_mirror_columns_hidden_after_spacer(self, generated):
         # xlsxwriter migration: spacer P, Trend Q (visible), spacer R, then
@@ -1067,9 +1084,9 @@ class TestDieCellNumberFormat:
     def test_die_cells_scientific_hardcoded(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        assert ws["M16"].number_format == "0.00E+00"
-        assert ws["N16"].number_format == "0.00E+00"
-        assert ws["M17"].number_format == "0"  # FTR die cells stay integer
+        assert ws["M17"].number_format == "0.00E+00"
+        assert ws["N17"].number_format == "0.00E+00"
+        assert ws["M18"].number_format == "0"  # FTR die cells stay integer
 
     def test_settings_notation_no_longer_affects_die_cells(
         self, tmp_path, qapp, monkeypatch
@@ -1080,8 +1097,8 @@ class TestDieCellNumberFormat:
         _, wb, _, _, _ = build_generated(tmp_path, qapp)
         ws = wb["DUT Summary"]
         assert number_format_from_settings(3, "F") == "0.000"  # utility intact
-        assert ws["M16"].number_format == "0.00E+00"  # hardcode wins
-        assert ws["N16"].number_format == "0.00E+00"
+        assert ws["M17"].number_format == "0.00E+00"  # hardcode wins
+        assert ws["N17"].number_format == "0.00E+00"
 
 
 # --------------------------------------------------------------------------
@@ -1136,18 +1153,18 @@ class TestRemeasureFilterPrune:
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
         # kept order: dutIndex 1 (SN542) then 2 (the later SN541)
-        assert ws["M15"].value == "SN542"
-        assert ws["N15"].value == "SN541"
+        assert ws["M16"].value == "SN542"
+        assert ws["N16"].value == "SN541"
         # the third die column is gone: O15 is the spacer region
-        assert ws["O15"].value in (None, "")
+        assert ws["O16"].value in (None, "")
 
     def test_filter_off_keeps_all_columns(self, tmp_path, qapp):
         generated = build_generated(tmp_path, qapp, duplicate_sn=True)
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
-        assert ws["M15"].value == "SN541"
-        assert ws["N15"].value == "SN542"
-        assert ws["O15"].value == "SN541"
+        assert ws["M16"].value == "SN541"
+        assert ws["N16"].value == "SN542"
+        assert ws["O16"].value == "SN541"
 
     def test_filter_on_blank_ids_never_match(self, tmp_path, qapp, monkeypatch):
         generated = build_generated(
@@ -1156,9 +1173,9 @@ class TestRemeasureFilterPrune:
         _, wb, _, _, _ = generated
         ws = wb["DUT Summary"]
         # nothing dropped: all three die columns survive
-        assert ws["M15"].value == "DUT #1"
-        assert ws["N15"].value == "DUT #2"
-        assert ws["O15"].value == "DUT #3"
+        assert ws["M16"].value == "DUT #1"
+        assert ws["N16"].value == "DUT #2"
+        assert ws["O16"].value == "DUT #3"
 
     def test_prune_summary_view_removes_exactly_the_drops(self):
         from deps.exporter.worksheets.dut_summary import prune_summary_view
@@ -1396,12 +1413,12 @@ class TestTemperatureSplit:
     def test_each_split_carries_only_its_temperature(self, tmp_path, qapp, monkeypatch):
         generated = self.split_generated(tmp_path, qapp, monkeypatch)
         _, wb, _, _, _ = generated
-        assert wb["DUT Summary - T25°C"]["M15"].value == "SN541"
-        assert wb["DUT Summary - T-55°C"]["M15"].value == "SN542"
-        assert wb["DUT Summary - T125.5°C"]["M15"].value == "SN543"
+        assert wb["DUT Summary - T25°C"]["M16"].value == "SN541"
+        assert wb["DUT Summary - T-55°C"]["M16"].value == "SN542"
+        assert wb["DUT Summary - T125.5°C"]["M16"].value == "SN543"
         # one die column per sheet: N15 is the spacer region everywhere
         for name in ("DUT Summary - T25°C", "DUT Summary - T-55°C", "DUT Summary - T125.5°C"):
-            assert wb[name]["N15"].value in (None, "")
+            assert wb[name]["N16"].value in (None, "")
 
     def test_unresolvable_dut_base_only(self, tmp_path, qapp, monkeypatch):
         generated = self.split_generated(
@@ -1410,11 +1427,11 @@ class TestTemperatureSplit:
         )
         _, wb, _, _, _ = generated
         # base sheet keeps all four DUTs
-        base_headers = [wb["DUT Summary"][f"{col}15"].value for col in "MNOP"]
+        base_headers = [wb["DUT Summary"][f"{col}16"].value for col in "MNOP"]
         assert base_headers == ["SN541", "SN542", "SN543", "SN544"]
         # SN544 appears in NO split sheet
         for name in ("DUT Summary - T25°C", "DUT Summary - T-55°C", "DUT Summary - T125.5°C"):
-            headers = [wb[name][f"{col}15"].value for col in "MN"]
+            headers = [wb[name][f"{col}16"].value for col in "MN"]
             assert "SN544" not in headers
 
     def test_split_off_unchanged(self, tmp_path, qapp):

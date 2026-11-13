@@ -68,13 +68,12 @@ from deps.exporter.helpers import format_temperature_label
 from deps.exporter.worksheets.file_info import file_temperatures_from_file_info
 from deps.exporter.writer import render_matrix_sheet
 
-# Sheet layout (2026-11-10 adjustment): banner row 1, 13 metadata rows 2..14
-# (DUT # row removed — the banner labels carry DUT #n), repeated header 15,
-# data 16+.
+# Sheet layout (2026-11-10 adjustment): banner row 1, the metadata block on
+# rows 2.. (DUT # row removed — the banner labels carry DUT #n), then the
+# repeated header and the data area. HEADER_ROW/DATA_START are computed
+# below, from the block length, so a future block change self-adjusts.
 BANNER_ROW = 1
 METADATA_START = 2
-HEADER_ROW = 15
-DATA_START = 16
 
 # Fixed A..L columns of the DUT Summary sheet (2026-11-10: Test# permuted
 # from C to A; only A/B/C move, so every formula's column letters stay put.
@@ -121,26 +120,32 @@ SCIENTIFIC_FORMAT = "0.00E+00"
 # Mask rules: "never" keeps the row; "blank" hides all-blank rows;
 # "constant" hides rows whose non-blank values are all identical
 # (all-blank counts as a constant of nothing); "always" folds the row
-# unconditionally (Head-Site, Test Time, DUT Flag).
+# unconditionally (Test Time only — the fourth wave moved DUT Flag to
+# "never", the Head/Site split moved the old Head-Site to "constant").
 MASK_NEVER = "never"
 MASK_BLANK = "blank"
 MASK_CONSTANT = "constant"
 MASK_ALWAYS = "always"
 
-# The 13-row metadata block (fixed order; DUT # removed 2026-11-10).
+# The 14-row metadata block (fixed order; DUT # removed 2026-11-10,
+# Head-Site split into numeric Head/Site rows 2026-11-13 — issue #1).
 # `unit_type` is the visible Unit cell. `dutinfo_index` maps into the
 # dutInfo tuple [File ID, Part ID, Part Text, Head-Site, Tests Executed,
 # Test Time, HW Bin, SW Bin, Wafer ID, (X, Y), DUT Flag]; None marks the
 # derived row (Temperature = parsed from the raw Part ID, falling back to
 # the file's recorded Test Temperature — MIR TST_TEMP — when the ID
-# carries no _T<n>C tag). Test Time and HW/SW Bin arrive as DB-shaped
-# strings ("123 ms" / "Bin 1") and parse to bare numerics. `mean`/`std`
-# keep live AVERAGE/STDEV formulas: third wave mean=True only for
-# Temperature; fourth wave the Test Time row takes mean=True + std=True;
-# every other numeric row shows MIN/MAX and dashes.
+# carries no _T<n>C tag). Head/Site share dutinfo_index 3 like X/Y share 9:
+# the DB-shaped "Head n - Site m" text parses to bare integers (numeric
+# rows let the user sort columns by head or site). Test Time and HW/SW Bin
+# arrive as DB-shaped strings ("123 ms" / "Bin 1") and parse to bare
+# numerics. `mean`/`std` keep live AVERAGE/STDEV formulas: third wave
+# mean=True only for Temperature; fourth wave the Test Time row takes
+# mean=True + std=True; every other numeric row shows MIN/MAX and dashes.
 # Fourth wave: DUT Flag folds "always" -> "never" (row visible — its
 # status conditional formatting would be meaningless on a hidden row);
-# Head-Site and Test Time keep the unconditional fold.
+# Test Time keeps the unconditional fold. Head/Site use "constant"
+# (X/Y policy): single-head/single-site lots fold them, mixed lots show
+# them — issue #1's numeric values only add information when they vary.
 METADATA_ROWS = (
     {
         "name": "File ID",
@@ -224,10 +229,19 @@ METADATA_ROWS = (
         "std": False,
     },
     {
-        "name": "Head-Site",
-        "unit_type": "TEXT",
-        "numeric": False,
-        "mask": MASK_ALWAYS,
+        "name": "Head",
+        "unit_type": "INT",
+        "numeric": True,
+        "mask": MASK_CONSTANT,
+        "dutinfo_index": 3,
+        "mean": False,
+        "std": False,
+    },
+    {
+        "name": "Site",
+        "unit_type": "INT",
+        "numeric": True,
+        "mask": MASK_CONSTANT,
         "dutinfo_index": 3,
         "mean": False,
         "std": False,
@@ -261,6 +275,12 @@ METADATA_ROWS = (
     },
 )
 
+# Repeated header row and first data row: derived from the block length so
+# the 13 -> 14 row growth (Head-Site split, issue #1) shifts everything
+# below by itself — header 16, data 17+ now. Computed, never hard-coded.
+HEADER_ROW = METADATA_START + len(METADATA_ROWS)
+DATA_START = HEADER_ROW + 1
+
 # Absolute Excel row of the DUT Flag metadata row (fourth wave): computed
 # from its METADATA_ROWS position, never hard-coded — the status CF range
 # in the spec and the writer's rules both derive from it.
@@ -278,6 +298,11 @@ PART_ID_ROW = METADATA_START + next(
 
 # First two integers inside a preformatted "(X, Y)" string.
 _XY_INT_RE = re.compile(r"-?\d+")
+
+# The DB-shaped head/site text ("Head 1 - Site 4", schema.rs
+# FETCH_SELECT_DUT_SUMMARY) — the Head/Site rows parse it to bare integers
+# (issue #1: numeric values so the user can sort columns by head or site).
+_HEAD_SITE_RE = re.compile(r"Head\s+(-?\d+)\s+-\s+Site\s+(-?\d+)")
 
 
 def build_dut_summary_spec(
@@ -474,6 +499,9 @@ def _metadata_cell(
     if name in ("X", "Y"):
         x, y = _parse_xy(raw(9))
         return _coerce(x if name == "X" else y, int)
+    if name in ("Head", "Site"):
+        head, site = _parse_head_site(raw(3))
+        return _coerce(head if name == "Head" else site, int)
     value = raw(meta["dutinfo_index"])
     if meta["numeric"]:
         return _coerce(value, int)
@@ -491,6 +519,16 @@ def _parse_xy(source):
     x = parts[0] if len(parts) > 0 else ""
     y = parts[1] if len(parts) > 1 else ""
     return x, y
+
+
+def _parse_head_site(source):
+    """(head, site) integers from the DB-shaped "Head n - Site m" text;
+    blanks when the value is missing or not in the expected shape."""
+    if isinstance(source, str):
+        match = _HEAD_SITE_RE.search(source)
+        if match is not None:
+            return int(match.group(1)), int(match.group(2))
+    return "", ""
 
 
 def _coerce(value, caster):
@@ -523,7 +561,8 @@ def _is_masked(meta, values):
 def _metadata_block(
     summaryTable, chunk_cells, first_die, last_die, file_temperatures=None
 ):
-    """The 13 metadata row-lists plus the absolute Excel rows to hide.
+    """The metadata row-lists (one per METADATA_ROWS entry) plus the
+    absolute Excel rows to hide.
 
     Numeric rows carry live MIN/MAX over their die range; Temperature
     keeps a live MEAN (third wave) and Test Time keeps MEAN + STDEV

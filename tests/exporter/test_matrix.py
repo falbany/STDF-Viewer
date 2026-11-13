@@ -22,25 +22,26 @@ from deps.exporter.worksheets.dut_summary import (
     group_order_by_temperature,
 )
 
-# Layout (2026-11-10 adjustment): banner row 1, 13 metadata rows 2..14,
-# repeated header 15, data 16+. Base columns: A=Test#, B=Test, C=Param.
-DATA_START = 16
-HEADER_ROW = 15
+# Layout (2026-11-13 Head-Site split): banner row 1, 14 metadata rows
+# 2..15, repeated header 16, data 17+. Base columns: A=Test#, B=Test,
+# C=Param.
+DATA_START = 17
+HEADER_ROW = 16
 
 SCIENTIFIC = "0.00E+00"
 
 # Exact formula strings (Global Constraints; asserted literally, not via
 # helpers). Ninth wave: the J column is Cp (sigma embedded as STDEV over
 # the row's die range — the old St. Dev. column is gone).
-CP_16 = '=IFERROR((F16-E16)/(6*STDEV(M16:O16)),"")'
 CP_17 = '=IFERROR((F17-E17)/(6*STDEV(M17:O17)),"")'
 CP_18 = '=IFERROR((F18-E18)/(6*STDEV(M18:O18)),"")'
-CPK_16 = '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:O16)),(I16-E16)/(3*STDEV(M16:O16))),"")'
+CP_19 = '=IFERROR((F19-E19)/(6*STDEV(M19:O19)),"")'
 CPK_17 = '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:O17)),(I17-E17)/(3*STDEV(M17:O17))),"")'
 CPK_18 = '=IFERROR(MIN((F18-I18)/(3*STDEV(M18:O18)),(I18-E18)/(3*STDEV(M18:O18))),"")'
-FAILS_LIMITS_16 = '=IFERROR(SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16))),"")'
-FAILS_LIMITS_18 = '=IFERROR(SUMPRODUCT((M18:O18<>"")*((E18<>"")*(M18:O18<E18)+(F18<>"")*(M18:O18>F18))),"")'
-FAILS_FLAGS_17 = '=IFERROR(SUMPRODUCT((S17:U17<>"")*(S17:U17=1)),"")'
+CPK_19 = '=IFERROR(MIN((F19-I19)/(3*STDEV(M19:O19)),(I19-E19)/(3*STDEV(M19:O19))),"")'
+FAILS_LIMITS_17 = '=IFERROR(SUMPRODUCT((M17:O17<>"")*((E17<>"")*(M17:O17<E17)+(F17<>"")*(M17:O17>F17))),"")'
+FAILS_LIMITS_19 = '=IFERROR(SUMPRODUCT((M19:O19<>"")*((E19<>"")*(M19:O19<E19)+(F19<>"")*(M19:O19>F19))),"")'
+FAILS_FLAGS_18 = '=IFERROR(SUMPRODUCT((S18:U18<>"")*(S18:U18=1)),"")'
 
 BASE_HEADERS = [
     "Test#",
@@ -67,7 +68,7 @@ def make_dut_info(
     fid=1,
     part_id="",
     part_txt="",
-    head_site="1-1",
+    head_site="Head 1 - Site 1",
     tests_executed=42,
     test_time="123 ms",
     hw_bin="Bin 1",
@@ -79,8 +80,9 @@ def make_dut_info(
     """dutInfo tuple: [File ID, Part ID, Part Text, Head-Site, Tests Executed,
     Test Time, HW Bin, SW Bin, Wafer ID, (X, Y), DUT Flag] (indices 0..10).
 
-    Test Time / HW Bin / SW Bin use the raw DB shapes ("123 ms", "Bin 1",
-    "Bin 2" — see schema.rs FETCH_SELECT_DUT_SUMMARY)."""
+    Head-Site / Test Time / HW Bin / SW Bin use the raw DB shapes
+    ("Head 1 - Site 1", "123 ms", "Bin 1", "Bin 2" — see schema.rs
+    FETCH_SELECT_DUT_SUMMARY)."""
     return (
         fid,
         part_id,
@@ -260,9 +262,11 @@ class TestSanitizeCell:
 
 
 class TestMetadataRowsConstant:
-    def test_thirteen_entries_pinned_order(self):
-        # DUT # row removed (2026-11-10): the banner labels carry DUT #n
-        assert len(METADATA_ROWS) == 13
+    def test_fourteen_entries_pinned_order(self):
+        # DUT # row removed (2026-11-10): the banner labels carry DUT #n.
+        # Issue #1 (2026-11-13): the combined Head-Site row split into
+        # numeric Head + Site rows.
+        assert len(METADATA_ROWS) == 14
         assert [m["name"] for m in METADATA_ROWS] == [
             "File ID",
             "Part ID",
@@ -273,7 +277,8 @@ class TestMetadataRowsConstant:
             "Wafer",
             "X",
             "Y",
-            "Head-Site",
+            "Head",
+            "Site",
             "Tests Executed",
             "Test Time",
             "DUT Flag",
@@ -307,7 +312,8 @@ class TestMetadataRowsConstant:
             "Wafer": (False, False),
             "X": (False, False),
             "Y": (False, False),
-            "Head-Site": (False, False),
+            "Head": (False, False),
+            "Site": (False, False),
             "Tests Executed": (False, False),
             "Test Time": (True, True),
             "DUT Flag": (False, False),
@@ -325,7 +331,8 @@ class TestMetadataRowsConstant:
             "Wafer": "INT",
             "X": "INT",
             "Y": "INT",
-            "Head-Site": "TEXT",
+            "Head": "INT",
+            "Site": "INT",
             "Tests Executed": "INT",
             "Test Time": "ms",
             "DUT Flag": "TEXT",
@@ -344,14 +351,18 @@ class TestMetadataRowsConstant:
             "Wafer",
             "X",
             "Y",
+            "Head",
+            "Site",
             "Tests Executed",
             "Test Time",
         }
 
     def test_mask_rules_distribution(self):
         # fourth wave: DUT Flag un-hidden ("always" -> "never") so its status
-        # conditional formatting is meaningful; Head-Site / Test Time keep
-        # the unconditional fold
+        # conditional formatting is meaningful; Test Time keeps the
+        # unconditional fold. Issue #1 (2026-11-13): Head/Site take the X/Y
+        # "constant" policy — single-head/single-site lots fold them, mixed
+        # lots keep them visible.
         masks = {m["name"]: m["mask"] for m in METADATA_ROWS}
         assert masks == {
             "File ID": "constant",
@@ -363,7 +374,8 @@ class TestMetadataRowsConstant:
             "Wafer": "blank",
             "X": "constant",
             "Y": "constant",
-            "Head-Site": "always",
+            "Head": "constant",
+            "Site": "constant",
             "Tests Executed": "never",
             "Test Time": "always",
             "DUT Flag": "never",
@@ -381,7 +393,8 @@ class TestMetadataRowsConstant:
             "Wafer": 8,
             "X": 9,
             "Y": 9,
-            "Head-Site": 3,
+            "Head": 3,
+            "Site": 3,
             "Tests Executed": 4,
             "Test Time": 5,
             "DUT Flag": 10,
@@ -397,10 +410,10 @@ class TestMetadataBlock:
     def spec(self):
         return build(base_tests(), base_duts())[0]
 
-    def test_exactly_thirteen_rows_with_pinned_test_numbers(self):
+    def test_exactly_fourteen_rows_with_pinned_test_numbers(self):
         rows = self.spec()["metadata_rows"]
-        assert len(rows) == 13
-        assert [r[0] for r in rows] == list(range(10000, 10013))
+        assert len(rows) == 14
+        assert [r[0] for r in rows] == list(range(10000, 10014))
 
     def test_file_id_row_exact(self):
         # Metadata rows sit at Excel rows 2..14; the File ID row's own die
@@ -460,31 +473,50 @@ class TestMetadataBlock:
         assert self.spec()["metadata_rows"][4][12:] == [1, 1, 1]  # HW Bin
         assert self.spec()["metadata_rows"][5][12:] == [2, 2, 2]  # SW Bin
 
+    def test_head_site_parsed_to_bare_integers(self):
+        # issue #1: the DB-shaped "Head 1 - Site 1" text splits into bare
+        # integer cells so the user can sort columns by head or site
+        assert self.spec()["metadata_rows"][9][12:] == [1, 1, 1]  # Head
+        assert self.spec()["metadata_rows"][10][12:] == [1, 1, 1]  # Site
+
+    def test_head_site_defensive_parse_blanks(self):
+        # missing / non-DB-shaped values leave blank cells (like X/Y)
+        duts = [
+            (1, 0, make_dut_info(part_id="D0", head_site=None)),
+            (1, 1, make_dut_info(part_id="D1", head_site="1--1")),
+        ]
+        rows = build([], duts)[0]["metadata_rows"]
+        assert rows[9][12:] == ["", ""]  # Head
+        assert rows[10][12:] == ["", ""]  # Site
+        # both blank -> constant-of-nothing -> folded
+        masked = build([], duts)[0]["masked_rows"]
+        assert 11 in masked and 12 in masked
+
     def test_test_time_parsed_to_milliseconds(self):
         # "123 ms" strings parse to bare ints so the stats compute; fourth
         # wave: the Test Time row keeps the full MIN/MAX/MEAN/STDEV set (the
         # row stays hidden — the formulas serve a user who unhides it)
-        row = self.spec()["metadata_rows"][11]
+        row = self.spec()["metadata_rows"][12]
         assert row[6:10] == [
-            '=IFERROR(MIN(M13:O13),"")',
-            '=IFERROR(MAX(M13:O13),"")',
-            '=IFERROR(AVERAGE(M13:O13),"")',
-            '=IFERROR(STDEV(M13:O13),"")',
+            '=IFERROR(MIN(M14:O14),"")',
+            '=IFERROR(MAX(M14:O14),"")',
+            '=IFERROR(AVERAGE(M14:O14),"")',
+            '=IFERROR(STDEV(M14:O14),"")',
         ]
         assert row[10:12] == ["-", "-"]
         assert row[12:] == [123, 123, 123]
 
     def test_text_rows_carry_dash_placeholders(self):
         rows = self.spec()["metadata_rows"]
-        for pos in (1, 2, 9, 12):  # Part ID, Part TXT, Head-Site, DUT Flag
+        for pos in (1, 2, 13):  # Part ID, Part TXT, DUT Flag
             assert rows[pos][6:12] == ["-", "-", "-", "-", "-", "-"]
 
     def test_numeric_rows_carry_dash_tails(self):
         rows = self.spec()["metadata_rows"]
         # numeric rows outside Temperature / Test Time: MIN/MAX live, the
-        # Mean and St. Dev. cells are dashes (Test Time pos 11 is pinned in
+        # Mean and St. Dev. cells are dashes (Test Time pos 12 is pinned in
         # test_test_time_parsed_to_milliseconds — fourth wave mean+std)
-        for pos in (0, 4, 5, 6, 7, 8, 10):
+        for pos in (0, 4, 5, 6, 7, 8, 9, 10, 11):
             assert rows[pos][6:8] == [
                 f'=IFERROR(MIN(M{2 + pos}:O{2 + pos}),"")',
                 f'=IFERROR(MAX(M{2 + pos}:O{2 + pos}),"")',
@@ -500,15 +532,16 @@ class TestMetadataBlock:
 
     def test_masked_rows_absolute_positions(self):
         # File ID constant (2), Wafer all blank (8), X/Y constant (9, 10),
-        # always-fold: Head-Site (11), Test Time (13). Fourth wave: DUT Flag
-        # (14) is VISIBLE — its status CF would be meaningless hidden.
-        assert self.spec()["masked_rows"] == [2, 8, 9, 10, 11, 13]
+        # Head/Site constant (11, 12 — every stub DUT is "Head 1 - Site 1"),
+        # always-fold: Test Time (14). Fourth wave: DUT Flag (15) is
+        # VISIBLE — its status CF would be meaningless hidden.
+        assert self.spec()["masked_rows"] == [2, 8, 9, 10, 11, 12, 14]
 
     def test_dut_flag_row_visible_with_identical_flags(self):
         # fourth wave ruling: the DUT Flag row never folds, even when every
         # DUT carries the same flag string
-        assert 14 not in self.spec()["masked_rows"]
-        assert self.spec()["metadata_rows"][12][12:] == ["Passed"] * 3
+        assert 15 not in self.spec()["masked_rows"]
+        assert self.spec()["metadata_rows"][13][12:] == ["Passed"] * 3
 
     def test_temperature_constant_folds(self):
         # new "constant" mask: identical temperatures fold the row
@@ -570,33 +603,43 @@ class TestMetadataBlock:
         spec = build([], duts, file_temperatures={2: 85.0})[0]
         assert spec["metadata_rows"][3][12:] == ["", 85.0]
 
-    def test_always_mask_folds_distinct_values(self):
-        # Head-Site / Test Time fold even when values differ; the DUT Flag
-        # row stays visible (fourth wave) for its status CF
+    def test_head_site_constant_mask_and_always_test_time(self):
+        # issue #1 policy: Head folds on identical values (constant) while
+        # distinct Sites keep the row visible; Test Time folds even when
+        # values differ (always); the DUT Flag row stays visible (fourth
+        # wave) for its status CF
         duts = [
             (
                 1,
                 0,
                 make_dut_info(
-                    part_id="D0", head_site="1-0", test_time="100 ms", dut_flag="Passed"
+                    part_id="D0",
+                    head_site="Head 1 - Site 0",
+                    test_time="100 ms",
+                    dut_flag="Passed",
                 ),
             ),
             (
                 1,
                 1,
                 make_dut_info(
-                    part_id="D1", head_site="1-1", test_time="200 ms", dut_flag="Failed"
+                    part_id="D1",
+                    head_site="Head 1 - Site 1",
+                    test_time="200 ms",
+                    dut_flag="Failed",
                 ),
             ),
         ]
         spec = build([], duts)[0]
         rows = spec["metadata_rows"]
-        assert rows[9][12:] == ["1-0", "1-1"]  # distinct Head-Sites
-        assert rows[11][12:] == [100, 200]  # distinct test times
-        assert rows[12][12:] == ["Passed", "Failed"]
-        for row in (11, 13):
-            assert row in spec["masked_rows"]
-        assert 14 not in spec["masked_rows"]
+        assert rows[9][12:] == [1, 1]  # identical Heads -> row folds
+        assert rows[10][12:] == [0, 1]  # distinct Sites -> row stays
+        assert rows[12][12:] == [100, 200]  # distinct test times
+        assert rows[13][12:] == ["Passed", "Failed"]
+        assert 11 in spec["masked_rows"]  # Head (constant)
+        assert 12 not in spec["masked_rows"]  # Site (constant, differs)
+        assert 14 in spec["masked_rows"]  # Test Time (always)
+        assert 15 not in spec["masked_rows"]  # DUT Flag (never)
 
 
 # --------------------------------------------------------------------------
@@ -619,12 +662,12 @@ class TestRows:
             "V",
             0.5,
             1.5,
-            '=IFERROR(MIN(M16:O16),"")',
-            '=IFERROR(MAX(M16:O16),"")',
-            '=IFERROR(AVERAGE(M16:O16),"")',
-            CP_16,
-            CPK_16,
-            FAILS_LIMITS_16,
+            '=IFERROR(MIN(M17:O17),"")',
+            '=IFERROR(MAX(M17:O17),"")',
+            '=IFERROR(AVERAGE(M17:O17),"")',
+            CP_17,
+            CPK_17,
+            FAILS_LIMITS_17,
             1.0,
             1.2,
             "",
@@ -645,12 +688,12 @@ class TestRows:
             "dB",
             "",
             "",
-            '=IFERROR(MIN(M17:O17),"")',
-            '=IFERROR(MAX(M17:O17),"")',
-            '=IFERROR(AVERAGE(M17:O17),"")',
-            CP_17,
-            CPK_17,
-            FAILS_FLAGS_17,
+            '=IFERROR(MIN(M18:O18),"")',
+            '=IFERROR(MAX(M18:O18),"")',
+            '=IFERROR(AVERAGE(M18:O18),"")',
+            CP_18,
+            CPK_18,
+            FAILS_FLAGS_18,
             2.0,
             0.1,
             3.0,
@@ -678,12 +721,12 @@ class TestRows:
             "P/F",
             -0.999999,
             0.999999,
-            '=IFERROR(MIN(M18:O18),"")',
-            '=IFERROR(MAX(M18:O18),"")',
-            '=IFERROR(AVERAGE(M18:O18),"")',
-            CP_18,
-            CPK_18,
-            FAILS_LIMITS_18,
+            '=IFERROR(MIN(M19:O19),"")',
+            '=IFERROR(MAX(M19:O19),"")',
+            '=IFERROR(AVERAGE(M19:O19),"")',
+            CP_19,
+            CPK_19,
+            FAILS_LIMITS_19,
             0,
             1,
             0,
@@ -715,10 +758,10 @@ class TestRows:
         assert row[3] == "P/F"
         assert row[4] == -0.999999
         assert row[5] == 0.999999
-        # single-die range: the limits-variant FAILS over M16:M16
+        # single-die range: the limits-variant FAILS over M17:M17
         assert row[11] == (
-            '=IFERROR(SUMPRODUCT((M16:M16<>"")*((E16<>"")*(M16:M16<E16)'
-            '+(F16<>"")*(M16:M16>F16))),"")'
+            '=IFERROR(SUMPRODUCT((M17:M17<>"")*((E17<>"")*(M17:M17<E17)'
+            '+(F17<>"")*(M17:M17>F17))),"")'
         )
 
     def test_row_length_layout(self):
@@ -787,7 +830,7 @@ class TestStructure:
         }
 
     def test_freeze_panes(self):
-        assert self.spec()["freeze_panes"] == "M16"
+        assert self.spec()["freeze_panes"] == "M17"
 
     def test_die_columns_and_flag_first_col(self):
         spec = self.spec()
@@ -834,24 +877,24 @@ class TestStructure:
     def test_auto_filter(self):
         # fix wave 2: the Excel Table was replaced by a native AutoFilter
         # over the same range (duplicated header text is legal for autofilters)
-        assert self.spec()["auto_filter"] == {"ref": "A15:O18"}
+        assert self.spec()["auto_filter"] == {"ref": "A16:O19"}
         assert "table" not in self.spec()
 
     def test_conditional_formatting(self):
         cf = self.spec()["conditional_formatting"]
         assert cf["die_rules"] == {
-            "range": "M16:O18",
+            "range": "M17:O19",
             "first_die": "M",
             "flag_col_offset": 6,
         }
-        assert cf["cp_range"] == "J16:J18"
-        assert cf["cpk_range"] == "K16:K18"
-        assert cf["fails_range"] == "L16:L18"
+        assert cf["cp_range"] == "J17:J19"
+        assert cf["cpk_range"] == "K17:K19"
+        assert cf["fails_range"] == "L17:L19"
         assert cf["fails_max"] == 0.2 * 3
         # fourth wave: status CF range over the DUT Flag metadata row's DIE
-        # CELLS ONLY (row 14 = METADATA_START + the DUT Flag position in
+        # CELLS ONLY (row 15 = METADATA_START + the DUT Flag position in
         # METADATA_ROWS — computed, not hard-coded; base cells never styled)
-        assert cf["dut_flag_range"] == "M14:O14"
+        assert cf["dut_flag_range"] == "M15:O15"
         # duplicate-highlight wave: same die-cells-only rule over the Part ID
         # metadata row (row 3 = METADATA_START + the Part ID position)
         assert cf["part_id_range"] == "M3:O3"
@@ -899,15 +942,15 @@ class TestChunking:
         assert (
             spec["flag_first_col"] == "R"
         )  # die M..N, spacer O, Trend P, spacer Q, mirror R..S
-        assert spec["rows"][0][6] == '=IFERROR(MIN(M16:N16),"")'
+        assert spec["rows"][0][6] == '=IFERROR(MIN(M17:N17),"")'
         assert spec["rows"][0][12:14] == [1.0, 1.2]
         assert spec["metadata_rows"][0][6] == '=IFERROR(MIN(M2:N2),"")'
-        assert spec["auto_filter"]["ref"] == "A15:N18"
+        assert spec["auto_filter"]["ref"] == "A16:N19"
 
     def test_chunk_two_references_own_columns(self):
         spec = self.specs()[1]
         assert spec["headers"][12:] == [3, "", "Trend"]  # global numbering + Trend tail
-        assert spec["rows"][0][6] == '=IFERROR(MIN(M16:M16),"")'
+        assert spec["rows"][0][6] == '=IFERROR(MIN(M17:M17),"")'
         assert spec["rows"][0][12:] == [
             "",
             "",
@@ -916,11 +959,11 @@ class TestChunking:
             "",
         ]  # nan die, spacer, Trend, spacer, blank mirror
         assert spec["metadata_rows"][0][6] == '=IFERROR(MIN(M2:M2),"")'
-        assert spec["auto_filter"]["ref"] == "A15:M18"
+        assert spec["auto_filter"]["ref"] == "A16:M19"
         assert spec["conditional_formatting"]["die_rules"]["flag_col_offset"] == 4
         assert spec["conditional_formatting"]["fails_max"] == 0.2 * 1
         # DUT Flag CF range follows the chunk's own die span
-        assert spec["conditional_formatting"]["dut_flag_range"] == "M14:M14"
+        assert spec["conditional_formatting"]["dut_flag_range"] == "M15:M15"
 
 
 # --------------------------------------------------------------------------
@@ -955,7 +998,7 @@ class TestColumnCapBoundaries:
         # formulas build against the full-width ranges
         last_die = die_col(DUT_CHUNK_CAP - 1)
         assert spec["metadata_rows"][0][6] == f'=IFERROR(MIN(M2:{last_die}2),"")'
-        assert spec["rows"][0][6] == f'=IFERROR(MIN(M16:{last_die}16),"")'
+        assert spec["rows"][0][6] == f'=IFERROR(MIN(M17:{last_die}17),"")'
 
     def test_16301_dies_two_valid_chunks(self):
         # the old 16300-boundary count now spans two chunks; BOTH must build
@@ -999,7 +1042,7 @@ class TestZeroDutChunk:
         assert "auto_filter" not in spec
         assert "table" not in spec
         assert spec["headers"] == BASE_HEADERS + ["", "Trend"]
-        assert spec["freeze_panes"] == "M16"
+        assert spec["freeze_panes"] == "M17"
         # metadata formulas stay well-formed (M2:M2, not the inverted N2:M2);
         # third wave: the File ID row carries MIN/MAX and a dash Mean
         assert spec["metadata_rows"][0][6:9] == [
@@ -1023,7 +1066,7 @@ class TestZeroDutChunk:
         spec = build(tests, [])[0]
         # mirror range collapses onto M (the empty visible range), not N:M
         assert (
-            spec["rows"][0][11] == '=IFERROR(SUMPRODUCT((M16:M16<>"")*(M16:M16=1)),"")'
+            spec["rows"][0][11] == '=IFERROR(SUMPRODUCT((M17:M17<>"")*(M17:M17=1)),"")'
         )
 
 
@@ -1038,9 +1081,9 @@ class TestEdgeCases:
         assert spec["rows"] == []
         assert "auto_filter" not in spec
         assert "table" not in spec
-        assert len(spec["metadata_rows"]) == 13
+        assert len(spec["metadata_rows"]) == 14
         assert spec["headers"] == BASE_HEADERS + [1, 2, 3, "", "Trend"]
-        assert spec["freeze_panes"] == "M16"
+        assert spec["freeze_panes"] == "M17"
         assert spec["row_groups"] == []
 
     def test_dut_without_prr_info_blanks_everywhere(self):
@@ -1067,7 +1110,8 @@ class TestEdgeCases:
         assert rows[1][12:] == ["SN1_T25C", ""]  # Part ID: raw, blank stays blank
         assert rows[3][12:] == [25.0, ""]  # Temperature from raw part ID
         assert rows[0][12:] == [1, ""]  # File ID blank for ()
-        assert rows[9][12:] == ["1-1", ""]  # Head-Site blank for ()
+        assert rows[9][12:] == [1, ""]  # Head parsed, blank for ()
+        assert rows[10][12:] == [1, ""]  # Site parsed, blank for ()
 
     def test_string_xy_parsed_defensively(self):
         duts = [
@@ -1090,8 +1134,9 @@ class TestEdgeCases:
         spec = build([], duts)[0]
         assert spec["metadata_rows"][7][12:] == ["", ""]
         # File ID + Temperature (no _T tag) + X + Y constant-of-nothing,
-        # Wafer all blank + always rows (Head-Site, Test Time)
-        assert spec["masked_rows"] == [2, 5, 8, 9, 10, 11, 13]
+        # Wafer all blank, Head/Site constant ("Head 1 - Site 1" stubs),
+        # always row (Test Time)
+        assert spec["masked_rows"] == [2, 5, 8, 9, 10, 11, 12, 14]
 
     def test_wafer_with_values_not_masked(self):
         duts = [
@@ -1250,7 +1295,7 @@ class TestFormulaValues:
     Ruling: the plan sketched (row_offset, col) with the fixture (0, 7) —
     ambiguous between the metadata and data row lists (both start at
     offset 0). Absolute rows are unambiguous and are what the writer
-    looks up while rendering; the plan's (0, 7) maps to (16, 7)."""
+    looks up while rendering; the plan's (0, 7) maps to (17, 7)."""
 
     def spec(self):
         return build(base_tests(), base_duts())[0]
@@ -1258,31 +1303,31 @@ class TestFormulaValues:
     def test_limits_row_caches(self):
         fv = self.spec()["formula_values"]
         # dies [1.0, 1.2, blank]
-        assert fv[(16, 7)] == 1.0  # MIN
-        assert fv[(16, 8)] == 1.2  # MAX
-        assert fv[(16, 9)] == pytest.approx(1.1)  # AVERAGE
-        assert fv[(16, 10)] == pytest.approx(cp_cached(0.5, 1.5, [1.0, 1.2]))  # Cp
-        assert fv[(16, 11)] == pytest.approx(cpk_cached(0.5, 1.5, [1.0, 1.2]))  # Cpk
-        assert fv[(16, 12)] == 0  # FAILS (all inside limits)
+        assert fv[(17, 7)] == 1.0  # MIN
+        assert fv[(17, 8)] == 1.2  # MAX
+        assert fv[(17, 9)] == pytest.approx(1.1)  # AVERAGE
+        assert fv[(17, 10)] == pytest.approx(cp_cached(0.5, 1.5, [1.0, 1.2]))  # Cp
+        assert fv[(17, 11)] == pytest.approx(cpk_cached(0.5, 1.5, [1.0, 1.2]))  # Cpk
+        assert fv[(17, 12)] == 0  # FAILS (all inside limits)
 
     def test_no_limit_row_uses_flag_cache(self):
         fv = self.spec()["formula_values"]
         # dies [2.0, 0.1, 3.0]; limits blank -> flag path (one 0x80 flag)
-        assert fv[(17, 10)] == ""  # Cp uncomputable without limits
-        assert fv[(17, 11)] == ""
-        assert fv[(17, 12)] == 1
+        assert fv[(18, 10)] == ""  # Cp uncomputable without limits
+        assert fv[(18, 11)] == ""
+        assert fv[(18, 12)] == 1
         # stats still compute over the die values
-        assert fv[(17, 7)] == 0.1
-        assert fv[(17, 9)] == pytest.approx(1.7)
+        assert fv[(18, 7)] == 0.1
+        assert fv[(18, 9)] == pytest.approx(1.7)
 
     def test_ftr_row_caches_from_synthetic_limits(self):
         fv = self.spec()["formula_values"]
         # dies [0, 1, 0]: 1 fails the ±0.999999 window; Cp/Cpk compute
-        assert fv[(18, 12)] == 1
-        assert fv[(18, 10)] == pytest.approx(
+        assert fv[(19, 12)] == 1
+        assert fv[(19, 10)] == pytest.approx(
             cp_cached(FTR_SPEC_MIN, FTR_SPEC_MAX, [0.0, 1.0, 0.0])
         )
-        assert fv[(18, 11)] == pytest.approx(
+        assert fv[(19, 11)] == pytest.approx(
             cpk_cached(FTR_SPEC_MIN, FTR_SPEC_MAX, [0.0, 1.0, 0.0])
         )
 
@@ -1296,10 +1341,14 @@ class TestFormulaValues:
         assert fv[(5, 7)] == 25.0
         assert fv[(5, 8)] == 85.0
         assert fv[(5, 9)] == pytest.approx(45.0)
-        # Test Time row (row 13, mean+std): [123, 123, 123] — the BARE
+        # Head/Site rows (rows 11/12, numeric): the "Head 1 - Site 1"
+        # stubs parse to [1, 1, 1]
+        assert fv[(11, 7)] == 1
+        assert fv[(12, 8)] == 1
+        # Test Time row (row 14, mean+std): [123, 123, 123] — the BARE
         # STDEV formula computes 0 for identical values, so 0 is faithful
-        assert fv[(13, 7)] == 123
-        assert fv[(13, 10)] == 0
+        assert fv[(14, 7)] == 123
+        assert fv[(14, 10)] == 0
 
     def test_all_blank_die_row_caches_blank(self):
         # the fid-1-only test leaves die 3 blank — but not ALL blank. A
@@ -1319,12 +1368,12 @@ class TestFormulaValues:
         fv = spec["formula_values"]
         # IFERROR-wrapped (2026-11-11): AVERAGE/Cp/Cpk error on an empty
         # range -> "" ; MIN/MAX never error — an empty range computes 0
-        assert fv[(16, 7)] == 0
-        assert fv[(16, 8)] == 0
+        assert fv[(17, 7)] == 0
+        assert fv[(17, 8)] == 0
         for col in (9, 10, 11):
-            assert fv[(16, col)] == ""
+            assert fv[(17, col)] == ""
         # SUMPRODUCT never errors: 0 for a blank range
-        assert fv[(16, 12)] == 0
+        assert fv[(17, 12)] == 0
 
     def test_single_die_cpk_blank(self):
         tests = [
@@ -1340,9 +1389,9 @@ class TestFormulaValues:
         ]
         spec = build(tests, [(1, 0, make_dut_info(part_id="D0"))])[0]
         fv = spec["formula_values"]
-        assert fv[(16, 7)] == 0.5  # MIN computes
-        assert fv[(16, 10)] == ""  # Cp needs sigma (n<2)
-        assert fv[(16, 11)] == ""
+        assert fv[(17, 7)] == 0.5  # MIN computes
+        assert fv[(17, 10)] == ""  # Cp needs sigma (n<2)
+        assert fv[(17, 11)] == ""
 
 
 class TestSparklines:
@@ -1351,19 +1400,19 @@ class TestSparklines:
 
     def test_one_entry_per_numeric_die_row(self):
         sparks = self.spec()["sparklines"]
-        assert [s["row"] for s in sparks] == [16, 17, 18]
+        assert [s["row"] for s in sparks] == [17, 18, 19]
 
     def test_parametric_rows_line_type_local_range(self):
         sparks = self.spec()["sparklines"]
-        assert sparks[0] == {"row": 16, "type": "line", "range": "M16:O16"}
+        assert sparks[0] == {"row": 17, "type": "line", "range": "M17:O17"}
         assert sparks[1]["type"] == "line"
-        assert sparks[1]["range"] == "M17:O17"
+        assert sparks[1]["range"] == "M18:O18"
 
     def test_ftr_row_column_type(self):
         assert self.spec()["sparklines"][2] == {
-            "row": 18,
+            "row": 19,
             "type": "column",
-            "range": "M18:O18",
+            "range": "M19:O19",
         }
 
     def test_all_blank_die_row_no_sparkline(self):
@@ -1381,8 +1430,8 @@ class TestSparklines:
         assert build(tests, base_duts())[0]["sparklines"] == []
 
     def test_partially_blank_row_still_sparked(self):
-        # row 16's die 3 is blank (nan) but 1.0/1.2 are numeric
-        assert self.spec()["sparklines"][0]["range"] == "M16:O16"
+        # row 17's die 3 is blank (nan) but 1.0/1.2 are numeric
+        assert self.spec()["sparklines"][0]["range"] == "M17:O17"
 
 
 class TestTrendChunking:
@@ -1431,10 +1480,10 @@ class TestTrendChunking:
 
     def test_sparkline_ranges_span_only_chunk_dies(self):
         specs = self.specs()
-        assert specs[0]["sparklines"][0]["range"] == "M16:Q16"
-        assert specs[1]["sparklines"][0]["range"] == "M16:Q16"
-        assert specs[2]["sparklines"][0]["range"] == "M16:N16"
-        assert all(s["row"] == 16 for s in specs[2]["sparklines"])
+        assert specs[0]["sparklines"][0]["range"] == "M17:Q17"
+        assert specs[1]["sparklines"][0]["range"] == "M17:Q17"
+        assert specs[2]["sparklines"][0]["range"] == "M17:N17"
+        assert all(s["row"] == 17 for s in specs[2]["sparklines"])
 
 
 class TestOneSidedLimitRow:
@@ -1458,9 +1507,9 @@ class TestOneSidedLimitRow:
         spec = build(tests, [(1, 0, make_dut_info(part_id="D0"))])[0]
         row = spec["rows"][0]
         # formula: SUMPRODUCT guards the blank HL side — 0.5 fails low -> 1
-        assert '(F16<>"")' in row[11] and (row[5] == "")
+        assert '(F17<>"")' in row[11] and (row[5] == "")
         fv = spec["formula_values"]
-        assert fv[(16, 12)] == 1  # flags alone would say 0 — cache matches formula
+        assert fv[(17, 12)] == 1  # flags alone would say 0 — cache matches formula
 
 
 # --------------------------------------------------------------------------

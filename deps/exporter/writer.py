@@ -45,12 +45,22 @@ from deps.exporter.theme import (
     NEUTRAL_FILL_HEX,
 )
 
-# Sheet layout, mirroring matrix.py: banner 1, metadata 2..14 (13 rows),
-# header 15, data 16+.
+# Sheet layout, mirroring matrix.py: banner 1, metadata 2.. (block length
+# comes from the spec — the Head-Site split grew it to 14 rows, header 16,
+# data 17+), so the two helpers below derive the rows per spec and can
+# never drift from the spec builder.
 BANNER_ROW = 1
 METADATA_START = 2
-HEADER_ROW = 15
-DATA_START = 16
+
+
+def _header_row(spec) -> int:
+    """Absolute Excel row of the repeated header (right below the block)."""
+    return METADATA_START + len(spec["metadata_rows"])
+
+
+def _data_start(spec) -> int:
+    """Absolute Excel row of the first data row (header + 1)."""
+    return _header_row(spec) + 1
 
 BASE_COLUMN_COUNT = 12  # fixed A..L block
 ROW_HEIGHT = 22
@@ -259,11 +269,12 @@ def _render_metadata(ws, spec, theme):
 
 
 def _render_header(ws, spec, theme):
-    """Row 15: blue repeated header (part ID base); leads the AutoFilter."""
+    """The blue repeated header row (part ID base); leads the AutoFilter."""
+    header_row = _header_row(spec)
     for column, value in enumerate(spec["secondary_header"], start=1):
         _write_cell(
             ws,
-            HEADER_ROW,
+            header_row,
             column,
             value,
             theme,
@@ -272,11 +283,12 @@ def _render_header(ws, spec, theme):
             border=True,
             fill_hex=HEADER_FILL_HEX,
         )
-    ws.set_row(HEADER_ROW - 1, ROW_HEIGHT)
+    ws.set_row(header_row - 1, ROW_HEIGHT)
 
 
 def _render_data_rows(ws, spec, theme):
-    """Rows 16+: body cells, per-row die number formats, group styling.
+    """Data rows (first one right below the header): body cells, per-row die
+    number formats, group styling.
 
     SpecMin/SpecMax (E/F) carry a static neutral yellow fill on every data
     row (2026-11-10), overriding the group banding there; Test/Param keep
@@ -295,8 +307,9 @@ def _render_data_rows(ws, spec, theme):
     neutral = NEUTRAL_FILL_HEX
     group = GROUP_FILL_HEX
 
+    data_start = _data_start(spec)
     for offset, values in enumerate(spec["rows"]):
-        row = DATA_START + offset
+        row = data_start + offset
         is_pf = len(values) > 3 and values[3] == "P/F"
         band = offset in banded_offsets
         boundary = offset in boundaries
@@ -509,10 +522,11 @@ def _hide_mirror_columns(ws, spec, theme):
     if count > 0:
         first0 = _col0(first)
         ws.set_column(first0, first0 + count - 1, None, None, {"hidden": True})
+    header_row = _header_row(spec)
     for offset in range(count):
         _write_cell(
             ws,
-            HEADER_ROW,
+            header_row,
             _col0(first) + offset + 1,
             MIRROR_HEADER_TEXT,
             theme,
@@ -622,7 +636,8 @@ def render_matrix_sheet(ws, spec: dict, theme) -> None:
     # NO set_paper here: the wave-8 ruling gives A4 to the Bin sheet ONLY —
     # the DUT Summary keeps fit-to-page with no explicit paper size
     ws.fit_to_pages(1, 0)
-    ws.repeat_rows(HEADER_ROW - 1, HEADER_ROW - 1)
+    header_row0 = _header_row(spec) - 1
+    ws.repeat_rows(header_row0, header_row0)
 
 
 def write_plain_row(

@@ -37,22 +37,23 @@ BASE_HEADERS = [
     "Fails",
 ]
 
-# Layout (2026-11-10): banner 1, metadata 2..14, header 15, data 16+.
-DATA_START = 16
-HEADER_ROW = 15
+# Layout (2026-11-13 Head-Site split): banner 1, metadata 2..15 (14 rows),
+# header 16, data 17+.
+DATA_START = 17
+HEADER_ROW = 16
 
 SCIENTIFIC = "0.00E+00"
 
 # Ninth wave: J = Cp, K = Cpk — both embed STDEV over the die range.
-CP_16 = '=IFERROR((F16-E16)/(6*STDEV(M16:O16)),"")'
 CP_17 = '=IFERROR((F17-E17)/(6*STDEV(M17:O17)),"")'
 CP_18 = '=IFERROR((F18-E18)/(6*STDEV(M18:O18)),"")'
-CPK_16 = '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:O16)),(I16-E16)/(3*STDEV(M16:O16))),"")'
+CP_19 = '=IFERROR((F19-E19)/(6*STDEV(M19:O19)),"")'
 CPK_17 = '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:O17)),(I17-E17)/(3*STDEV(M17:O17))),"")'
 CPK_18 = '=IFERROR(MIN((F18-I18)/(3*STDEV(M18:O18)),(I18-E18)/(3*STDEV(M18:O18))),"")'
-FAILS_LIMITS_16 = '=IFERROR(SUMPRODUCT((M16:O16<>"")*((E16<>"")*(M16:O16<E16)+(F16<>"")*(M16:O16>F16))),"")'
-FAILS_LIMITS_18 = '=IFERROR(SUMPRODUCT((M18:O18<>"")*((E18<>"")*(M18:O18<E18)+(F18<>"")*(M18:O18>F18))),"")'
-FAILS_FLAGS_17 = '=IFERROR(SUMPRODUCT((S17:U17<>"")*(S17:U17=1)),"")'
+CPK_19 = '=IFERROR(MIN((F19-I19)/(3*STDEV(M19:O19)),(I19-E19)/(3*STDEV(M19:O19))),"")'
+FAILS_LIMITS_17 = '=IFERROR(SUMPRODUCT((M17:O17<>"")*((E17<>"")*(M17:O17<E17)+(F17<>"")*(M17:O17>F17))),"")'
+FAILS_LIMITS_19 = '=IFERROR(SUMPRODUCT((M19:O19<>"")*((E19<>"")*(M19:O19<E19)+(F19<>"")*(M19:O19>F19))),"")'
+FAILS_FLAGS_18 = '=IFERROR(SUMPRODUCT((S18:U18<>"")*(S18:U18=1)),"")'
 
 METADATA_NAMES = [
     "File ID",
@@ -64,7 +65,8 @@ METADATA_NAMES = [
     "Wafer",
     "X",
     "Y",
-    "Head-Site",
+    "Head",
+    "Site",
     "Tests Executed",
     "Test Time",
     "DUT Flag",
@@ -96,7 +98,7 @@ def make_metadata_rows():
 
 def make_rows():
     return [
-        # parametric with limits (row 16): Test# leads the base cells
+        # parametric with limits (row 17): Test# leads the base cells
         [
             10,
             "0_TXCC",
@@ -104,12 +106,12 @@ def make_rows():
             "V",
             0.5,
             1.5,
-            '=IFERROR(MIN(M16:O16),"")',
-            '=IFERROR(MAX(M16:O16),"")',
-            '=IFERROR(AVERAGE(M16:O16),"")',
-            CP_16,
-            CPK_16,
-            FAILS_LIMITS_16,
+            '=IFERROR(MIN(M17:O17),"")',
+            '=IFERROR(MAX(M17:O17),"")',
+            '=IFERROR(AVERAGE(M17:O17),"")',
+            CP_17,
+            CPK_17,
+            FAILS_LIMITS_17,
             1.0,
             1.2,
             "",
@@ -120,7 +122,7 @@ def make_rows():
             0,
             "",
         ],
-        # parametric without limits (row 17): mirror-driven FAILS
+        # parametric without limits (row 18): mirror-driven FAILS
         [
             11,
             "1_RX",
@@ -128,12 +130,12 @@ def make_rows():
             "dB",
             "",
             "",
-            '=IFERROR(MIN(M17:O17),"")',
-            '=IFERROR(MAX(M17:O17),"")',
-            '=IFERROR(AVERAGE(M17:O17),"")',
-            CP_17,
-            CPK_17,
-            FAILS_FLAGS_17,
+            '=IFERROR(MIN(M18:O18),"")',
+            '=IFERROR(MAX(M18:O18),"")',
+            '=IFERROR(AVERAGE(M18:O18),"")',
+            CP_18,
+            CPK_18,
+            FAILS_FLAGS_18,
             2.0,
             0.1,
             3.0,
@@ -144,7 +146,7 @@ def make_rows():
             1,
             0,
         ],
-        # FTR row (row 18): Unit "P/F", synthetic real limits ±0.999999
+        # FTR row (row 19): Unit "P/F", synthetic real limits ±0.999999
         # (third wave), die cells carry 0/1 flags
         [
             12,
@@ -153,12 +155,12 @@ def make_rows():
             "P/F",
             -0.999999,
             0.999999,
-            '=IFERROR(MIN(M18:O18),"")',
-            '=IFERROR(MAX(M18:O18),"")',
-            '=IFERROR(AVERAGE(M18:O18),"")',
-            CP_18,
-            CPK_18,
-            FAILS_LIMITS_18,
+            '=IFERROR(MIN(M19:O19),"")',
+            '=IFERROR(MAX(M19:O19),"")',
+            '=IFERROR(AVERAGE(M19:O19),"")',
+            CP_19,
+            CPK_19,
+            FAILS_LIMITS_19,
             0,
             1,
             0,
@@ -179,7 +181,7 @@ def make_matrix_spec(**overrides):
         "headers": BASE_HEADERS + [1, 2, 3, "", "Trend"],
         "metadata_rows": make_metadata_rows(),
         "masked_rows": [8],  # "Wafer" row
-        # repeated header row 15: part ID base (duplicated + blank)
+        # repeated header row 16: part ID base (duplicated + blank)
         "secondary_header": BASE_HEADERS + ["SN541", "SN541", "", "", "Trend"],
         "rows": make_rows(),
         "formula_columns": [6, 7, 8, 9, 10, 11],
@@ -197,20 +199,20 @@ def make_matrix_spec(**overrides):
             "Cpk": "0.00",
             "Test#": "0",
         },
-        "freeze_panes": "M16",
+        "freeze_panes": "M17",
         "row_groups": [0, 1, 2],
         "die_columns": ["M", "N", "O"],
         "flag_first_col": "S",
         "trend_col": "Q",
         "conditional_formatting": {
-            "die_rules": {"range": "M16:O18", "first_die": "M", "flag_col_offset": 6},
-            "cp_range": "J16:J18",
-            "cpk_range": "K16:K18",
-            "fails_range": "L16:L18",
+            "die_rules": {"range": "M17:O19", "first_die": "M", "flag_col_offset": 6},
+            "cp_range": "J17:J19",
+            "cpk_range": "K17:K19",
+            "fails_range": "L17:L19",
             "fails_max": 0.6,
-            "dut_flag_range": "M14:O14",
+            "dut_flag_range": "M15:O15",
         },
-        "auto_filter": {"ref": "A15:O18"},
+        "auto_filter": {"ref": "A16:O19"},
     }
     spec.update(overrides)
     return spec
@@ -295,18 +297,18 @@ class TestMatrixLayout:
 
     def test_repeated_header_secondary_values_and_style(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["A15"].value == "Test#"
-        assert ws["M15"].value == "SN541"
-        assert ws["N15"].value == "SN541"  # duplicate display text kept
-        assert ws["O15"].value in ("", None)  # blank display kept
-        assert ws["A15"].fill.fgColor.rgb == "FF1E40AF"
-        assert ws.row_dimensions[15].height == pytest.approx(22, abs=0.26)
+        assert ws["A16"].value == "Test#"
+        assert ws["M16"].value == "SN541"
+        assert ws["N16"].value == "SN541"  # duplicate display text kept
+        assert ws["O16"].value in ("", None)  # blank display kept
+        assert ws["A16"].fill.fgColor.rgb == "FF1E40AF"
+        assert ws.row_dimensions[16].height == pytest.approx(22, abs=0.26)
 
     def test_data_formula_survives_reload(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["G16"].value == '=IFERROR(MIN(M16:O16),"")'
-        assert ws["K17"].value == CPK_17
-        assert ws["L18"].value == FAILS_LIMITS_18
+        assert ws["G17"].value == '=IFERROR(MIN(M17:O17),"")'
+        assert ws["K18"].value == CPK_18
+        assert ws["L19"].value == FAILS_LIMITS_19
 
     def test_metadata_label_font_and_formulas(self):
         ws = self.wb()["DUT Summary"]
@@ -337,14 +339,14 @@ class TestMatrixLayout:
 
     def test_freeze_and_gridlines(self):
         ws = self.wb()["DUT Summary"]
-        assert ws.freeze_panes == "M16"
+        assert ws.freeze_panes == "M17"
         assert ws.sheet_view.showGridLines is False
 
     def test_repeat_rows_header_row(self):
-        # final-review fix 5: the blue header (row 15) repeats on every
+        # final-review fix 5: the blue header (row 16) repeats on every
         # printed page (spec §10 repeat_rows read-back)
         ws = self.wb()["DUT Summary"]
-        assert ws.print_title_rows == "$15:$15"
+        assert ws.print_title_rows == "$16:$16"
 
     def test_print_setup_fit_to_page(self):
         # xlsxwriter writes fitToHeight=0 + <pageSetUpPr fitToPage="1"/>;
@@ -356,34 +358,34 @@ class TestMatrixLayout:
 
     def test_number_formats_per_row_type(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["A16"].number_format == "0"  # Test# (column A)
-        assert ws["E16"].number_format == SCIENTIFIC  # SpecMin
-        assert ws["F16"].number_format == SCIENTIFIC  # SpecMax
-        assert ws["G16"].number_format == SCIENTIFIC  # Min
-        assert ws["H17"].number_format == SCIENTIFIC  # Max
-        assert ws["I17"].number_format == SCIENTIFIC  # Mean
-        assert ws["J17"].number_format == "0.00"  # Cp (ninth wave: no scientific)
-        assert ws["K16"].number_format == "0.00"  # Cpk
-        assert ws["L16"].number_format == "0"  # Fails
-        assert ws["M16"].number_format == SCIENTIFIC  # parametric die cell
-        assert ws["O17"].number_format == SCIENTIFIC
-        assert ws["E18"].number_format == SCIENTIFIC  # FTR synthetic SpecMin
-        assert ws["M18"].number_format == "0"  # FTR (P/F) die cell
-        assert ws["O18"].number_format == "0"
+        assert ws["A17"].number_format == "0"  # Test# (column A)
+        assert ws["E17"].number_format == SCIENTIFIC  # SpecMin
+        assert ws["F17"].number_format == SCIENTIFIC  # SpecMax
+        assert ws["G17"].number_format == SCIENTIFIC  # Min
+        assert ws["H18"].number_format == SCIENTIFIC  # Max
+        assert ws["I18"].number_format == SCIENTIFIC  # Mean
+        assert ws["J18"].number_format == "0.00"  # Cp (ninth wave: no scientific)
+        assert ws["K17"].number_format == "0.00"  # Cpk
+        assert ws["L17"].number_format == "0"  # Fails
+        assert ws["M17"].number_format == SCIENTIFIC  # parametric die cell
+        assert ws["O18"].number_format == SCIENTIFIC
+        assert ws["E19"].number_format == SCIENTIFIC  # FTR synthetic SpecMin
+        assert ws["M19"].number_format == "0"  # FTR (P/F) die cell
+        assert ws["O19"].number_format == "0"
 
     def test_cp_column_never_scientific(self):
         # ninth wave regression guard: J held St. Dev. (scientific) before;
         # as Cp it gets "0.00" via the fixed-column map on every data row
         ws = self.wb()["DUT Summary"]
-        for cell in ("J16", "J17", "J18"):
+        for cell in ("J17", "J18", "J19"):
             assert ws[cell].number_format == "0.00", cell
 
     def test_data_cell_values_follow_new_column_order(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["A16"].value == 10  # Test#
-        assert ws["B16"].value == "0_TXCC"  # Test
-        assert ws["C16"].value == "VCCC_ASIC"  # Param
-        assert ws["D18"].value == "P/F"
+        assert ws["A17"].value == 10  # Test#
+        assert ws["B17"].value == "0_TXCC"  # Test
+        assert ws["C17"].value == "VCCC_ASIC"  # Param
+        assert ws["D19"].value == "P/F"
 
 
 # --------------------------------------------------------------------------
@@ -426,10 +428,10 @@ class TestMatrixAlignment:
 
     def test_data_rows_test_right_param_left(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["B16"].alignment.horizontal == "right"  # Test name
-        assert ws["C16"].alignment.horizontal == "left"  # Param
-        assert ws["A16"].alignment.horizontal == "center"  # Test#
-        assert ws["D16"].alignment.horizontal == "center"  # Unit
+        assert ws["B17"].alignment.horizontal == "right"  # Test name
+        assert ws["C17"].alignment.horizontal == "left"  # Param
+        assert ws["A17"].alignment.horizontal == "center"  # Test#
+        assert ws["D17"].alignment.horizontal == "center"  # Unit
 
     def test_metadata_rows_test_right_param_left(self):
         ws = self.wb()["DUT Summary"]
@@ -438,15 +440,15 @@ class TestMatrixAlignment:
 
     def test_vertical_center_kept(self):
         ws = self.wb()["DUT Summary"]
-        assert ws["B16"].alignment.vertical == "center"
+        assert ws["B17"].alignment.vertical == "center"
         assert ws["C2"].alignment.vertical == "center"
 
     def test_banner_and_header_keep_centered(self):
         ws = self.wb()["DUT Summary"]
         assert ws["A1"].alignment.horizontal == "center"  # banner
         assert ws["B1"].alignment.horizontal == "center"
-        assert ws["A15"].alignment.horizontal == "center"  # blue header
-        assert ws["B15"].alignment.horizontal == "center"
+        assert ws["A16"].alignment.horizontal == "center"  # blue header
+        assert ws["B16"].alignment.horizontal == "center"
 
 
 # --------------------------------------------------------------------------
@@ -460,30 +462,30 @@ class TestSpecMinMaxStaticFill:
 
     def test_metadata_rows_yellow(self):
         ws = self.wb()["DUT Summary"]
-        for cell in ("E2", "F2", "E9", "F14"):
+        for cell in ("E2", "F2", "E9", "F15"):
             assert ws[cell].fill.fgColor.rgb == "FFFFF3CD", cell
 
     def test_data_rows_yellow(self):
         ws = self.wb()["DUT Summary"]
-        for cell in ("E16", "F16", "E17", "F17", "E18", "F18"):
+        for cell in ("E17", "F17", "E18", "F18", "E19", "F19"):
             assert ws[cell].fill.fgColor.rgb == "FFFFF3CD", cell
 
     def test_yellow_overrides_group_banding_on_ef(self):
         ws = self.wb()["DUT Summary"]
-        # row 17 sits in the banded odd group, but E/F stay yellow
-        assert ws["A17"].fill.fgColor.rgb == "FFE9EEF6"
-        assert ws["E17"].fill.fgColor.rgb == "FFFFF3CD"
-        assert ws["F17"].fill.fgColor.rgb == "FFFFF3CD"
+        # row 18 sits in the banded odd group, but E/F stay yellow
+        assert ws["A18"].fill.fgColor.rgb == "FFE9EEF6"
+        assert ws["E18"].fill.fgColor.rgb == "FFFFF3CD"
+        assert ws["F18"].fill.fgColor.rgb == "FFFFF3CD"
 
     def test_other_columns_not_filled(self):
         ws = self.wb()["DUT Summary"]
-        for cell in ("A16", "D16", "G16", "L16", "M16"):
+        for cell in ("A17", "D17", "G17", "L17", "M17"):
             assert ws[cell].fill.patternType is None, cell
 
     def test_banner_and_header_keep_own_fills(self):
         ws = self.wb()["DUT Summary"]
         assert ws["E1"].fill.fgColor.rgb == "FFCBD5E1"  # banner
-        assert ws["E15"].fill.fgColor.rgb == "FF1E40AF"  # blue header
+        assert ws["E16"].fill.fgColor.rgb == "FF1E40AF"  # blue header
 
 
 # --------------------------------------------------------------------------
@@ -501,14 +503,14 @@ class TestMatrixConditionalFormatting:
         # on them. Remaining set: blank-neutral, fail-low, fail-high,
         # flag-mirror, pass.
         ws = self.wb()["DUT Summary"]
-        rules = cf_block(ws, "M16:O18")
+        rules = cf_block(ws, "M17:O19")
         assert len(rules) >= 3
         assert [r.formula for r in rules] == [
-            ['M16=""'],
-            ['AND(M16<>"",$E16<>"",M16<$E16)'],
-            ['AND(M16<>"",$F16<>"",M16>$F16)'],
-            ['AND(S16=1,$E16="",$F16="")'],
-            ['M16<>""'],
+            ['M17=""'],
+            ['AND(M17<>"",$E17<>"",M17<$E17)'],
+            ['AND(M17<>"",$F17<>"",M17>$F17)'],
+            ['AND(S17=1,$E17="",$F17="")'],
+            ['M17<>""'],
         ]
         assert all(r.stopIfTrue for r in rules)
         priorities = [r.priority for r in rules]
@@ -527,12 +529,12 @@ class TestMatrixConditionalFormatting:
 
     def test_cpk_bands(self):
         ws = self.wb()["DUT Summary"]
-        rules = cf_block(ws, "K16:K18")
+        rules = cf_block(ws, "K17:K19")
         assert [r.formula for r in rules] == [
-            ["AND(ISNUMBER(K16),K16>=1.67)"],
-            ["AND(ISNUMBER(K16),K16>=1.33)"],
-            ["AND(ISNUMBER(K16),K16>=1)"],
-            ["AND(ISNUMBER(K16),K16<1)"],
+            ["AND(ISNUMBER(K17),K17>=1.67)"],
+            ["AND(ISNUMBER(K17),K17>=1.33)"],
+            ["AND(ISNUMBER(K17),K17>=1)"],
+            ["AND(ISNUMBER(K17),K17<1)"],
         ]
         assert [r.stopIfTrue for r in rules] == [
             True,
@@ -546,14 +548,14 @@ class TestMatrixConditionalFormatting:
     def test_cp_column_banded_like_cpk(self):
         # ninth wave left the DUT Summary Cp column (J) unbanded; the user
         # then asked for the same Cpk-style bands there — identical four
-        # ISNUMBER-guarded rules on J16:J18.
+        # ISNUMBER-guarded rules on J17:J19.
         ws = self.wb()["DUT Summary"]
-        rules = cf_block(ws, "J16:J18")
+        rules = cf_block(ws, "J17:J19")
         assert [r.formula for r in rules] == [
-            ["AND(ISNUMBER(J16),J16>=1.67)"],
-            ["AND(ISNUMBER(J16),J16>=1.33)"],
-            ["AND(ISNUMBER(J16),J16>=1)"],
-            ["AND(ISNUMBER(J16),J16<1)"],
+            ["AND(ISNUMBER(J17),J17>=1.67)"],
+            ["AND(ISNUMBER(J17),J17>=1.33)"],
+            ["AND(ISNUMBER(J17),J17>=1)"],
+            ["AND(ISNUMBER(J17),J17<1)"],
         ]
         assert [r.stopIfTrue for r in rules] == [
             True,
@@ -566,7 +568,7 @@ class TestMatrixConditionalFormatting:
 
     def test_fails_color_scale(self):
         ws = self.wb()["DUT Summary"]
-        rules = cf_block(ws, "L16:L18")
+        rules = cf_block(ws, "L17:L19")
         assert len(rules) == 1
         scale = rules[0].colorScale
         assert [(v.type, v.val) for v in scale.cfvo] == [("num", 0.0), ("num", 0.6)]
@@ -575,17 +577,17 @@ class TestMatrixConditionalFormatting:
         assert rgbs[1].endswith("FFCCCC")
 
     def test_dut_flag_status_rules_on_die_cells_only(self):
-        # fourth wave: the DUT Flag metadata row (Excel row 14) carries three
-        # status rules on its DIE cells only — the base cells (A..L14) are
+        # fourth wave: the DUT Flag metadata row (Excel row 15) carries three
+        # status rules on its DIE cells only — the base cells (A..L15) are
         # never in the range. Superseded (neutral yellow) first, then Fail
         # (red; upstream values are "Failed - 0xNN"), then Pass (green),
         # all stopIfTrue with case-insensitive SEARCH.
         ws = self.wb()["DUT Summary"]
-        rules = cf_block(ws, "M14:O14")
+        rules = cf_block(ws, "M15:O15")
         assert [r.formula for r in rules] == [
-            ['ISNUMBER(SEARCH("Superseded",M14))'],
-            ['ISNUMBER(SEARCH("Fail",M14))'],
-            ['ISNUMBER(SEARCH("Pass",M14))'],
+            ['ISNUMBER(SEARCH("Superseded",M15))'],
+            ['ISNUMBER(SEARCH("Fail",M15))'],
+            ['ISNUMBER(SEARCH("Pass",M15))'],
         ]
         assert all(r.stopIfTrue for r in rules)
         fills = [dxf_fill_hex(r) for r in rules]
@@ -595,7 +597,7 @@ class TestMatrixConditionalFormatting:
         assert all(
             ref.split(":")[0][0] not in "ABCDEFGHIJKL"
             for ref in refs
-            if "14" in ref.split(":")[0]
+            if "15" in ref.split(":")[0]
         )
 
     def test_dut_flag_row_visible_and_unstyled_without_key(self):
@@ -605,32 +607,32 @@ class TestMatrixConditionalFormatting:
         del spec["conditional_formatting"]["dut_flag_range"]
         ws = roundtrip(render(spec))["DUT Summary"]
         with pytest.raises(AssertionError):
-            cf_block(ws, "M14:O14")
-        assert ws.row_dimensions[14].hidden is not True
+            cf_block(ws, "M15:O15")
+        assert ws.row_dimensions[15].hidden is not True
 
     def test_dut_flag_rules_shift_with_die_columns(self):
-        # single-die chunk: the spec range is M14:M14 (openpyxl stores the
-        # single cell as "M14") and the formulas anchor on M14
+        # single-die chunk: the spec range is M15:M15 (openpyxl stores the
+        # single cell as "M15") and the formulas anchor on M15
         spec = make_matrix_spec(
             die_columns=["M"],
             conditional_formatting={
                 "die_rules": {
-                    "range": "M16:M18",
+                    "range": "M17:M19",
                     "first_die": "M",
                     "flag_col_offset": 4,
                 },
-                "cpk_range": "K16:K18",
-                "fails_range": "L16:L18",
+                "cpk_range": "K17:K19",
+                "fails_range": "L17:L19",
                 "fails_max": 0.2,
-                "dut_flag_range": "M14:M14",
+                "dut_flag_range": "M15:M15",
             },
         )
         ws = roundtrip(render(spec))["DUT Summary"]
-        rules = cf_block(ws, "M14")
+        rules = cf_block(ws, "M15")
         assert [r.formula[0] for r in rules] == [
-            'ISNUMBER(SEARCH("Superseded",M14))',
-            'ISNUMBER(SEARCH("Fail",M14))',
-            'ISNUMBER(SEARCH("Pass",M14))',
+            'ISNUMBER(SEARCH("Superseded",M15))',
+            'ISNUMBER(SEARCH("Fail",M15))',
+            'ISNUMBER(SEARCH("Pass",M15))',
         ]
 
 
@@ -645,24 +647,24 @@ class TestMatrixRowGroups:
 
     def test_group_boundary_heavier_top_border(self):
         ws = self.wb()["DUT Summary"]
-        # row_groups [0,1,2]: boundaries at data rows 17 and 18, columns A..L
-        for cell in ("A17", "F17", "L17", "L18"):
+        # row_groups [0,1,2]: boundaries at data rows 18 and 19, columns A..L
+        for cell in ("A18", "F18", "L18", "L19"):
             top = ws[cell].border.top
             assert top.style == "medium"
             assert top.color.rgb.endswith("94A3B8")
         # non-boundary row keeps the thin border
-        assert ws["A16"].border.top.style == "thin"
-        assert ws["A16"].border.top.color.rgb == "FFDBEAFE"
+        assert ws["A17"].border.top.style == "thin"
+        assert ws["A17"].border.top.color.rgb == "FFDBEAFE"
 
     def test_odd_group_banding_on_fixed_columns(self):
         ws = self.wb()["DUT Summary"]
-        # groups 0/1/2 on rows 16/17/18: odd group index (1) -> row 17 banded
-        assert ws["A17"].fill.fgColor.rgb == "FFE9EEF6"
-        assert ws["L17"].fill.fgColor.rgb == "FFE9EEF6"
-        assert ws["A16"].fill.patternType is None
-        assert ws["A18"].fill.patternType is None
+        # groups 0/1/2 on rows 17/18/19: odd group index (1) -> row 18 banded
+        assert ws["A18"].fill.fgColor.rgb == "FFE9EEF6"
+        assert ws["L18"].fill.fgColor.rgb == "FFE9EEF6"
+        assert ws["A17"].fill.patternType is None
+        assert ws["A19"].fill.patternType is None
         # banding stops at column L: die cells keep CF free rein
-        assert ws["M17"].fill.patternType is None
+        assert ws["M18"].fill.patternType is None
 
 
 # --------------------------------------------------------------------------
@@ -680,11 +682,11 @@ class TestMatrixAutoFilter:
         # ("SN541" twice) is legal for autofilters — the ref still covers
         # the full header..last-data range, and no Excel Table is written.
         ws = self.wb()["DUT Summary"]
-        assert ws.auto_filter.ref == "A15:O18"
+        assert ws.auto_filter.ref == "A16:O19"
         assert list(ws.tables) == []  # no /xl/tables/table1.xml anymore
-        assert ws["M15"].value == "SN541"
-        assert ws["N15"].value == "SN541"
-        assert ws["A15"].value == "Test#"
+        assert ws["M16"].value == "SN541"
+        assert ws["N16"].value == "SN541"
+        assert ws["A16"].value == "Test#"
 
     def test_no_auto_filter_without_spec_key(self):
         spec = make_matrix_spec(
@@ -692,12 +694,12 @@ class TestMatrixAutoFilter:
             row_groups=[],
             conditional_formatting={
                 "die_rules": {
-                    "range": "M16:M16",
+                    "range": "M17:M17",
                     "first_die": "M",
                     "flag_col_offset": 4,
                 },
-                "cpk_range": "K16:K16",
-                "fails_range": "L16:L16",
+                "cpk_range": "K17:K17",
+                "fails_range": "L17:L17",
                 "fails_max": 0.2,
             },
         )
@@ -720,27 +722,27 @@ class TestMatrixMirrorsAndSanitization:
         ws = self.wb()["DUT Summary"]
         for letter in ("S", "T", "U"):
             assert col_dim(ws, letter).hidden is True
-            header = ws[f"{letter}15"]
+            header = ws[f"{letter}16"]
             assert header.value == "flags (do not edit)"
             assert header.fill.fgColor.rgb == "FFCBD5E1"
         # spacer P, Trend Q, spacer R all stay visible
         for letter in ("P", "Q", "R"):
             dim = col_dim(ws, letter)
             assert dim is None or not dim.hidden
-        assert ws["S16"].value == 0  # mirror flag data still written
+        assert ws["S17"].value == 0  # mirror flag data still written
 
     def test_illegal_characters_sanitized(self):
         spec = make_matrix_spec()
         spec["rows"][0][1] = "bad\x00name"  # Test name (column B)
         spec["metadata_rows"][1][12] = "SN\x00541"  # Part ID die value
         ws = roundtrip(render(spec))["DUT Summary"]
-        assert ws["B16"].value == "badname"
+        assert ws["B17"].value == "badname"
         assert ws["M3"].value == "SN541"
 
     def test_formulas_not_mangled(self):
         # formula cells pass through sanitize untouched
         ws = self.wb()["DUT Summary"]
-        assert ws["L16"].value == FAILS_LIMITS_16
+        assert ws["L17"].value == FAILS_LIMITS_17
 
 
 # --------------------------------------------------------------------------
@@ -1048,18 +1050,19 @@ class TestRealSpecIntegration:
         spec = build(base_tests(), base_duts())[0]
         wb = render(spec)
         # masked rows of the real fixture: File ID 2, Wafer 8, X 9, Y 10,
-        # Head-Site 11, Test Time 13 (fourth wave: DUT Flag 14 stays visible)
-        for row in (2, 8, 9, 10, 11, 13):
+        # Head/Site 11/12 (constant stubs), Test Time 14 (fourth wave: DUT
+        # Flag 15 stays visible)
+        for row in (2, 8, 9, 10, 11, 12, 14):
             assert wb["DUT Summary"].row_dimensions[row].hidden is True
-        assert wb["DUT Summary"].row_dimensions[14].hidden is not True
+        assert wb["DUT Summary"].row_dimensions[15].hidden is not True
         ws = roundtrip(wb)["DUT Summary"]
-        assert ws["A16"].value == 10
-        assert ws["B16"].value == "0_TXCC"
-        assert ws["D18"].value == "P/F"
-        assert ws["M15"].value == "SN541"
+        assert ws["A17"].value == 10
+        assert ws["B17"].value == "0_TXCC"
+        assert ws["D19"].value == "P/F"
+        assert ws["M16"].value == "SN541"
         assert ws["M1"].value == 1
-        assert ws.auto_filter.ref == "A15:O18"
-        assert cf_block(ws, "M16:O18")  # die-range CF present on the real spec
+        assert ws.auto_filter.ref == "A16:O19"
+        assert cf_block(ws, "M17:O19")  # die-range CF present on the real spec
 
 
 # --------------------------------------------------------------------------
@@ -1172,24 +1175,24 @@ class TestMatrixCachedValues:
         # caches for the fixture rows (dies [1.0, 1.2, blank] etc. — the
         # same numbers the real builder would compute)
         spec["formula_values"] = {
-            (16, 7): 1.0,
-            (16, 8): 1.2,
-            (16, 9): 1.1,
-            (16, 10): "",
-            (16, 11): "",
-            (16, 12): 0,
-            (17, 7): 0.1,
-            (17, 8): 3.0,
-            (17, 9): 1.7,
+            (17, 7): 1.0,
+            (17, 8): 1.2,
+            (17, 9): 1.1,
             (17, 10): "",
             (17, 11): "",
-            (17, 12): 1,
-            (18, 7): 0.0,
-            (18, 8): 1.0,
-            (18, 9): 1 / 3,
-            (18, 10): 0.3333332538249627,
-            (18, 11): 0.3333332538249627,
+            (17, 12): 0,
+            (18, 7): 0.1,
+            (18, 8): 3.0,
+            (18, 9): 1.7,
+            (18, 10): "",
+            (18, 11): "",
             (18, 12): 1,
+            (19, 7): 0.0,
+            (19, 8): 1.0,
+            (19, 9): 1 / 3,
+            (19, 10): 0.3333332538249627,
+            (19, 11): 0.3333332538249627,
+            (19, 12): 1,
             (2, 7): 1,
             (2, 8): 1,
             (5, 7): 25.0,
@@ -1201,16 +1204,16 @@ class TestMatrixCachedValues:
 
         ws = load_workbook(io.BytesIO(book), data_only=True)["DUT Summary"]
         formula_cells = {
-            "G16": (16, 7),
-            "H16": (16, 8),
-            "I16": (16, 9),
-            "J16": (16, 10),
-            "K16": (16, 11),
-            "L16": (16, 12),
             "G17": (17, 7),
+            "H17": (17, 8),
+            "I17": (17, 9),
+            "J17": (17, 10),
+            "K17": (17, 11),
             "L17": (17, 12),
             "G18": (18, 7),
             "L18": (18, 12),
+            "G19": (19, 7),
+            "L19": (19, 12),
         }
         expected = spec["formula_values"]
         for cell, key in formula_cells.items():
@@ -1232,12 +1235,12 @@ class TestMatrixCachedValues:
                     "V",
                     0.0,
                     1.0,
-                    '=IFERROR(MIN(M16:O16),"")',
-                    '=IFERROR(MAX(M16:O16),"")',
-                    '=IFERROR(AVERAGE(M16:O16),"")',
-                    CP_16,
-                    CPK_16,
-                    FAILS_LIMITS_16,
+                    '=IFERROR(MIN(M17:O17),"")',
+                    '=IFERROR(MAX(M17:O17),"")',
+                    '=IFERROR(AVERAGE(M17:O17),"")',
+                    CP_17,
+                    CPK_17,
+                    FAILS_LIMITS_17,
                     "",
                     "",
                     "",
@@ -1252,26 +1255,26 @@ class TestMatrixCachedValues:
             row_groups=[0],
         )
         spec["formula_values"] = {
-            (16, 7): 0,  # IFERROR(MIN(...),""): empty range computes 0
-            (16, 8): 0,
-            (16, 9): "",  # AVERAGE errors on empty -> blank
-            (16, 10): "",
-            (16, 11): "",
-            (16, 12): 0,  # SUMPRODUCT never errors
+            (17, 7): 0,  # IFERROR(MIN(...),""): empty range computes 0
+            (17, 8): 0,
+            (17, 9): "",  # AVERAGE errors on empty -> blank
+            (17, 10): "",
+            (17, 11): "",
+            (17, 12): 0,  # SUMPRODUCT never errors
         }
-        spec["auto_filter"] = {"ref": "A15:O16"}
-        spec["conditional_formatting"]["die_rules"]["range"] = "M16:O16"
+        spec["auto_filter"] = {"ref": "A16:O17"}
+        spec["conditional_formatting"]["die_rules"]["range"] = "M17:O17"
         book = render_matrix_bytes(spec)
         from openpyxl import load_workbook
 
         ws = load_workbook(io.BytesIO(book), data_only=True)["DUT Summary"]
-        assert ws["G16"].value == 0  # MIN of an empty range computes 0
-        assert ws["H16"].value == 0
-        for cell in ("I16", "J16", "K16"):
+        assert ws["G17"].value == 0  # MIN of an empty range computes 0
+        assert ws["H17"].value == 0
+        for cell in ("I17", "J17", "K17"):
             assert ws[cell].value in ("", None), cell
-        assert ws["L16"].value == 0  # SUMPRODUCT never errors
-        rules = cf_block(ws, "M16:O16")
-        assert rules[0].formula == ['M16=""']  # blank-neutral first
+        assert ws["L17"].value == 0  # SUMPRODUCT never errors
+        rules = cf_block(ws, "M17:O17")
+        assert rules[0].formula == ['M17=""']  # blank-neutral first
 
     def test_single_die_cpk_cached_blank(self):
         # Review Focus 4: n=1 — STDEV errors, Cp/Cpk cache blank, the
@@ -1285,12 +1288,12 @@ class TestMatrixCachedValues:
                     "V",
                     0.0,
                     1.0,
-                    '=IFERROR(MIN(M16:M16),"")',
-                    '=IFERROR(MAX(M16:M16),"")',
-                    '=IFERROR(AVERAGE(M16:M16),"")',
-                    '=IFERROR((F16-E16)/(6*STDEV(M16:M16)),"")',
-                    '=IFERROR(MIN((F16-I16)/(3*STDEV(M16:M16)),(I16-E16)/(3*STDEV(M16:M16))),"")',
-                    FAILS_LIMITS_16.replace("M16:O16", "M16:M16"),
+                    '=IFERROR(MIN(M17:M17),"")',
+                    '=IFERROR(MAX(M17:M17),"")',
+                    '=IFERROR(AVERAGE(M17:M17),"")',
+                    '=IFERROR((F17-E17)/(6*STDEV(M17:M17)),"")',
+                    '=IFERROR(MIN((F17-I17)/(3*STDEV(M17:M17)),(I17-E17)/(3*STDEV(M17:M17))),"")',
+                    FAILS_LIMITS_17.replace("M17:O17", "M17:M17"),
                     0.5,
                     "",
                     "",
@@ -1307,32 +1310,32 @@ class TestMatrixCachedValues:
             flag_first_col="Q",
         )
         spec["conditional_formatting"]["die_rules"] = {
-            "range": "M16:M16",
+            "range": "M17:M17",
             "first_die": "M",
             "flag_col_offset": 4,
         }
-        spec["conditional_formatting"]["cp_range"] = "J16:J16"
-        spec["conditional_formatting"]["cpk_range"] = "K16:K16"
-        spec["conditional_formatting"]["fails_range"] = "L16:L16"
+        spec["conditional_formatting"]["cp_range"] = "J17:J17"
+        spec["conditional_formatting"]["cpk_range"] = "K17:K17"
+        spec["conditional_formatting"]["fails_range"] = "L17:L17"
         spec["conditional_formatting"]["fails_max"] = 0.2
-        spec["auto_filter"] = {"ref": "A15:M16"}
+        spec["auto_filter"] = {"ref": "A16:M17"}
         spec["number_formats"]["M"] = SCIENTIFIC
         spec["formula_values"] = {
-            (16, 7): 0.5,
-            (16, 8): 0.5,
-            (16, 9): 0.5,
-            (16, 10): "",
-            (16, 11): "",
-            (16, 12): 0,
+            (17, 7): 0.5,
+            (17, 8): 0.5,
+            (17, 9): 0.5,
+            (17, 10): "",
+            (17, 11): "",
+            (17, 12): 0,
         }
         book = render_matrix_bytes(spec)
         from openpyxl import load_workbook
 
         ws = load_workbook(io.BytesIO(book), data_only=True)["DUT Summary"]
-        assert ws["J16"].value in ("", None)
-        assert ws["K16"].value in ("", None)
+        assert ws["J17"].value in ("", None)
+        assert ws["K17"].value in ("", None)
         ws2 = load_workbook(io.BytesIO(book))["DUT Summary"]
-        assert "IFERROR" in ws2["J16"].value
+        assert "IFERROR" in ws2["J17"].value
 
 
 class TestMatrixSparklines:
@@ -1345,8 +1348,8 @@ class TestMatrixSparklines:
             rows_sparks
             if rows_sparks is not None
             else [
-                {"row": 16, "type": "line", "range": "M16:O16"},
-                {"row": 18, "type": "column", "range": "M18:O18"},
+                {"row": 17, "type": "line", "range": "M17:O17"},
+                {"row": 19, "type": "column", "range": "M19:O19"},
             ]
         )
         spec["trend_col"] = "Q"
@@ -1357,8 +1360,8 @@ class TestMatrixSparklines:
         xml = read_xml(book, "xl/worksheets/sheet1.xml")
         assert "sparklineGroups" in xml
         # sheet-qualified absolute ranges
-        assert "DUT Summary!M16:O16" in xml or "'DUT Summary'!M16:O16" in xml
-        assert "DUT Summary!M18:O18" in xml or "'DUT Summary'!M18:O18" in xml
+        assert "DUT Summary!M17:O17" in xml or "'DUT Summary'!M17:O17" in xml
+        assert "DUT Summary!M19:O19" in xml or "'DUT Summary'!M19:O19" in xml
         # pinned visual tokens (2026-11-11 user ruling: high RED, low
         # GREEN — swapped — and negative points displayed, also red)
         assert 'colorSeries rgb="FF1E40AF"' in xml
@@ -1385,9 +1388,9 @@ class TestMatrixSparklines:
         # chunk-2 range must reference 'DUT Summary (2)' not the base name
         spec = self.sparkline_spec(
             [
-                {"row": 16, "type": "line", "range": "M16:O16"},
+                {"row": 17, "type": "line", "range": "M17:O17"},
             ]
         )
         book = render_matrix_bytes(spec, "DUT Summary (2)")
         xml = read_xml(book, "xl/worksheets/sheet1.xml")
-        assert "'DUT Summary (2)'!M16:O16" in xml
+        assert "'DUT Summary (2)'!M17:O17" in xml
