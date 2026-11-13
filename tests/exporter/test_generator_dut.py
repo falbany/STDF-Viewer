@@ -11,6 +11,7 @@ files — see test_sheets.py).
 """
 
 import io
+import re
 import zipfile
 from pathlib import Path
 
@@ -1500,6 +1501,84 @@ class TestDutBlockTabOrder:
             "Bin Chart",
             "Wafer W01",
         ]
+
+
+# --------------------------------------------------------------------------
+# defined-name localSheetIds (Excel repair dialog, 2026-11-13 bug)
+# --------------------------------------------------------------------------
+
+
+SHEET_NAME_IN_RANGE = re.compile(r"^(?:'([^']+)'|([^'!]+))!")
+
+
+def assert_local_sheet_ids_valid(report_path: str) -> None:
+    """Excel's validity rule for <definedName localSheetId>: the id must be
+    in range AND point at the sheet whose name the range string carries.
+
+    xlsxwriter stores the sheet's CREATION index there (workbook.py
+    _prepare_defined_names uses sheet.index), so any worksheets_objs
+    surgery (wafer base-sheet drop, DUT-block reorder) must be followed
+    by a renumber or Excel repairs the file ("Fonction supprimée: Plage
+    nommée dans la partie /xl/workbook.xml") when an id is out of range,
+    and silently mis-points Print_Titles/_FilterDatabase when it is not.
+    """
+    from xml.etree import ElementTree
+
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    rid = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+    with zipfile.ZipFile(report_path) as zf:
+        root = ElementTree.fromstring(zf.read("xl/workbook.xml"))
+    names = [s.get("name") for s in root.findall(".//m:sheets/m:sheet", ns)]
+    for defined in root.findall(".//m:definedNames/m:definedName", ns):
+        sheet_id = defined.get("localSheetId")
+        if sheet_id is None:
+            continue
+        sheet_id = int(sheet_id)
+        match = SHEET_NAME_IN_RANGE.match(defined.text or "")
+        assert match is not None, f"unparsable range {defined.text!r}"
+        pointed = match.group(1) or match.group(2)
+        assert 0 <= sheet_id < len(names), (
+            f"localSheetId {sheet_id} out of range for {len(names)} sheets "
+            f"({defined.get('name')} -> {defined.text})"
+        )
+        assert names[sheet_id] == pointed, (
+            f"localSheetId {sheet_id} points at {names[sheet_id]!r}, range "
+            f"says {pointed!r} ({defined.get('name')} -> {defined.text})"
+        )
+
+
+class TestDefinedNameSheetIds:
+    """The wafer base-sheet drop shifts final tab positions below sheets
+    appended after it (DUT chunks / temperature splits); xlsxwriter keeps
+    their CREATION index in defined-name localSheetId. Repro of the user's
+    failing case: wafer selected + no wafer data + temperature splits."""
+
+    def test_no_wafer_data_splits_ids_in_range(self, tmp_path, qapp, monkeypatch):
+        generated = build_generated(
+            tmp_path, qapp,
+            part_ids=["SN541_T25C", "SN542_T-55C", "SN543_T125.5C"],
+            split_temperature=True, monkeypatch=monkeypatch,
+            wafer_tuples=[],
+        )
+        _, _, report_path, _, _ = generated
+        assert_local_sheet_ids_valid(report_path)
+
+    def test_with_wafer_data_splits_ids_in_range(self, tmp_path, qapp, monkeypatch):
+        # the appended per-wafer sheets mask the out-of-range id as a
+        # silent wrong-sheet association — same invariant must hold
+        generated = build_generated(
+            tmp_path, qapp,
+            part_ids=["SN541_T25C", "SN542_T-55C", "SN543_T125.5C"],
+            split_temperature=True, monkeypatch=monkeypatch,
+        )
+        _, _, report_path, _, _ = generated
+        assert_local_sheet_ids_valid(report_path)
+
+    def test_no_wafer_data_no_splits(self, tmp_path, qapp):
+        # the original reported scenario, minimal form
+        generated = build_generated(tmp_path, qapp, wafer_tuples=[])
+        _, _, report_path, _, _ = generated
+        assert_local_sheet_ids_valid(report_path)
 
 
 # --------------------------------------------------------------------------

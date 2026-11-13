@@ -269,6 +269,15 @@ class ModernReportGenerator(
                 self._wb.worksheets_objs = order_dut_block(
                     self._wb.worksheets_objs, self._dut_sheet_block
                 )
+            # Defined-name localSheetIds carry the sheet's CREATION index
+            # (xlsxwriter workbook.py _prepare_defined_names reads
+            # sheet.index) — the wafer base-sheet drop and the DUT-block
+            # reorder above shift final positions, so an id can end up
+            # out of range (Excel repairs the file: "Fonction supprimée:
+            # Plage nommée") or point at the wrong sheet. Renumber to the
+            # final tab order before close.
+            for position, ws in enumerate(self._wb.worksheets_objs):
+                ws.index = position
             self._wb.close()
             # xlsxwriter gap completion (charts.py): inject the data-label
             # show* zeros + <c:plotVisOnly val="0"/> it cannot emit — run on
