@@ -890,6 +890,11 @@ class DataInterface:
         getWaferMapData dict with the per-sbin palette hexes merged in —
         one round-trip per wafer instead of separate stats/map fetches.
         '''
+        if waferTuple[0] == -1:
+            # issue #5 stacked wafer tuple: cross-wafer fail-count
+            # aggregation — no per-wafer stats/palette/BinPF machinery
+            map_data = self.getWaferMapData(waferTuple, selectSites, selectFiles)
+            return stacked_report_payload(map_data, selectSites, selectFiles)
         stats = self.getWaferStatistics([waferTuple], selectSites)
         rows = wafer_payload_rows(stats)
         map_data = self.getWaferMapData(waferTuple, selectSites, selectFiles)
@@ -928,4 +933,25 @@ def wafer_payload_rows(stats: dict) -> list:
     carries the bin counts now.
     '''
     return [[ele[0] for ele in row if ele[1] == -1] for row in stats.get("Rows", [])]
+
+
+def stacked_report_payload(map_data: dict, selectSites: list, selectFiles: list) -> dict:
+    '''
+    Flagged tab.Wafer payload for the stacked wafer tuple (issue #5):
+    getWaferMapData's stacked branch ({count: {"x", "y"}} keyed by COUNT)
+    enriched for the stacked block renderer — Info drives the block title
+    + default orientation, no Palette/BinPF/Properties (sbin machinery is
+    meaningless for fail counts). Data is keyed by COUNT, so the total
+    failed DUTs is Σ count × coords_at_that_count, not the coordinate
+    tally.
+    '''
+    data = map_data.get("Data") or {}
+    total = sum(count * len(v["x"]) for count, v in data.items())
+    coords = sum(len(v["x"]) for v in data.values())
+    rows = [[f"Total Failed DUTs: {total}",
+             f"Fail Coordinates: {coords}",
+             f"Files: {len(selectFiles)}"]]
+    map_data.setdefault("Info", (1.0, "", False, False,
+                                 "Stacked Wafer Map", list(selectSites)))
+    return {"rows": rows, "map": map_data}
 

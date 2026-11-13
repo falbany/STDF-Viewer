@@ -2,9 +2,11 @@
 wafer map): the pure helpers `wafer_bin_palette` (SharedSrc) and
 `wafer_payload_rows` (DataInterface) — the flagged fetch branch composes
 them GUI-side; the unflagged classic rows keep their trailing sbin cells.
+Issue #5 adds `stacked_report_payload` for the stacked wafer tuple
+(waferIndex == -1): cross-wafer fail-count aggregation, no sbin machinery.
 """
 
-from deps.DataInterface import wafer_payload_rows
+from deps.DataInterface import stacked_report_payload, wafer_payload_rows
 from deps.SharedSrc import wafer_bin_palette
 
 STATS = {
@@ -45,3 +47,31 @@ def test_palette_bin_pf_fallbacks():
 
 def test_palette_empty_data():
     assert wafer_bin_palette({}, {}, {}) == {}
+
+
+STACKED = {
+    "Bounds": (5, 1, 5, 1),
+    "ID": (-1, -1),
+    "Data": {1: {"x": [1, 2, 3], "y": [1, 1, 1]}, 3: {"x": [4], "y": [1]}},
+    "Statistic": {1: 1, 3: 3},
+}
+
+
+def test_stacked_rows_arithmetic():
+    # counts are the dict KEYS: total fails = 1*3 + 3*1 = 6, not 4
+    out = stacked_report_payload(STACKED, [-1], [0, 1])
+    assert out["rows"] == [
+        ["Total Failed DUTs: 6", "Fail Coordinates: 4", "Files: 2"]
+    ]
+
+
+def test_stacked_payload_enriches_info():
+    out = stacked_report_payload(STACKED, [-1], [0])
+    assert out["map"]["Info"] == (1.0, "", False, False, "Stacked Wafer Map", [-1])
+    assert "Palette" not in out["map"] and "BinPF" not in out["map"]
+
+
+def test_stacked_payload_empty():
+    out = stacked_report_payload({}, [-1], [0])
+    assert out["rows"] == [["Total Failed DUTs: 0", "Fail Coordinates: 0", "Files: 1"]]
+    assert out["map"]["Info"][4] == "Stacked Wafer Map"
