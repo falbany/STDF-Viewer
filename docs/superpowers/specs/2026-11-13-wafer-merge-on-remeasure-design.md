@@ -1,6 +1,6 @@
 # Design: Merged Wafer Bin Map when "Hide re-measured DUTs (keep latest)" is checked
 
-**Date:** 2026-11-13 · **Author:** brainstorming session (falbany + agent) · **Status:** approved-in-conversation, pending builder check
+**Date:** 2026-11-13 · **Author:** brainstorming session (falbany + agent) · **Status:** implemented (see `docs/superpowers/plans/2026-11-13-wafer-merge-on-remeasure.md`)
 
 ## Intent and why
 
