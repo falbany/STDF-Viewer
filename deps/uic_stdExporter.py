@@ -186,9 +186,11 @@ class signals(QtCore.QObject):
 
     # fork(falbany): light dutInfo-only fetch (re-measure filter, stat-only)
     retrieveDutInfoSignal = Signal(list, list, list)
-    
-    
-    
+
+    # fork(falbany): supersede ordering — File_Info timestamps + SubFid counts
+    retrieveFileDatesSignal = Signal(list)
+
+
 class reportGenerator(QtCore.QObject):
     def __init__(self, signals:signals, mutex:QtCore.QMutex, conditionWait:QtCore.QWaitCondition, reportInfo:tuple, channel:dataChannel):
         super().__init__()
@@ -259,6 +261,16 @@ class reportGenerator(QtCore.QObject):
         # (stat-only exports; Part ID + DUT Flag suffice for the drop-set)
         self.mutex.lock()
         self.retrieveDutInfoSignal.emit(selectedHeads, selectedSites, selectedFiles)
+        self.condWait.wait(self.mutex)
+        self.mutex.unlock()
+        return self.channel.dataListChannel
+
+
+    def waitForFileDates(self, fids: list[int]) -> dict:
+        # fork(falbany): supersede ordering — per-Fid SubFid counts + STDF
+        # timestamps (merge mode ranks by fid, open mode by timestamps)
+        self.mutex.lock()
+        self.retrieveFileDatesSignal.emit(fids)
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         return self.channel.dataListChannel
@@ -680,6 +692,7 @@ class progressDisplayer(QtWidgets.QDialog):
         self.signals.retrieveTableDataSignal.connect(self.getTableDataFromParent)
         self.signals.retrieveDutSummarySignal.connect(self.getDutSummaryFromParent)
         self.signals.retrieveDutInfoSignal.connect(self.getDutInfoFromParent)  # fork(falbany): re-measure filter
+        self.signals.retrieveFileDatesSignal.connect(self.getFileDatesFromParent)  # fork(falbany): supersede ordering
         
         
     # fork(falbany): pluggable report generator
@@ -801,6 +814,15 @@ class progressDisplayer(QtWidgets.QDialog):
     def getDutInfoFromParent(self, selectedHeads: list, selectedSites: list, selectedFiles: list):
         # fork(falbany): re-measure filter — light dutInfo-only fetch
         self.channel.dataListChannel = self.mainUI.getDutInfoForReport(selectedHeads, selectedSites, selectedFiles)
+        self.mutex.lock()   # wait the mutex to unlock once the thread paused
+        self.condWait.wakeAll()
+        self.mutex.unlock()
+
+
+    @Slot(list)
+    def getFileDatesFromParent(self, fids: list):
+        # fork(falbany): supersede ordering — File_Info timestamps + SubFid counts
+        self.channel.dataListChannel = self.mainUI.getFileDatesForReport(fids)
         self.mutex.lock()   # wait the mutex to unlock once the thread paused
         self.condWait.wakeAll()
         self.mutex.unlock()

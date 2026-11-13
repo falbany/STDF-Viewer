@@ -1544,6 +1544,13 @@ class MyWindow(QtWidgets.QMainWindow):
             fid: self.data_interface.DatabaseFetcher.getPartialDUTInfoOnCondition(heads, sites, fid)
             for fid in fids
         }
+
+
+    def getFileDatesForReport(self, fids: list[int]) -> dict:
+        # fork(falbany): supersede ordering — per-Fid SubFid counts + STDF
+        # timestamps (FINISH_T / START_T) for the "latest" rank map
+        dates = self.data_interface.DatabaseFetcher.getFileDates()
+        return {fid: dates[fid] for fid in fids if fid in dates}
     
     
     def getDatalogForReport(self, fids: list[int]):
