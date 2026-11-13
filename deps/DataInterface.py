@@ -941,13 +941,16 @@ def stacked_report_payload(map_data: dict, selectSites: list, selectFiles: list)
     getWaferMapData's stacked branch ({count: {"x", "y"}} keyed by COUNT)
     enriched for the stacked block renderer — Info drives the block title
     + default orientation, no Palette/BinPF/Properties (sbin machinery is
-    meaningless for fail counts). Data is keyed by COUNT, so the total
-    failed DUTs is Σ count × coords_at_that_count, not the coordinate
-    tally.
+    meaningless for fail counts). Data is keyed by COUNT and carries a
+    count-0 bucket (getStackedWaferData seeds every probed coordinate —
+    dies probed but never failed), so both info numbers count FAILING
+    coordinates only: total = Σ count × coords_at_that_count (the 0
+    bucket contributes nothing) and Fail Coordinates excludes it, else a
+    normal wafer would report its whole probed-die count.
     '''
     data = map_data.get("Data") or {}
     total = sum(count * len(v["x"]) for count, v in data.items())
-    coords = sum(len(v["x"]) for v in data.values())
+    coords = sum(len(v["x"]) for count, v in data.items() if count)
     rows = [[f"Total Failed DUTs: {total}",
              f"Fail Coordinates: {coords}",
              f"Files: {len(selectFiles)}"]]

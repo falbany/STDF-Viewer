@@ -82,8 +82,13 @@ native live cell grid.
 - Stacked data carries no `Bounds`/`Info` — the grid axes derive from the
   min/max `(x, y)` present in the aggregation over the selected files/sites.
 - xlsxwriter 3.3.1 CF color scales ignore blank (unwritten) cells —
-  coordinates with zero fails are simply absent from the grid, no rule
-  needed for them.
+  never-probed gap coordinates are simply absent from the grid, no rule
+  needed for them. (Errata, found in review: the assumption that
+  zero-fail coordinates are absent is wrong — `getStackedWaferData`
+  seeds every probed coordinate, so dies probed but never failed arrive
+  under the count-0 key and render as 0, green end of the gradient.
+  Info-row arithmetic must therefore count FAILING coordinates only,
+  excluding the 0 bucket.)
 - The flagged `tab.Wafer` fetch must not hit `getWaferCoordsDict` /
   `waferInfoDict` with the stacked tuple (they are keyed per real wafer);
   the stacked branch bypasses them.

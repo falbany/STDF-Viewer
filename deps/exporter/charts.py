@@ -1225,7 +1225,14 @@ def write_wafer_map_block(
     return max(sw_start + len(bins_present) + 3, xh_row + len(y_axis) + 1)
 
 
-def write_stacked_wafer_block(ws, theme, rows: list, map_data: dict, start_row: int) -> int:
+def write_stacked_wafer_block(
+    ws,
+    theme,
+    rows: list,
+    map_data: dict,
+    start_row: int,
+    freeze_panes: bool = False,
+) -> int:
     """One stacked wafer block (issue #5): title band, the info lines
     (total failed DUTs / fail coordinates / files — NOT passed through
     wafer_info_rows: there are no KPI cells to drop), then the live
@@ -1234,9 +1241,12 @@ def write_stacked_wafer_block(ws, theme, rows: list, map_data: dict, start_row: 
     F — under ONE 3_color_scale rule (green #00CC00 low → yellow #FFFF00
     → red #CC0000 high; default min / percentile-50 / max anchors, the
     sbin palette's pass/fail hexes with Excel's canonical mid). No KPI
-    cards, no SW bin table — there are no software bins to table.
-    Coordinates with zero fails stay unwritten (CF ignores blanks).
-    Empty grid → title + info lines only. Returns the next free row."""
+    cards, no SW bin table — there are no software bins to table. Real
+    aggregations carry a count-0 bucket (getStackedWaferData seeds every
+    probed coordinate): probed-but-passing dies render as 0 at the green
+    end of the gradient, wafer-outline style; only never-probed gap
+    coordinates stay unwritten (CF ignores blanks). Empty grid → title +
+    info lines only. Returns the next free row."""
     info = map_data.get("Info") or (1.0, "", False, False, "", [])
     wafer_id = info[4] if len(info) > 4 else ""
     sites = info[5] if len(info) > 5 else []
@@ -1270,6 +1280,12 @@ def write_stacked_wafer_block(ws, theme, rows: list, map_data: dict, start_row: 
     xh_row = start_row + len(info_cells) + 2  # 1-based X-header row
     first_letter = xlutil.xl_col_to_name(WAFER_FIRST_DIE_COL0)
     last_letter = xlutil.xl_col_to_name(last_col0)
+
+    if freeze_panes:
+        # keep title + info lines + X-header rows and columns A:F (the
+        # Y-axis header) visible while scrolling the die grid — same
+        # cosmetics as the sbin sheets (spec Goal 4)
+        ws.freeze_panes(xh_row, WAFER_FIRST_DIE_COL0)
 
     # fixed squares: spacer E, Y-axis header F, die columns G.. — explicit
     # widths, never the ledger (same as the sbin block)

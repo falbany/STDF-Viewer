@@ -569,7 +569,7 @@ class TestStackedWaferSheet:
     TUPLES = [(-1, -1, "Stacked Wafer Map"), (0, 0, "W08")]
     PAYLOADS = {
         (-1, -1, "Stacked Wafer Map"): stacked_payload(
-            {1: [(1, 1), (2, 1), (3, 1)], 3: [(4, 1)]}
+            {0: [(5, 1)], 1: [(1, 1), (2, 1), (3, 1)], 3: [(4, 1)]}
         ),
         (0, 0, "W08"): wafer_payload({1: [(0, 0)]}),
     }
@@ -592,9 +592,17 @@ class TestStackedWaferSheet:
         stacked = wb["Wafer Stacked Map (All Wafers)"]
         # 3 info cells: title row 1, info lines 2-4, X headers row 6, dies
         # row 7 — the canned payload's fail counts as ints (x=1..3 → 1,
-        # x=4 → 3), G-anchored
+        # x=4 → 3), G-anchored; the count-0 die (probed, never failed)
+        # renders as 0 at K7; the info rows count FAILING coords only
+        # (total = 0*1 + 1*3 + 3*1 = 6, coordinates = 4)
         assert stacked["A1"].value == "Stacked Wafer Map – All Sites"
-        assert [stacked.cell(row=7, column=c).value for c in range(7, 11)] == [1, 1, 1, 3]
+        assert [stacked.cell(row=7, column=c).value for c in range(7, 12)] == [1, 1, 1, 3, 0]
+        assert stacked["B2"].value == "6"
+        assert stacked["B3"].value == "4"
+        # spec Goal 4: the stacked sheet reuses the per-sheet cosmetics —
+        # its grid freezes like every wafer sheet (G7 = first die cell:
+        # title + info lines + X-header row stay visible)
+        assert stacked.freeze_panes == "G7"
 
     def test_setting_independence(self, tmp_path, qapp, monkeypatch):
         for hide in (False, True):

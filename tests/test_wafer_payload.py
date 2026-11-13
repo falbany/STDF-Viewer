@@ -50,15 +50,22 @@ def test_palette_empty_data():
 
 
 STACKED = {
-    "Bounds": (5, 1, 5, 1),
+    "Bounds": (5, 1, 1, 1),
     "ID": (-1, -1),
-    "Data": {1: {"x": [1, 2, 3], "y": [1, 1, 1]}, 3: {"x": [4], "y": [1]}},
-    "Statistic": {1: 1, 3: 3},
+    "Data": {
+        0: {"x": [7, 8], "y": [7, 8]},  # probed, never failed (count-0 key)
+        1: {"x": [1, 2, 3], "y": [1, 1, 1]},
+        3: {"x": [4], "y": [1]},
+    },
+    "Statistic": {0: 0, 1: 1, 3: 3},
 }
 
 
 def test_stacked_rows_arithmetic():
-    # counts are the dict KEYS: total fails = 1*3 + 3*1 = 6, not 4
+    # counts are the dict KEYS: total fails = 0*2 + 1*3 + 3*1 = 6, not 4;
+    # Fail Coordinates counts FAILING coordinates only — the count-0
+    # bucket (probed dies that never failed) is excluded, else a normal
+    # wafer would report its whole probed-die count
     out = stacked_report_payload(STACKED, [-1], [0, 1])
     assert out["rows"] == [
         ["Total Failed DUTs: 6", "Fail Coordinates: 4", "Files: 2"]

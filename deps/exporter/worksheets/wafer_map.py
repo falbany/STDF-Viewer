@@ -146,6 +146,7 @@ class WaferMapMixin:
                 stacked_payload["rows"],
                 stacked_payload["map"],
                 1,
+                freeze_panes=True,  # same grid freeze as the sbin sheets
             )
             self._style_wafer_sheet(StackedSheet)
         group_last = {
