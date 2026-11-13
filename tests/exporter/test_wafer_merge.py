@@ -2,8 +2,12 @@
 
 Payload shape: {"rows": list, "map": dict} as DataInterface.getWaferReportPayload
 returns; map keys Bounds / ID / Info / Data / Statistic / Palette / BinPF /
-Properties. No Qt, no workbook — pure dicts.
+Properties. Real Data x/y values are NUMPY ARRAYS (getWaferCoordsDict) —
+staging must mirror that or the tests lie about the production path.
+No Qt, no workbook — pure dicts.
 """
+
+import numpy as np
 
 from deps.exporter.wafer_merge import merge_wafer_payloads, merged_wafer_groups
 
@@ -85,6 +89,19 @@ class TestMergeWaferPayloads:
         merged, sup = merge_wafer_payloads([empty, empty])
         assert merged["Data"] == {}
         assert sup == set()
+
+    def test_numpy_coordinate_arrays_merge(self):
+        # 2026-11-13 production crash: real getWaferCoordsDict payloads
+        # carry numpy arrays — truth-testing one (`arr or []`) raises
+        # ValueError for len > 1 (report dialog: "The truth value of an
+        # array ... is ambiguous"); the merge reads them like
+        # build_wafer_grid does, with explicit None checks
+        old = payload({1: {"x": np.array([1, 2]), "y": np.array([3, 4])}})
+        new = payload({2: {"x": np.array([1]), "y": np.array([3])}})
+        merged, sup = merge_wafer_payloads([old, new])
+        coords = {(x, y): s for s, xy in merged["Data"].items() for x, y in zip(xy["x"], xy["y"])}
+        assert coords == {(1, 3): 2, (2, 4): 1}
+        assert sup == {(1, 3)}
 
 
 class TestMergedWaferGroups:

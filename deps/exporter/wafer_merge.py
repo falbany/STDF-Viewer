@@ -71,7 +71,12 @@ def merge_wafer_payloads(payloads: list) -> tuple[dict, set]:
         data = (payload.get("map") or {}).get("Data") or {}
         inv: dict[tuple, object] = {}
         for sbin, xy in data.items():
-            xs, ys = xy.get("x") or [], xy.get("y") or []
+            # x/y are numpy arrays in real payloads — truth-testing one
+            # (arr or []) raises ValueError for len > 1; None-check like
+            # build_wafer_grid instead
+            xs, ys = xy.get("x"), xy.get("y")
+            if xs is None or ys is None:
+                continue
             for x, y in zip(xs, ys):
                 inv[(x, y)] = sbin
         inverted.append(inv)
