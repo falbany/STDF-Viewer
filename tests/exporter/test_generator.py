@@ -351,6 +351,27 @@ class TestReportCore:
         assert gen.loopCount == gen.totalLoopCnt == 3
 
 
+class TestFidRanks:
+    def test_fid_ranks_fetched_once_and_cached(self, qapp):
+        # 2026-11-13 supersede ordering: ONE waitForFileDates round-trip
+        # per export, shared by the DUT Summary dedup and the wafer merge
+        sig = signals()
+        channel = dataChannel()
+        reportInfo = ([], [], [], [], [], "unused", [], 0)
+        gen = ModernReportGenerator(
+            sig, QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, channel
+        )
+        calls = []
+        gen.waitForFileDates = lambda fids: calls.append(fids) or {
+            0: (1, "2026-01-02", ""),
+            1: (1, "2026-01-05", ""),
+        }
+        ranks = gen._fid_ranks()
+        assert ranks == {0: 0, 1: 1}
+        gen._fid_ranks()  # second call must NOT refetch
+        assert len(calls) == 1
+
+
 class TestPlainSheets:
     def test_file_info_header_spans_selected_files(self, generated):
         _, wb, _, _, _ = generated

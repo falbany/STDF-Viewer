@@ -35,6 +35,7 @@ from xlsxwriter.worksheet import Worksheet
 from .ui.stdfViewer_exportUI import Ui_exportUI
 from .ui.stdfViewer_loadingUI import Ui_loadingUI
 from .SharedSrc import *
+from .exporter.dedup import compute_fid_ranks
 
 # pyqt5
 from PyQt5 import QtCore, QtWidgets
@@ -274,6 +275,17 @@ class reportGenerator(QtCore.QObject):
         self.condWait.wait(self.mutex)
         self.mutex.unlock()
         return self.channel.dataListChannel
+
+
+    def _fid_ranks(self) -> dict:
+        # fork(falbany): supersede ranks — merge mode orders by fid, open
+        # mode by STDF timestamps; ONE fetch per export, shared by DUT
+        # Summary and the wafer merge (cache reset in report_core)
+        cached = getattr(self, "_fid_ranks_cache", None)
+        if cached is None:
+            cached = compute_fid_ranks(self.waitForFileDates(self.selectedFiles))
+            self._fid_ranks_cache = cached
+        return cached
             
         
     def sendProgress(self):
