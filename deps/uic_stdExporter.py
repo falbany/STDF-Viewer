@@ -219,6 +219,11 @@ class reportGenerator(QtCore.QObject):
         self.retrieveDataListSignal = signals.retrieveDataListSignal
         self.retrieveTableDataSignal = signals.retrieveTableDataSignal
         self.retrieveDutSummarySignal = signals.retrieveDutSummarySignal
+        # fork(falbany): retrieveDutInfoSignal was emitted by waitForDutInfo
+        # but never bound here (latent production crash on the stat-only
+        # fetch path) — bound alongside the supersede-ordering signal
+        self.retrieveDutInfoSignal = signals.retrieveDutInfoSignal
+        self.retrieveFileDatesSignal = signals.retrieveFileDatesSignal
         
     
     def waitForImage(self, testTuple: tuple, head: int, sites: list[int], fids: list[int], chartType: tab) -> io.BytesIO:
