@@ -1281,6 +1281,11 @@ class stdfExporter(QtWidgets.QDialog):
             totalLoopCnt += (1 + len(testTuples))   # dut info part + test part
         if ReportSelection.Wafer in selectedContents:
             totalLoopCnt += len(waferTuples)
+            if getSetting().gen.hide_remeasured:
+                # 2026-11-13 wafer merge: one extra (Merged) sheet per
+                # real wafer ID spanning 2+ tuples (one progress tick each)
+                from .exporter.wafer_merge import merged_wafer_groups  # lazy, like the generator import below
+                totalLoopCnt += len(merged_wafer_groups(waferTuples))
         if ReportSelection.GDR_DTR in selectedContents:
             totalLoopCnt += 1
                     
