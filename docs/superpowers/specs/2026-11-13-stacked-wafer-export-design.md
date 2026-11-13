@@ -1,6 +1,6 @@
 # Design: Stacked Wafer Map in the Modern Excel report
 
-**Date:** 2026-11-13 · **Status:** approved-in-conversation (short design, no builder check)
+**Date:** 2026-11-13 · **Status:** implemented (see `docs/superpowers/plans/2026-11-13-stacked-wafer-export.md`)
 
 ## Intent and why
 
