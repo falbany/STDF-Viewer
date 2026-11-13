@@ -42,6 +42,7 @@ from deps.exporter.charts import (
     BIN_LABEL_FONT,
     BIN_PAGE_COLUMN_WIDTH,
     BIN_TABLE_HEADERS,
+    WAFER_SUPERSEDED_BORDER_HEX,
     cm_to_px,
     aggregate_bin_counts,
     aggregate_kpi,
@@ -56,6 +57,7 @@ from deps.exporter.charts import (
     write_wafer_map_block,
     wafer_info_rows,
     wafer_kpi_from_grid,
+    wafer_sheet_name,
     wafer_table_name,
 )
 from deps.exporter.theme import ModernTheme
@@ -1366,3 +1368,89 @@ class TestWriteWaferMapBlock:
     def test_no_freeze_by_default(self, env):
         self.written(env)
         assert env["reload"]().freeze_panes is None
+
+
+class TestWaferSuperseded:
+    """2026-11-13 wafer merge (issue #4), merged-sheet-only rendering:
+    superseded-die thick orange border, Fails subtitle superseded count,
+    Total Parts source-file subtitle, merged name / table suffixes."""
+
+    # MAP + a 2-die bin 9 with no BinPF / Palette entry -> kpi unknown = 2
+    UNKNOWN2_MAP = dict(
+        MAP,
+        Data={
+            1: {"x": np.array([0]), "y": np.array([0])},
+            2: {"x": np.array([2]), "y": np.array([0])},
+            9: {"x": np.array([1, 2]), "y": np.array([0, 1])},
+        },
+    )
+
+    def test_merged_name_suffix_and_31_char_cap(self):
+        assert wafer_sheet_name(0, "W08", set(), suffix=" (Merged)") == "Wafer W08 (Merged)"
+        # 31-char Excel cap applies AFTER the suffix is appended; two
+        # calls against the same taken-set take DIFFERENT names (_2...)
+        taken = set()
+        n1 = wafer_sheet_name(0, "W" * 40, taken, suffix=" (Merged)")
+        taken.add(n1)
+        n2 = wafer_sheet_name(0, "W" * 40, taken, suffix=" (Merged)")
+        assert len(n1) <= 31 and len(n2) <= 31
+        assert n1 != n2
+
+    def test_merged_table_name_suffix(self):
+        assert wafer_table_name(0, "W08", suffix="_M") == "SW_0_W08_M"
+
+    def test_fails_subtitle_counts_superseded(self, env):
+        # strings land in xl/sharedStrings.xml (xlsxwriter default)
+        write_wafer_map_block(
+            env["ws"], env["theme"], [["WAFER_ID: W01"]], self.UNKNOWN2_MAP, 1,
+            "SW_0_W01", superseded_coords={(1, 0)},
+        )
+        env["reload"]()
+        assert "2 unknown · 1 superseded" in read_xml(env["book"], "xl/sharedStrings.xml")
+
+    def test_fails_subtitle_defaults_to_zero_superseded(self, env):
+        write_wafer_map_block(
+            env["ws"], env["theme"], [["WAFER_ID: W01"]], self.UNKNOWN2_MAP, 1,
+            "SW_0_W01",
+        )
+        env["reload"]()
+        assert "2 unknown · 0 superseded" in read_xml(env["book"], "xl/sharedStrings.xml")
+
+    def test_superseded_border_style(self, env):
+        # die (0, 0) sits at I6 (duplicate (0,0): last wins, sbin 2) —
+        # thick orange border on all four sides; die (0, 1) at I5 untouched
+        write_wafer_map_block(
+            env["ws"], env["theme"], [["WAFER_ID: W01"]], MAP, 1,
+            "SW_0_W01", superseded_coords={(0, 0)},
+        )
+        reloaded = env["reload"]()
+        border = reloaded["I6"].border
+        for side in (border.top, border.bottom, border.left, border.right):
+            assert side.style == "thick"
+            assert str(side.color.rgb).endswith(WAFER_SUPERSEDED_BORDER_HEX)
+        assert reloaded["I5"].border.top.style is None
+        styles = read_xml(env["book"], "xl/styles.xml")
+        assert WAFER_SUPERSEDED_BORDER_HEX in styles
+        assert 'style="thick"' in styles
+
+    def test_no_border_without_superseded_coords(self, env):
+        write_wafer_map_block(
+            env["ws"], env["theme"], [["WAFER_ID: W01"]], MAP, 1, "SW_0_W01"
+        )
+        env["reload"]()
+        assert WAFER_SUPERSEDED_BORDER_HEX not in read_xml(env["book"], "xl/styles.xml")
+
+    def test_total_parts_source_files(self, env):
+        write_wafer_map_block(
+            env["ws"], env["theme"], [["WAFER_ID: W01"]], MAP, 1,
+            "SW_0_W01", source_files=3,
+        )
+        env["reload"]()
+        assert "across 3 file(s)" in read_xml(env["book"], "xl/sharedStrings.xml")
+
+    def test_total_parts_defaults_to_one_file(self, env):
+        write_wafer_map_block(
+            env["ws"], env["theme"], [["WAFER_ID: W01"]], MAP, 1, "SW_0_W01"
+        )
+        env["reload"]()
+        assert "across 1 file(s)" in read_xml(env["book"], "xl/sharedStrings.xml")
