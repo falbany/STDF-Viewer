@@ -54,6 +54,7 @@ from deps.exporter.charts import (
     write_bin_table,
     write_kpi_cards,
     write_merged_headline,
+    write_stacked_wafer_block,
     write_wafer_map_block,
     wafer_info_rows,
     wafer_kpi_from_grid,
@@ -1454,3 +1455,110 @@ class TestWaferSuperseded:
         )
         env["reload"]()
         assert "across 1 file(s)" in read_xml(env["book"], "xl/sharedStrings.xml")
+
+
+# issue #5 stacked wafer payload (Task 1's STACKED shape + the Info tuple
+# stacked_report_payload enriches in): fail counts keyed by COUNT, default
+# orientation; Bounds order is (xmax, xmin, ymax, ymin) — x∈[1,5], y=1
+STACKED_MAP = {
+    "Bounds": (5, 1, 1, 1),
+    "ID": (-1, -1),
+    "Data": {1: {"x": [1, 2, 3], "y": [1, 1, 1]}, 3: {"x": [4], "y": [1]}},
+    "Statistic": {1: 1, 3: 3},
+    "Info": (1.0, "", False, False, "Stacked Wafer Map", [-1]),
+}
+STACKED_ROWS = [["Total Failed DUTs: 6", "Fail Coordinates: 4", "Files: 2"]]
+
+
+class TestStackedWaferBlock:
+    """Issue #5: the stacked wafer map block — one live fail-count grid
+    (counts as cell values) under ONE green→yellow→red color-scale rule;
+    title + info lines only, no KPI cards, no SW bin table."""
+
+    def written(self, env, rows=None, map_data=None, start_row=1):
+        return write_stacked_wafer_block(
+            env["ws"],
+            env["theme"],
+            rows if rows is not None else STACKED_ROWS,
+            map_data if map_data is not None else STACKED_MAP,
+            start_row,
+        )
+
+    def test_counts_written_as_values(self, env):
+        nxt = self.written(env)
+        reloaded = env["reload"]()
+        # 3 info cells: lines on rows 2-4, blank row 5, X headers row 6,
+        # dies row 7, G-anchored per the layout constants (x=1..5 → G..K);
+        # count 1 at (x=1..3), 3 at (x=4), (x=5) has no fails → unwritten
+        assert [reloaded.cell(row=7, column=c).value for c in range(7, 12)] == [
+            1, 1, 1, 3, None,
+        ]
+        assert reloaded["G6"].value == "1"  # first X header, str(x)
+        assert reloaded["F7"].value == "1"  # Y-axis header
+        assert reloaded.tables == {}  # no SW bin table on the stacked sheet
+        assert nxt == 8  # dies end at xh_row 6 + 1 die row → next free 8
+
+    def test_gradient_cf_rule_present(self, env):
+        self.written(env)
+        env["reload"]()
+        xml = read_xml(env["book"], "xl/worksheets/sheet1.xml")
+        # exactly ONE color-scale rule over the die range
+        assert xml.count('type="colorScale"') == 1
+        for hex8 in ("FF00CC00", "FFFFFF00", "FFCC0000"):
+            assert xml.count(hex8) == 1
+        # default anchors (min / 50th percentile / max) — no type overrides
+        assert '<cfvo type="min" val="0"/>' in xml
+        assert '<cfvo type="percentile" val="50"/>' in xml
+        assert '<cfvo type="max" val="0"/>' in xml
+
+    def test_empty_stacked_degrades(self, env):
+        nxt = self.written(
+            env,
+            rows=[["Total Failed DUTs: 0", "Fail Coordinates: 0", "Files: 1"]],
+            map_data={},
+        )
+        reloaded = env["reload"]()
+        xml = read_xml(env["book"], "xl/worksheets/sheet1.xml")
+        assert "conditionalFormatting" not in xml  # no grid → no CF rule
+        assert "A1:D1" in {str(r) for r in reloaded.merged_cells.ranges}
+        assert reloaded["A2"].value == "Total Failed DUTs:"
+        assert reloaded["B2"].value == "0"
+        assert reloaded["A3"].value == "Fail Coordinates:"
+        assert reloaded["B3"].value == "0"
+        assert reloaded["A4"].value == "Files:"
+        assert reloaded["B4"].value == "1"
+        assert nxt == 5
+
+    def test_single_count_renders(self, env):
+        # every coordinate shares one fail count (min == max): the rule is
+        # still written, Excel renders uniformly, nothing raises
+        m = dict(STACKED_MAP, Data={2: {"x": [1, 2], "y": [1, 1]}}, Bounds=(2, 1, 1, 1))
+        self.written(env, map_data=m)
+        reloaded = env["reload"]()
+        assert [reloaded.cell(row=7, column=c).value for c in range(7, 9)] == [2, 2]
+        xml = read_xml(env["book"], "xl/worksheets/sheet1.xml")
+        assert xml.count('type="colorScale"') == 1
+
+    def test_sparse_axes_full_extent(self, env):
+        # gaps in the x range: the axis spans the full rectangular extent
+        # like the sbin sheets, missing coords stay unwritten
+        m = dict(STACKED_MAP, Data={1: {"x": [1, 5], "y": [2, 2]}}, Bounds=(5, 1, 2, 2))
+        self.written(env, map_data=m)
+        reloaded = env["reload"]()
+        assert [reloaded.cell(row=6, column=c).value for c in range(7, 12)] == [
+            "1", "2", "3", "4", "5",
+        ]
+        assert reloaded["G7"].value == 1 and reloaded["K7"].value == 1
+        assert all(reloaded.cell(row=7, column=c).value is None for c in range(8, 11))
+
+    def test_title_and_info_lines(self, env):
+        self.written(env)
+        reloaded = env["reload"]()
+        assert "A1:K1" in {str(r) for r in reloaded.merged_cells.ranges}
+        assert reloaded["A1"].value == "Stacked Wafer Map – All Sites"
+        assert reloaded["A2"].value == "Total Failed DUTs:"
+        assert reloaded["B2"].value == "6"
+        assert reloaded["A3"].value == "Fail Coordinates:"
+        assert reloaded["B3"].value == "4"
+        assert reloaded["A4"].value == "Files:"
+        assert reloaded["B4"].value == "2"

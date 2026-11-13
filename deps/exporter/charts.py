@@ -1223,3 +1223,82 @@ def write_wafer_map_block(
     )
 
     return max(sw_start + len(bins_present) + 3, xh_row + len(y_axis) + 1)
+
+
+def write_stacked_wafer_block(ws, theme, rows: list, map_data: dict, start_row: int) -> int:
+    """One stacked wafer block (issue #5): title band, the info lines
+    (total failed DUTs / fail coordinates / files — NOT passed through
+    wafer_info_rows: there are no KPI cells to drop), then the live
+    fail-count die grid anchored at F{start + len(info) + 2} — counts as
+    the cell VALUES from G, X headers on the anchor row, Y-axis header in
+    F — under ONE 3_color_scale rule (green #00CC00 low → yellow #FFFF00
+    → red #CC0000 high; default min / percentile-50 / max anchors, the
+    sbin palette's pass/fail hexes with Excel's canonical mid). No KPI
+    cards, no SW bin table — there are no software bins to table.
+    Coordinates with zero fails stay unwritten (CF ignores blanks).
+    Empty grid → title + info lines only. Returns the next free row."""
+    info = map_data.get("Info") or (1.0, "", False, False, "", [])
+    wafer_id = info[4] if len(info) > 4 else ""
+    sites = info[5] if len(info) > 5 else []
+    site_info = _wafer_site_info(sites)
+    title = f"{wafer_id} – {site_info}" if wafer_id else site_info
+
+    x_axis, y_axis, grid, _total = build_wafer_grid(map_data)
+    info_cells = [cell for row in (rows or []) for cell in row]
+
+    if not grid:
+        # empty stacked aggregation (no failed DUTs in the selection):
+        # title + info lines only — the export must not break
+        ws.merge_range(
+            start_row - 1, 0, start_row - 1, 3, title, theme.lookalike("title")
+        )
+        for offset, cell in enumerate(info_cells):
+            key, _, value = cell.partition(":")
+            _wafer_kv_row(ws, start_row + 1 + offset, key.strip() + ":", value.strip(), theme)
+        return start_row + len(info_cells) + 1
+
+    last_col0 = WAFER_FIRST_DIE_COL0 + len(x_axis) - 1
+    ws.merge_range(
+        start_row - 1, 0, start_row - 1, last_col0, title, theme.lookalike("title")
+    )
+
+    # info lines right below the title (one blank row before the map)
+    for offset, cell in enumerate(info_cells):
+        key, _, value = cell.partition(":")
+        _wafer_kv_row(ws, start_row + 1 + offset, key.strip() + ":", value.strip(), theme)
+
+    xh_row = start_row + len(info_cells) + 2  # 1-based X-header row
+    first_letter = xlutil.xl_col_to_name(WAFER_FIRST_DIE_COL0)
+    last_letter = xlutil.xl_col_to_name(last_col0)
+
+    # fixed squares: spacer E, Y-axis header F, die columns G.. — explicit
+    # widths, never the ledger (same as the sbin block)
+    ws.set_column(WAFER_SPACER_COL0, WAFER_SPACER_COL0, WAFER_DIE_WIDTH)
+    ws.set_column(WAFER_YAXIS_COL0, WAFER_YAXIS_COL0, WAFER_YAXIS_WIDTH)
+    ws.set_column(WAFER_FIRST_DIE_COL0, last_col0, WAFER_DIE_WIDTH)
+
+    axis_fmt = theme.cell_format(
+        font="bold_body", align="center", border=True, fill_hex="EDEFF2"
+    )
+    for col_offset, x in enumerate(x_axis):
+        ws.write(xh_row - 1, WAFER_FIRST_DIE_COL0 + col_offset, str(x), axis_fmt)
+
+    die_fmt = theme.cell_format(font="body", align="center")
+    for row_offset, y in enumerate(y_axis):
+        row0 = xh_row + row_offset  # 0-based; first die row = 1-based xh_row+1
+        ws.set_row(row0, WAFER_DIE_ROW_PT)
+        ws.write(row0, WAFER_YAXIS_COL0, str(y), axis_fmt)
+        for col_offset, x in enumerate(x_axis):
+            count = grid.get((x, y))
+            if count is not None:
+                ws.write(row0, WAFER_FIRST_DIE_COL0 + col_offset, int(count), die_fmt)
+
+    # ONE CF rule over the die range: fail counts on the green→yellow→red
+    # gradient — lower = greener, hot spots = deep red
+    ws.conditional_format(
+        f"{first_letter}{xh_row + 1}:{last_letter}{xh_row + len(y_axis)}",
+        {"type": "3_color_scale",
+         "min_color": "#00CC00", "mid_color": "#FFFF00", "max_color": "#CC0000"},
+    )
+
+    return xh_row + len(y_axis) + 1
