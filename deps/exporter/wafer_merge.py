@@ -77,7 +77,7 @@ def merge_wafer_payloads(payloads: list) -> tuple[dict, set]:
             xs, ys = xy.get("x"), xy.get("y")
             if xs is None or ys is None:
                 continue
-            for x, y in zip(xs, ys):
+            for x, y in zip(xs, ys, strict=False):
                 inv[(x, y)] = sbin
         inverted.append(inv)
         coord_sets.append(set(inv))
@@ -96,9 +96,10 @@ def merge_wafer_payloads(payloads: list) -> tuple[dict, set]:
     per_sbin: dict[object, list] = {}
     for (x, y), sbin in merged_coords.items():
         per_sbin.setdefault(sbin, []).append((x, y))
-    data = {sbin: {"x": [c[0] for c in sorted(coords)],
-                   "y": [c[1] for c in sorted(coords)]}
-            for sbin, coords in sorted(per_sbin.items(), key=lambda kv: str(kv[0]))}
+    data = {
+        sbin: {"x": [c[0] for c in sorted(coords)], "y": [c[1] for c in sorted(coords)]}
+        for sbin, coords in sorted(per_sbin.items(), key=lambda kv: str(kv[0]))
+    }
 
     # Palette / BinPF / Statistic-name union, LATER payload wins conflicts
     palette: dict = {}
@@ -108,14 +109,23 @@ def merge_wafer_payloads(payloads: list) -> tuple[dict, set]:
         m = payload.get("map") or {}
         palette.update(m.get("Palette") or {})
         bin_pf.update(m.get("BinPF") or {})
-        names.update({sbin: stat[0] for sbin, stat in (m.get("Statistic") or {}).items()
-                      if isinstance(stat, tuple) and stat})
+        names.update(
+            {
+                sbin: stat[0]
+                for sbin, stat in (m.get("Statistic") or {}).items()
+                if isinstance(stat, tuple) and stat
+            }
+        )
 
     total = len(merged_coords)
-    statistic = {sbin: (names.get(sbin, f"Bin {sbin}"),
-                        len(coords),
-                        100.0 * len(coords) / total if total else 0.0)
-                 for sbin, coords in sorted(per_sbin.items(), key=lambda kv: str(kv[0]))}
+    statistic = {
+        sbin: (
+            names.get(sbin, f"Bin {sbin}"),
+            len(coords),
+            100.0 * len(coords) / total if total else 0.0,
+        )
+        for sbin, coords in sorted(per_sbin.items(), key=lambda kv: str(kv[0]))
+    }
 
     last_map = (payloads[-1].get("map") or {}) if payloads else {}
     merged = dict(last_map)
@@ -124,12 +134,18 @@ def merge_wafer_payloads(payloads: list) -> tuple[dict, set]:
     merged["Palette"] = palette
     merged["BinPF"] = bin_pf
 
-    valid_bounds = [m["Bounds"] for m in ((p.get("map") or {}) for p in (payloads or []))
-                    if isinstance(m.get("Bounds"), (tuple, list)) and len(m["Bounds"]) == 4
-                    and all(isinstance(v, int) for v in m["Bounds"])]
+    valid_bounds = [
+        m["Bounds"]
+        for m in ((p.get("map") or {}) for p in (payloads or []))
+        if isinstance(m.get("Bounds"), (tuple, list))
+        and len(m["Bounds"]) == 4
+        and all(isinstance(v, int) for v in m["Bounds"])
+    ]
     if valid_bounds:
-        merged["Bounds"] = (max(b[0] for b in valid_bounds),
-                            min(b[1] for b in valid_bounds),
-                            max(b[2] for b in valid_bounds),
-                            min(b[3] for b in valid_bounds))
+        merged["Bounds"] = (
+            max(b[0] for b in valid_bounds),
+            min(b[1] for b in valid_bounds),
+            max(b[2] for b in valid_bounds),
+            min(b[3] for b in valid_bounds),
+        )
     return merged, superseded

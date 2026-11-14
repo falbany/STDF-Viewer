@@ -44,8 +44,7 @@ the hide-remeasured setting: the cross-wafer fail-count heatmap as a
 live cell grid under one green→yellow→red color-scale, with its
 reading legend right below the title.
 """
-from deps.SharedSrc import getSetting, tab
-from deps.uic_stdExporter import ReportSelection
+
 from deps.exporter.charts import (
     WAFER_LABEL_COL_WIDTH,
     WAFER_SPACER_PINNED_WIDTH,
@@ -59,6 +58,8 @@ from deps.exporter.charts import (
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.wafer_merge import merge_wafer_payloads, merged_wafer_groups
 from deps.exporter.writer import FOOTER_TEXT
+from deps.SharedSrc import getSetting, tab
+from deps.uic_stdExporter import ReportSelection
 
 
 class WaferMapMixin:
@@ -177,16 +178,16 @@ class WaferMapMixin:
             self.sendProgress()
             if wafer[2] in merge_ids and group_last[wafer[2]] == index:
                 self._write_merged_wafer_sheet(
-                    wafer[2], index, taken,
+                    wafer[2],
+                    index,
+                    taken,
                     [(w, p) for _i, w, p in fetched if w[2] == wafer[2]],
                 )
                 row = start_row
                 self.loopCount += 1
                 self.sendProgress()
         if stacked_payload is not None:
-            name = wafer_sheet_name(
-                stacked_index, "Stacked Map (All Wafers)", taken
-            )
+            name = wafer_sheet_name(stacked_index, "Stacked Map (All Wafers)", taken)
             taken.add(name)
             StackedSheet = self._wb.add_worksheet(name)
             # per-wafer ID table: every fetched payload is already in
@@ -204,12 +205,8 @@ class WaferMapMixin:
                 wafer_rows=wafer_rows,
                 overall_yield=overall_yield,
                 total_duts=total_duts,
-                wafer_table_name=wafer_table_name(
-                    stacked_index, "StackedWafers"
-                ),
-                fail_table_name=wafer_table_name(
-                    stacked_index, "FailMapCount"
-                ),
+                wafer_table_name=wafer_table_name(stacked_index, "StackedWafers"),
+                fail_table_name=wafer_table_name(stacked_index, "FailMapCount"),
             )
             self._style_wafer_sheet(StackedSheet)
         self._row[key] = row

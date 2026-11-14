@@ -62,6 +62,7 @@ def _data_start(spec) -> int:
     """Absolute Excel row of the first data row (header + 1)."""
     return _header_row(spec) + 1
 
+
 BASE_COLUMN_COUNT = 12  # fixed A..L block
 ROW_HEIGHT = 22
 
@@ -197,9 +198,7 @@ def _write_cell(
         ws.write(row0, col0, value, fmt)
 
 
-def write_body_cell(
-    ws, row: int, column: int, value, theme, border: bool = True, fill=None
-):
+def write_body_cell(ws, row: int, column: int, value, theme, border: bool = True, fill=None):
     """One themed body cell: body font + centered alignment, optional thin
     border and band fill (a 6-digit hex string or None) — the public
     cell-level counterpart of the internal matrix renderers, for
@@ -296,9 +295,7 @@ def _render_data_rows(ws, spec, theme):
     die_columns = spec["die_columns"]
     formats = spec.get("number_formats") or {}
     fixed_formats = {
-        column: formats[key]
-        for key, column in FIXED_FORMAT_COLUMNS.items()
-        if key in formats
+        column: formats[key] for key, column in FIXED_FORMAT_COLUMNS.items() if key in formats
     }
     formula_values = spec.get("formula_values") or {}
 
@@ -318,9 +315,7 @@ def _render_data_rows(ws, spec, theme):
             if number_format is None:
                 die_index = column - 1 - BASE_COLUMN_COUNT
                 if 0 <= die_index < len(die_columns):
-                    number_format = (
-                        "0" if is_pf else formats.get(die_columns[die_index])
-                    )
+                    number_format = "0" if is_pf else formats.get(die_columns[die_index])
             fixed_column = column <= BASE_COLUMN_COUNT
             if column in (SPEC_MIN_COLUMN, SPEC_MAX_COLUMN):
                 fill = neutral
@@ -442,7 +437,7 @@ def _add_cpk_rules(ws, cell_range, theme):
         (f"AND(ISNUMBER({cell}),{cell}>=1)", True),
         (f"AND(ISNUMBER({cell}),{cell}<1)", False),
     )
-    for (formula, stop), hex6 in zip(bands, theme.cpk_band_fills()):
+    for (formula, stop), hex6 in zip(bands, theme.cpk_band_fills(), strict=False):
         _add_rule(ws, cell_range, formula, theme.cf_fill(hex6), stop=stop)
 
 
@@ -453,12 +448,8 @@ def _add_fail_num_rules(ws, cell_range, theme):
     row0 = _range_first_row(cell_range)
     col0 = _col0(cell_range.split(":")[0].rstrip("0123456789"))
     cell = f"{xlutil.xl_col_to_name(col0)}{row0 + 1}"
-    _add_rule(
-        ws, cell_range, f"AND(ISNUMBER({cell}),{cell}>0)", theme.cf_fill("FFCCCC")
-    )
-    _add_rule(
-        ws, cell_range, f"AND(ISNUMBER({cell}),{cell}=0)", theme.cf_fill("CCFFCC")
-    )
+    _add_rule(ws, cell_range, f"AND(ISNUMBER({cell}),{cell}>0)", theme.cf_fill("FFCCCC"))
+    _add_rule(ws, cell_range, f"AND(ISNUMBER({cell}),{cell}=0)", theme.cf_fill("CCFFCC"))
 
 
 def _add_fails_scale(ws, cf):
@@ -491,9 +482,7 @@ def _add_dut_flag_status_rules(ws, cell_range, theme):
         ("Fail", "FFCCCC"),
         ("Pass", "CCFFCC"),
     ):
-        _add_rule(
-            ws, cell_range, f'ISNUMBER(SEARCH("{needle}",{cell}))', theme.cf_fill(hex6)
-        )
+        _add_rule(ws, cell_range, f'ISNUMBER(SEARCH("{needle}",{cell}))', theme.cf_fill(hex6))
 
 
 def _add_duplicate_part_id_rules(ws, cell_range, theme):

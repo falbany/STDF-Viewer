@@ -26,10 +26,10 @@
 GDR & DTR Summary worksheet writer (moved verbatim from generator.py).
 """
 
-from deps.uic_stdExporter import ReportSelection
 from deps.exporter.sheets import plain_table_spec
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.writer import render_plain_table
+from deps.uic_stdExporter import ReportSelection
 
 
 class GdrDtrMixin:

@@ -37,8 +37,6 @@ import re
 
 import numpy as np
 
-from deps.SharedSrc import REC, getSetting
-from deps.uic_stdExporter import ReportSelection
 from deps.exporter.dedup import compute_remeasure_drops, dut_info_from_partial
 from deps.exporter.helpers import (
     DUT_CHUNK_CAP,
@@ -52,6 +50,7 @@ from deps.exporter.helpers import (
     fails_formula_flags,
     fails_formula_limits,
     flag_value,
+    format_temperature_label,
     has_numeric,
     metadata_stat_formulas,
     parse_bin,
@@ -64,9 +63,10 @@ from deps.exporter.helpers import (
     stat_formula,
     workflow_key,
 )
-from deps.exporter.helpers import format_temperature_label
 from deps.exporter.worksheets.file_info import file_temperatures_from_file_info
 from deps.exporter.writer import render_matrix_sheet
+from deps.SharedSrc import REC, getSetting
+from deps.uic_stdExporter import ReportSelection
 
 # Sheet layout (2026-11-10 adjustment): banner row 1, the metadata block on
 # rows 2.. (DUT # row removed — the banner labels carry DUT #n), then the
@@ -330,8 +330,7 @@ def build_dut_summary_spec(
     hardcoded scientific — no float format is passed in anymore.
     """
     display_ids = [
-        dut_id if dut_id not in (None, "") else f"DUT #{i + 1}"
-        for i, dut_id in enumerate(dut_ids)
+        dut_id if dut_id not in (None, "") else f"DUT #{i + 1}" for i, dut_id in enumerate(dut_ids)
     ]
     base_labels = [tr(label) for label in BASE_HEADERS]
     trend_label = tr("Trend")
@@ -472,9 +471,7 @@ def _flag_cell(flag):
 # --------------------------------------------------------------------------
 
 
-def _metadata_cell(
-    meta, summaryTable, fid, dut_index, global_index, file_temperatures=None
-):
+def _metadata_cell(meta, summaryTable, fid, dut_index, global_index, file_temperatures=None):
     name = meta["name"]
     info = summaryTable.get("dutInfo", {}).get(fid, {}).get(dut_index) or ()
 
@@ -558,9 +555,7 @@ def _is_masked(meta, values):
     return False
 
 
-def _metadata_block(
-    summaryTable, chunk_cells, first_die, last_die, file_temperatures=None
-):
+def _metadata_block(summaryTable, chunk_cells, first_die, last_die, file_temperatures=None):
     """The metadata row-lists (one per METADATA_ROWS entry) plus the
     absolute Excel rows to hide.
 
@@ -583,9 +578,7 @@ def _metadata_block(
     for position, meta in enumerate(METADATA_ROWS):
         excel_row = METADATA_START + position
         values = [
-            _metadata_cell(
-                meta, summaryTable, fid, dut_index, global_index, file_temperatures
-            )
+            _metadata_cell(meta, summaryTable, fid, dut_index, global_index, file_temperatures)
             for global_index, fid, dut_index in chunk_cells
         ]
         prefix = [
@@ -631,9 +624,7 @@ def _metadata_block(
 # --------------------------------------------------------------------------
 
 
-def _test_rows(
-    summaryTable, tests, chunk_cells, first_die, last_die, mirror_first, mirror_last
-):
+def _test_rows(summaryTable, tests, chunk_cells, first_die, last_die, mirror_first, mirror_last):
     rows = []
     formula_values = {}
     sparklines = []
@@ -877,11 +868,19 @@ def prune_summary_view(summaryTable: dict, drop_pairs: set[tuple[int, int]]) -> 
         return summaryTable
     pruned = dict(summaryTable)
     pruned["dutInfo"] = {
-        fid: {dut_index: info for dut_index, info in rows.items() if (fid, dut_index) not in drop_pairs}
+        fid: {
+            dut_index: info
+            for dut_index, info in rows.items()
+            if (fid, dut_index) not in drop_pairs
+        }
         for fid, rows in summaryTable["dutInfo"].items()
     }
     pruned["dut2ind"] = {
-        fid: {dut_index: data_index for dut_index, data_index in indices.items() if (fid, dut_index) not in drop_pairs}
+        fid: {
+            dut_index: data_index
+            for dut_index, data_index in indices.items()
+            if (fid, dut_index) not in drop_pairs
+        }
         for fid, indices in summaryTable["dut2ind"].items()
     }
     return pruned
@@ -940,11 +939,10 @@ class DUTSummaryMixin:
         degrades gracefully to an empty drop-set."""
         if self._remeasure_drops is not None:
             return self._remeasure_drops
-        partial = self.waitForDutInfo(
-            self.selectedHeads, self.selectedSites, self.selectedFiles
-        )
+        partial = self.waitForDutInfo(self.selectedHeads, self.selectedSites, self.selectedFiles)
         return compute_remeasure_drops(
-            dut_info_from_partial(partial or {}), self.selectedFiles,
+            dut_info_from_partial(partial or {}),
+            self.selectedFiles,
             fid_ranks=self._fid_ranks(),  # 2026-11-13: shared supersede ranks
         )
 
@@ -995,9 +993,7 @@ class DUTSummaryMixin:
         self._ftr_tests = set()
         for test_tuple in self.testTuples:
             fid_data = summaryTable.get("Data", {}).get(test_tuple) or {}
-            if any(
-                (fid_data.get(fid) or {}).get("SUB_CODE") == REC.FTR for fid in fid_data
-            ):
+            if any((fid_data.get(fid) or {}).get("SUB_CODE") == REC.FTR for fid in fid_data):
                 self._ftr_tests.add((test_tuple[0], test_tuple[2]))
 
         # re-measure filter (DUT Summary enhancements §7.2): the drop-set
@@ -1008,7 +1004,8 @@ class DUTSummaryMixin:
         # means the DUT sheet did not render (stat-only fallback fetch).
         if getSetting().gen.hide_remeasured:
             drops = compute_remeasure_drops(
-                summaryTable["dutInfo"], self.selectedFiles,
+                summaryTable["dutInfo"],
+                self.selectedFiles,
                 fid_ranks=self._fid_ranks(),  # 2026-11-13: shared supersede ranks
             )
         else:
@@ -1027,9 +1024,7 @@ class DUTSummaryMixin:
         file_info_rows = self.waitForTableData(isFileInfo=True)
         if self.forceQuit:
             return
-        file_temperatures = file_temperatures_from_file_info(
-            file_info_rows, self.selectedFiles
-        )
+        file_temperatures = file_temperatures_from_file_info(file_info_rows, self.selectedFiles)
 
         specs = build_dut_summary_spec(
             summaryTable,
@@ -1076,7 +1071,7 @@ class DUTSummaryMixin:
                         self.testTuples,
                         sub_order,
                         sub_ids,
-                        sheet_name=f'{self.tr("DUT Summary")} - T{format_temperature_label(temp)}°C',
+                        sheet_name=f"{self.tr('DUT Summary')} - T{format_temperature_label(temp)}°C",
                         tr=self.tr,
                         file_temperatures=file_temperatures,
                     )

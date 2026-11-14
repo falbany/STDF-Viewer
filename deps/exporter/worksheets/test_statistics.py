@@ -35,8 +35,6 @@ import re
 
 import xlsxwriter.utility as xlutil
 
-from deps.SharedSrc import getSetting, tab
-from deps.uic_stdExporter import ReportSelection
 from deps.exporter.dedup import drops_to_exclusion
 from deps.exporter.helpers import (
     apply_cp_formula,
@@ -48,8 +46,10 @@ from deps.exporter.helpers import (
 )
 from deps.exporter.sheets import plain_table_spec
 from deps.exporter.theme import TAB_COLOR_HEXES
-from deps.exporter.writer import render_plain_table, write_plain_row
 from deps.exporter.worksheets.dut_summary import FTR_SPEC_MAX, FTR_SPEC_MIN
+from deps.exporter.writer import render_plain_table, write_plain_row
+from deps.SharedSrc import getSetting, tab
+from deps.uic_stdExporter import ReportSelection
 
 # The GUI's waitForDataList rows (DataInterface.getStatistics) arrive as
 # header = [""] + translated hHeader and data rows = [VHeader, TestName,
@@ -185,7 +185,7 @@ def transform_stat_header(header_row) -> dict:
         }
     body = [str(cell) for cell in cells[1:]]
     normalized = [_norm_header_text(cell) for cell in body]
-    renamed = [_STAT_RENAMES.get(norm, cell) for norm, cell in zip(normalized, body)]
+    renamed = [_STAT_RENAMES.get(norm, cell) for norm, cell in zip(normalized, body, strict=False)]
     header = list(STAT_VHEADER_LABELS) + renamed
     param_inserted = _STAT_TEST_NAME in normalized
     if param_inserted:
@@ -270,11 +270,7 @@ def stat_cf_ranges(header_info: dict, data_row_count: int) -> dict:
     """
     header = header_info.get("header") or []
     normalized = [_norm_header_text(cell) for cell in header]
-    if (
-        _STAT_FAIL_NUM not in normalized
-        or _STAT_CPK not in normalized
-        or data_row_count <= 0
-    ):
+    if _STAT_FAIL_NUM not in normalized or _STAT_CPK not in normalized or data_row_count <= 0:
         return {}
     last_row = 1 + data_row_count
     fail_letter = get_column_letter(normalized.index(_STAT_FAIL_NUM) + 1)
@@ -403,9 +399,7 @@ class TestStatisticsMixin:
             if drops:
                 kargs["dut_exclusion"] = drops_to_exclusion(drops)
 
-        dataTable = self.waitForDataList(
-            heads, sites, self.selectedFiles, tab.Trend, kargs
-        )
+        dataTable = self.waitForDataList(heads, sites, self.selectedFiles, tab.Trend, kargs)
         if not dataTable:
             return
         # the GUI sends the (already translated) header row as the first

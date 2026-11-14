@@ -30,11 +30,11 @@ Pure module-level code moved verbatim from generator.py (worksheets split,
 2026-11-12); the FileInfoMixin writer joins this file in the extraction wave.
 """
 
-from deps.uic_stdExporter import ReportSelection
 from deps.exporter.helpers import parse_temperature_text
 from deps.exporter.sheets import plain_table_spec
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.writer import render_plain_table
+from deps.uic_stdExporter import ReportSelection
 
 # File Info rows whose values must be written as numeric cells (fix wave 2).
 # Labels arrive TRANSLATED from the main window (getFileInfoForReport) with
@@ -178,8 +178,7 @@ class FileInfoMixin:
         # "File #3"); applied unconditionally (single file -> "File #1")
         spec = plain_table_spec(
             self.tr("File Info"),
-            [self.tr("Property Name")]
-            + [f"File #{fid + 1}" for fid in self.selectedFiles],
+            [self.tr("Property Name")] + [f"File #{fid + 1}" for fid in self.selectedFiles],
             rows,
             self.tr,
             cell_number_formats=cell_number_formats,

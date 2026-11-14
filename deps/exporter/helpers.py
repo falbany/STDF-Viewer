@@ -32,7 +32,6 @@ import re
 import statistics
 
 import numpy as np
-
 from xlsxwriter.utility import xl_col_to_name
 
 from deps.SharedSrc import isPass
@@ -237,9 +236,7 @@ def flag_value(flag) -> int | None:
     return 0 if isPass(flag) else 1
 
 
-def split_dut_chunks(
-    dut_ids: list[str], cap: int = DUT_CHUNK_CAP
-) -> tuple[tuple[str, ...], ...]:
+def split_dut_chunks(dut_ids: list[str], cap: int = DUT_CHUNK_CAP) -> tuple[tuple[str, ...], ...]:
     """Split DUT IDs into consecutive chunks of at most ``cap`` per sheet.
 
     An empty list still yields one (empty) chunk so the caller renders one
@@ -395,9 +392,7 @@ def apply_cpk_formula(stat_row: list, header_info: dict, row_number: int) -> Non
 # --------------------------------------------------------------------------
 
 
-def build_stat_cp_formula(
-    spec_min_l: str, spec_max_l: str, std_l: str, row_number: int
-) -> str:
+def build_stat_cp_formula(spec_min_l: str, spec_max_l: str, std_l: str, row_number: int) -> str:
     """Live Cp formula for one Test Statistics row: (USL-LSL)/(6σ).
 
     ``=IFERROR(({max}{r}-{min}{r})/(6*{std}{r}),"")`` with the column
@@ -409,8 +404,7 @@ def build_stat_cp_formula(
     σ=0 and missing/one-sided limits.
     """
     return (
-        f"=IFERROR(({spec_max_l}{row_number}-{spec_min_l}{row_number})"
-        f'/(6*{std_l}{row_number}),"")'
+        f'=IFERROR(({spec_max_l}{row_number}-{spec_min_l}{row_number})/(6*{std_l}{row_number}),"")'
     )
 
 

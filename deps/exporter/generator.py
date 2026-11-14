@@ -64,24 +64,14 @@ keeps only the assembly — ``__init__`` state, the shared
 ``_autofit_columns`` / ``_write_body_row`` helpers, and ``report_core``.
 """
 
+import contextlib
 from itertools import product
 
 import xlsxwriter
 from PyQt5 import QtCore
 
-from deps.uic_stdExporter import (
-    ReportSelection,
-    dataChannel,
-    reportGenerator,
-    signals,
-)
 from deps.exporter.charts import complete_chart_flags
 from deps.exporter.theme import ModernTheme
-from deps.exporter.writer import (
-    apply_autofit,
-    reset_widths,
-    write_body_cell,
-)
 from deps.exporter.worksheets.bin_chart import BinChartMixin
 from deps.exporter.worksheets.dut_summary import DUTSummaryMixin, order_dut_block
 from deps.exporter.worksheets.file_info import FileInfoMixin
@@ -90,6 +80,17 @@ from deps.exporter.worksheets.histogram import HistogramMixin
 from deps.exporter.worksheets.test_statistics import TestStatisticsMixin
 from deps.exporter.worksheets.trend_chart import TrendChartMixin
 from deps.exporter.worksheets.wafer_map import WaferMapMixin
+from deps.exporter.writer import (
+    apply_autofit,
+    reset_widths,
+    write_body_cell,
+)
+from deps.uic_stdExporter import (
+    ReportSelection,
+    dataChannel,
+    reportGenerator,
+    signals,
+)
 
 # auto-fit column width = max content length * 1.1, capped (classic uses the
 # same *1.1 factor via xlsxwriter set_column; the cap is the modern bound).
@@ -167,11 +168,11 @@ class ModernReportGenerator(
         # re-measure filter hand-off (§7.2): None until writeDUT_Summary
         # stores its drop-set — None (vs an empty set) is the stat-only
         # signal that triggers the light dutInfo-only fetch
-        self._remeasure_drops: "set | None" = None
+        self._remeasure_drops: set | None = None
         # supersede rank map (2026-11-13 wafer merge): None until the
         # first _fid_ranks() call — ONE waitForFileDates round-trip per
         # export, shared by the DUT Summary dedup and the wafer merge
-        self._fid_ranks_cache: "dict | None" = None
+        self._fid_ranks_cache: dict | None = None
         # the DUT-derived sheet block (base + chunk overflow + temperature
         # splits, base first) for the close-time tab-order reorder (§7.4)
         self._dut_sheet_block: list = []
@@ -286,9 +287,8 @@ class ModernReportGenerator(
             # xlsxwriter gap completion (charts.py): inject the data-label
             # show* zeros + <c:plotVisOnly val="0"/> it cannot emit — run on
             # every exit path so even a forceQuit partial file stays clean
-            try:
+            with contextlib.suppress(OSError):
+                # a failed completion must not mask the report itself
                 complete_chart_flags(self.reportPath)
-            except OSError:
-                pass  # a failed completion must not mask the report itself
 
         self.closeSignal.emit(True)

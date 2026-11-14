@@ -40,7 +40,9 @@ def _part_id(info):
     return info[1] if len(info) > 1 and info[1] else None
 
 
-def file_dates_from_rows(rows: list[tuple], group_lengths: dict[int, int]) -> dict[int, tuple[int, str, str]]:
+def file_dates_from_rows(
+    rows: list[tuple], group_lengths: dict[int, int]
+) -> dict[int, tuple[int, str, str]]:
     """`(Fid, Field, SubFid, Value)` rows -> `{fid: (n_subfids, FINISH_T, START_T)}`.
 
     `rows` is what `DatabaseFetcher.get_file_info_rows()` returns;
@@ -55,11 +57,12 @@ def file_dates_from_rows(rows: list[tuple], group_lengths: dict[int, int]) -> di
         if field == "FINISH_T":
             if value > finish.get(fid, ""):
                 finish[fid] = value
-        elif field == "START_T":
-            if value > start.get(fid, ""):
-                start[fid] = value
-    return {fid: (group_lengths.get(fid, 1), finish.get(fid, ""), start.get(fid, ""))
-            for fid in group_lengths}
+        elif field == "START_T" and value > start.get(fid, ""):
+            start[fid] = value
+    return {
+        fid: (group_lengths.get(fid, 1), finish.get(fid, ""), start.get(fid, ""))
+        for fid in group_lengths
+    }
 
 
 def compute_fid_ranks(file_dates: dict[int, tuple[int, str, str]]) -> dict[int, int]:
@@ -73,13 +76,15 @@ def compute_fid_ranks(file_dates: dict[int, tuple[int, str, str]]) -> dict[int, 
     """
     if any(n > 1 for n, _finish, _start in file_dates.values()):
         return {fid: fid for fid in file_dates}
-    ordered = sorted(file_dates,
-                     key=lambda fid: (file_dates[fid][1] or file_dates[fid][2] or "", fid))
+    ordered = sorted(
+        file_dates, key=lambda fid: (file_dates[fid][1] or file_dates[fid][2] or "", fid)
+    )
     return {fid: rank for rank, fid in enumerate(ordered)}
 
 
-def compute_remeasure_drops(dutInfo: dict, selected_fids: list[int],
-                            fid_ranks: "dict | None" = None) -> set[tuple[int, int]]:
+def compute_remeasure_drops(
+    dutInfo: dict, selected_fids: list[int], fid_ranks: "dict | None" = None
+) -> set[tuple[int, int]]:
     """`(fid, dutIndex)` pairs the filter drops, over the export selection.
 
     `dutInfo` is the classic DUT Summary fetch `{fid: {dutIndex: info}}`

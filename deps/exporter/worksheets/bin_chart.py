@@ -27,12 +27,11 @@ tables.
 
 (Moved verbatim from generator.py, worksheets split 2026-11-12.)
 """
+
 from itertools import product
 
 import xlsxwriter.utility as xlutil
 
-from deps.SharedSrc import tab
-from deps.uic_stdExporter import ReportSelection
 from deps.exporter.charts import (
     BIN_BANNER_ROW_HEIGHT_PT,
     BIN_CHART_BAND_HEIGHT_PT,
@@ -50,6 +49,8 @@ from deps.exporter.charts import (
 )
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.writer import FOOTER_TEXT
+from deps.SharedSrc import tab
+from deps.uic_stdExporter import ReportSelection
 
 
 class BinChartMixin:
@@ -129,7 +130,7 @@ class BinChartMixin:
             )
             row += 1  # blank below the contribution headline
             section_refs = []
-            for index, (isHBIN, bins) in enumerate(zip((True, False), aggregated)):
+            for index, (isHBIN, bins) in enumerate(zip((True, False), aggregated, strict=False)):
                 kind = "Hardware" if isHBIN else "Software"
                 prefix = "HB" if isHBIN else "SB"
                 title_row = row
@@ -141,9 +142,7 @@ class BinChartMixin:
                     f"{kind} Bins — Head{head} / {site_label}",
                     f"{prefix}_Head{head}_{site_tag}",
                 )
-                section_refs.append(
-                    bin_table_ranges(title_row, len(bins)) if bins else None
-                )
+                section_refs.append(bin_table_ranges(title_row, len(bins)) if bins else None)
                 if index == 0:
                     row += 1  # single blank separator before the SB section
 
@@ -151,7 +150,7 @@ class BinChartMixin:
             # them (write order is irrelevant — refs are strings; xlsxwriter
             # resolves the numCache from the already-written cells at close)
             for (kind, anchor_letter), refs, bins in zip(
-                (("Hardware", "A"), ("Software", "D")), section_refs, aggregated
+                (("Hardware", "A"), ("Software", "D")), section_refs, aggregated, strict=False
             ):
                 if refs is None:
                     continue

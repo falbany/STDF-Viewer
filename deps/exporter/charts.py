@@ -142,6 +142,8 @@ def wafer_font_for_fill(hex6: str) -> str:
     v = hex6.lstrip("#")
     r, g, b = int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16)
     return "#000000" if (0.299 * r + 0.587 * g + 0.114 * b) > 80 else "#FFFFFF"
+
+
 # Uniform Bin-sheet page width (tenth wave: user ruling 15).
 BIN_PAGE_WIDTH_RANGE = ("A", "F")
 BIN_PAGE_COLUMN_WIDTH = 15
@@ -293,8 +295,7 @@ def bin_table_ranges(title_row: int, n_bins: int, first_col: int = BIN_TABLE_FIR
 # before <c:showPercent> (valid CT_DLbls child order: ...dLblPos?,
 # showLegendKey?, showVal?, showCatName?, showSerName?, showPercent?, ...).
 _LABEL_FLAG_ZEROS = (
-    '<c:showLegendKey val="0"/><c:showVal val="0"/>'
-    '<c:showCatName val="0"/><c:showSerName val="0"/>'
+    '<c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/>'
 )
 _LABEL_FLAG_BUBBLE_ZERO = '<c:showBubbleSize val="0"/>'  # follows showPercent
 
@@ -314,9 +315,7 @@ def _pin_label_flags(xml: str) -> str:
         )
     if "<c:plotVisOnly" not in xml:
         if "<c:dispBlanksAs" in xml:
-            xml = xml.replace(
-                "<c:dispBlanksAs", '<c:plotVisOnly val="0"/><c:dispBlanksAs', 1
-            )
+            xml = xml.replace("<c:dispBlanksAs", '<c:plotVisOnly val="0"/><c:dispBlanksAs', 1)
         else:
             xml = xml.replace("</c:chart>", '<c:plotVisOnly val="0"/></c:chart>', 1)
     return xml
@@ -342,9 +341,7 @@ def complete_chart_flags(path: str) -> None:
                 changed = True
     if not changed:
         return
-    fd, tmp = tempfile.mkstemp(
-        dir=os.path.dirname(os.path.abspath(path)), suffix=".xlsx"
-    )
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), suffix=".xlsx")
     os.close(fd)
     try:
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
@@ -435,9 +432,7 @@ def build_bin_donut(
             # per-slice modern palette with white borders (cycled)
             "points": [
                 {
-                    "fill": {
-                        "color": f"#{BIN_SLICE_PALETTE[i % len(BIN_SLICE_PALETTE)]}"
-                    },
+                    "fill": {"color": f"#{BIN_SLICE_PALETTE[i % len(BIN_SLICE_PALETTE)]}"},
                     "border": {"color": f"#{BIN_SLICE_BORDER_HEX}"},
                 }
                 for i in range(len(bins))
@@ -445,9 +440,7 @@ def build_bin_donut(
         }
     )
     chart.set_legend({"position": "right"})  # mockup: right-hand legend
-    chart.set_size(
-        {"width": cm_to_px(BIN_CHART_WIDTH_CM), "height": cm_to_px(BIN_CHART_HEIGHT_CM)}
-    )
+    chart.set_size({"width": cm_to_px(BIN_CHART_WIDTH_CM), "height": cm_to_px(BIN_CHART_HEIGHT_CM)})
     row_anchor, col_anchor = xlutil.xl_cell_to_rowcol(anchor_cell)
     ws.insert_chart(row_anchor, col_anchor, chart)
 
@@ -569,7 +562,10 @@ def write_kpi_cards(
                 "right_color": accent.format(border_hex),
             },
         )
-        def _put(row, text, fmt):
+
+        # bind this card's span explicitly — the closure is defined inside
+        # the card loop and must never see a later iteration's first0/last0
+        def _put(row, text, fmt, first0=first0, last0=last0):
             if last0 > first0:
                 ws.merge_range(row - 1, first0, row - 1, last0, text, fmt)
             else:
@@ -692,9 +688,7 @@ def write_bin_table(
     first_data_row = header_row + 1
     last_data_row = first_data_row + len(bins) - 1
 
-    header_fmt = theme.cell_format(
-        font="header", align="center", border=True, fill_hex="1E40AF"
-    )
+    header_fmt = theme.cell_format(font="header", align="center", border=True, fill_hex="1E40AF")
     ws.add_table(
         header_row - 1,
         first0,
@@ -705,16 +699,13 @@ def write_bin_table(
             "style": None,  # keep the hand-tuned theme (no gallery stripes)
             "autofilter": True,
             "columns": [
-                {"header": header, "header_format": header_fmt}
-                for header in table_headers
+                {"header": header, "header_format": header_fmt} for header in table_headers
             ],
         },
     )
 
     body_fmt = theme.cell_format(font="body", align="center", border=True)
-    pct_fmt = theme.cell_format(
-        font="body", align="center", border=True, num_fmt=BIN_PCT_FORMAT
-    )
+    pct_fmt = theme.cell_format(font="body", align="center", border=True, num_fmt=BIN_PCT_FORMAT)
     for offset, (bin_num, name, count) in enumerate(bins):
         row0 = first_data_row - 1 + offset
         ws.write(row0, first0, sanitize_cell(name), body_fmt)
@@ -786,9 +777,7 @@ def write_bin_table(
         total_row - 1,
         last0,
         1.0,
-        theme.cell_format(
-            font="bold_body", align="center", border=True, num_fmt=BIN_PCT_FORMAT
-        ),
+        theme.cell_format(font="bold_body", align="center", border=True, num_fmt=BIN_PCT_FORMAT),
     )
 
     return total_row + 1
@@ -864,7 +853,7 @@ def build_wafer_grid(map_data: dict):
         xs, ys = xy.get("x"), xy.get("y")
         if xs is None or ys is None:
             continue
-        for x, y in zip(xs, ys):
+        for x, y in zip(xs, ys, strict=False):
             grid[(int(x), int(y))] = sbin
     return x_axis, y_axis, grid, len(grid)
 
@@ -952,8 +941,7 @@ def wafer_info_rows(rows: list) -> list:
             if not (
                 isinstance(cell, str)
                 and (
-                    KPI_ROW_RE.match(cell.strip()) is not None
-                    or cell.strip().startswith("Yield:")
+                    KPI_ROW_RE.match(cell.strip()) is not None or cell.strip().startswith("Yield:")
                 )
             )
         ]
@@ -1063,18 +1051,14 @@ def write_wafer_map_block(
     if not grid:
         # empty wafer (WIR/WCR-only or degenerate payload): title +
         # identity lines only — the export must not break
-        ws.merge_range(
-            start_row - 1, 0, start_row - 1, 3, title, theme.lookalike("title")
-        )
+        ws.merge_range(start_row - 1, 0, start_row - 1, 3, title, theme.lookalike("title"))
         for offset, cell in enumerate(identity_cells):
             key, _, value = cell.partition(":")
             _wafer_kv_row(ws, start_row + 1 + offset, key.strip() + ":", value.strip(), theme)
         return start_row + len(identity_cells) + 1
 
     last_col0 = WAFER_FIRST_DIE_COL0 + len(x_axis) - 1
-    ws.merge_range(
-        start_row - 1, 0, start_row - 1, last_col0, title, theme.lookalike("title")
-    )
+    ws.merge_range(start_row - 1, 0, start_row - 1, last_col0, title, theme.lookalike("title"))
 
     # identity lines right below the title (WAFER_ID on line 2)
     for offset, cell in enumerate(identity_cells):
@@ -1107,10 +1091,10 @@ def write_wafer_map_block(
     # the SW table's Count column is C (first_col=1: A name, B value,
     # C count); its data rows start two rows below the table start
     count_letter = xlutil.xl_col_to_name(2)
+
     def _count_refs(bins):
-        return [
-            f"{count_letter}{sw_start + 2 + bins_present.index(b)}" for b in bins
-        ]
+        return [f"{count_letter}{sw_start + 2 + bins_present.index(b)}" for b in bins]
+
     pass_bins = [b for b in bins_present if pf_map[b] == "P"]
     fail_bins = [b for b in bins_present if pf_map[b] == "F"]
     pass_refs, fail_refs = _count_refs(pass_bins), _count_refs(fail_bins)
@@ -1131,7 +1115,7 @@ def write_wafer_map_block(
         (
             "Total Parts",
             (f"=COUNT({map_range})", effective_total),
-            "across %d file(s)" % source_files if source_files is not None else "across 1 file(s)",
+            f"across {source_files} file(s)" if source_files is not None else "across 1 file(s)",
             False,
         ),
     )
@@ -1160,9 +1144,7 @@ def write_wafer_map_block(
 
     # map anchor: X-coordinate headers on start_row+3 (F4's row for the
     # first block), dies from the next row, Y-axis header in F
-    axis_fmt = theme.cell_format(
-        font="bold_body", align="center", border=True, fill_hex="EDEFF2"
-    )
+    axis_fmt = theme.cell_format(font="bold_body", align="center", border=True, fill_hex="EDEFF2")
     for col_offset, x in enumerate(x_axis):
         ws.write(xh_row - 1, WAFER_FIRST_DIE_COL0 + col_offset, str(x), axis_fmt)
 
@@ -1175,7 +1157,10 @@ def write_wafer_map_block(
             font="body",
             align="center",
             extra={
-                "top": 5, "bottom": 5, "left": 5, "right": 5,
+                "top": 5,
+                "bottom": 5,
+                "left": 5,
+                "right": 5,
                 "top_color": f"#{WAFER_SUPERSEDED_BORDER_HEX}",
                 "bottom_color": f"#{WAFER_SUPERSEDED_BORDER_HEX}",
                 "left_color": f"#{WAFER_SUPERSEDED_BORDER_HEX}",
@@ -1228,8 +1213,7 @@ def write_wafer_map_block(
     # alongside), recalculating when the user edits die values
     statistic = map_data.get("Statistic") or {}
     bins_rows = [
-        (sbin, statistic.get(sbin, (f"Bin {sbin}",))[0], counts[sbin])
-        for sbin in bins_present
+        (sbin, statistic.get(sbin, (f"Bin {sbin}",))[0], counts[sbin]) for sbin in bins_present
     ]
     write_bin_table(
         ws,
@@ -1261,9 +1245,7 @@ WAFER_GRADIENT_MIN_HEX = "#00CC00"
 WAFER_GRADIENT_MID_HEX = "#FFFF00"
 WAFER_GRADIENT_MAX_HEX = "#CC0000"
 
-WAFER_STACKED_LEGEND = (
-    "Green: few fails → Red: many · 0: probed, passed · blank: never probed"
-)
+WAFER_STACKED_LEGEND = "Green: few fails → Red: many · 0: probed, passed · blank: never probed"
 
 
 def stacked_wafer_table_rows(payloads: list) -> tuple:
@@ -1281,11 +1263,13 @@ def stacked_wafer_table_rows(payloads: list) -> tuple:
     for wafer_id, payload in payloads:
         _x, _y, grid, _n = build_wafer_grid(payload.get("map") or {})
         kpi = aggregate_kpi(payload.get("rows") or [])
-        rows.append((
-            wafer_id,
-            sum(1 for v in grid.values() if v == 1),
-            kpi["yield"],
-        ))
+        rows.append(
+            (
+                wafer_id,
+                sum(1 for v in grid.values() if v == 1),
+                kpi["yield"],
+            )
+        )
         for key in KPI_KEYS:
             sums[key] += kpi.get(key, 0)
     effective = sums["total"] - sums["superseded"]
@@ -1323,19 +1307,24 @@ def write_stacked_wafer_table(
     last0 = len(WAFER_STACKED_TABLE_HEADERS) - 1  # A:C
 
     ws.merge_range(
-        start_row - 1, 0, start_row - 1, last0,
-        WAFER_STACKED_TABLE_TITLE, theme.lookalike(BIN_SECTION_STYLE),
+        start_row - 1,
+        0,
+        start_row - 1,
+        last0,
+        WAFER_STACKED_TABLE_TITLE,
+        theme.lookalike(BIN_SECTION_STYLE),
     )
     note_width(ws, 1, WAFER_STACKED_TABLE_TITLE)
 
     header_row = start_row + 1
     first_data = header_row + 1
     last_data = first_data + len(wafer_rows) - 1
-    header_fmt = theme.cell_format(
-        font="header", align="center", border=True, fill_hex="1E40AF"
-    )
+    header_fmt = theme.cell_format(font="header", align="center", border=True, fill_hex="1E40AF")
     ws.add_table(
-        header_row - 1, 0, last_data - 1, last0,
+        header_row - 1,
+        0,
+        last_data - 1,
+        last0,
         {
             "name": table_name,
             "style": None,  # keep the hand-tuned theme (no gallery stripes)
@@ -1348,9 +1337,7 @@ def write_stacked_wafer_table(
     )
 
     body_fmt = theme.cell_format(font="body", align="center", border=True)
-    pct_fmt = theme.cell_format(
-        font="body", align="center", border=True, num_fmt=BIN_PCT_FORMAT
-    )
+    pct_fmt = theme.cell_format(font="body", align="center", border=True, num_fmt=BIN_PCT_FORMAT)
     bin1_total = 0
     for offset, (wafer_id, bin1, yld) in enumerate(wafer_rows):
         row0 = first_data - 1 + offset
@@ -1374,9 +1361,11 @@ def write_stacked_wafer_table(
     ws.write(total_row - 1, 0, BIN_TOTAL_LABEL, total_fmt)
     bin_letter = xlutil.xl_col_to_name(1)
     ws.write_formula(
-        total_row - 1, 1,
+        total_row - 1,
+        1,
         f"=SUM({bin_letter}{first_data}:{bin_letter}{last_data})",
-        total_fmt, bin1_total,
+        total_fmt,
+        bin1_total,
     )
     if overall_yield is not None:
         ws.write(total_row - 1, 2, float(overall_yield), total_pct_fmt)
@@ -1437,14 +1426,16 @@ def write_stacked_wafer_block(
     if not grid:
         # empty stacked aggregation (no failed DUTs in the selection):
         # title + legend + info lines — the export must not break
-        ws.merge_range(
-            start_row - 1, 0, start_row - 1, 3, title, theme.lookalike("title")
-        )
+        ws.merge_range(start_row - 1, 0, start_row - 1, 3, title, theme.lookalike("title"))
         # no grid → no map-width span: merge across a 5-die map's span
         # (A:K) so both branches carry the same legend
         ws.merge_range(
-            start_row, 0, start_row, WAFER_FIRST_DIE_COL0 + 4,
-            WAFER_STACKED_LEGEND, _wafer_prop_fmt(theme, ""),
+            start_row,
+            0,
+            start_row,
+            WAFER_FIRST_DIE_COL0 + 4,
+            WAFER_STACKED_LEGEND,
+            _wafer_prop_fmt(theme, ""),
         )
         for offset, cell in enumerate(info_cells):
             key, _, value = cell.partition(":")
@@ -1452,15 +1443,17 @@ def write_stacked_wafer_block(
         return start_row + len(info_cells) + 2
 
     last_col0 = WAFER_FIRST_DIE_COL0 + len(x_axis) - 1
-    ws.merge_range(
-        start_row - 1, 0, start_row - 1, last_col0, title, theme.lookalike("title")
-    )
+    ws.merge_range(start_row - 1, 0, start_row - 1, last_col0, title, theme.lookalike("title"))
 
     # reading legend on row 2, the sbin identity slot (full width, the
     # "Explanatory Text" lookalike)
     ws.merge_range(
-        start_row, 0, start_row, last_col0,
-        WAFER_STACKED_LEGEND, _wafer_prop_fmt(theme, ""),
+        start_row,
+        0,
+        start_row,
+        last_col0,
+        WAFER_STACKED_LEGEND,
+        _wafer_prop_fmt(theme, ""),
     )
 
     xh_row = start_row + 2  # 1-based X-header row — the sbin F3 anchor
@@ -1479,9 +1472,7 @@ def write_stacked_wafer_block(
     ws.set_column(WAFER_YAXIS_COL0, WAFER_YAXIS_COL0, WAFER_YAXIS_WIDTH)
     ws.set_column(WAFER_FIRST_DIE_COL0, last_col0, WAFER_DIE_WIDTH)
 
-    axis_fmt = theme.cell_format(
-        font="bold_body", align="center", border=True, fill_hex="EDEFF2"
-    )
+    axis_fmt = theme.cell_format(font="bold_body", align="center", border=True, fill_hex="EDEFF2")
     for col_offset, x in enumerate(x_axis):
         ws.write(xh_row - 1, WAFER_FIRST_DIE_COL0 + col_offset, str(x), axis_fmt)
 
@@ -1513,9 +1504,12 @@ def write_stacked_wafer_block(
         "min_color": WAFER_GRADIENT_MIN_HEX,
         "mid_color": WAFER_GRADIENT_MID_HEX,
         "max_color": WAFER_GRADIENT_MAX_HEX,
-        "min_type": "num", "min_value": die_values[0],
-        "mid_type": "num", "mid_value": die_mid,
-        "max_type": "num", "max_value": die_values[-1],
+        "min_type": "num",
+        "min_value": die_values[0],
+        "mid_type": "num",
+        "mid_value": die_mid,
+        "max_type": "num",
+        "max_value": die_values[-1],
     }
     ws.conditional_format(
         f"{first_letter}{xh_row + 1}:{last_letter}{xh_row + len(y_axis)}",
@@ -1539,16 +1533,28 @@ def write_stacked_wafer_block(
             except ValueError:
                 files = 0
     card_defs = (
-        ("Total Failed DUTs", (f"=SUM({map_range})", total),
-         "fail count per die, summed across all files", False),
-        ("Fail Coordinates", (f'=COUNTIF({map_range},">0")', coords),
-         "dies failing at least once", False),
+        (
+            "Total Failed DUTs",
+            (f"=SUM({map_range})", total),
+            "fail count per die, summed across all files",
+            False,
+        ),
+        (
+            "Fail Coordinates",
+            (f'=COUNTIF({map_range},">0")', coords),
+            "dies failing at least once",
+            False,
+        ),
         ("Files", files, "stacked hot-spot view", False),
         # 2026-11-14 user ask: slot 2 (rows 10-12) splits in two — the
         # Total Parts analog (live COUNT over the die grid, lavender) +
         # the per-wafer DUT total (light green)
-        ("DUTs per Wafer", (f"=COUNT({map_range})", len(grid)),
-         "probed dies across all wafers", False),
+        (
+            "DUTs per Wafer",
+            (f"=COUNT({map_range})", len(grid)),
+            "probed dies across all wafers",
+            False,
+        ),
         ("Total DUTs Tested", total_duts, "Σ of the per-wafer DUT totals", False),
     )
     write_kpi_cards(
@@ -1567,7 +1573,11 @@ def write_stacked_wafer_block(
     table_row = start_row + 14  # the sbin SW-table slot (row 15, A:D zone)
     if wafer_rows and wafer_table_name:
         wafers_end = write_stacked_wafer_table(
-            ws, table_row, wafer_rows, overall_yield, theme,
+            ws,
+            table_row,
+            wafer_rows,
+            overall_yield,
+            theme,
             wafer_table_name,
         )
         next_free = max(next_free, wafers_end)
@@ -1579,15 +1589,16 @@ def write_stacked_wafer_block(
         counts = {}
         for v in grid.values():
             counts[v] = counts.get(v, 0) + 1
-        fail_bins = [
-            (v, "1 fail" if v == 1 else f"{v} fails", counts[v])
-            for v in sorted(counts)
-        ]
+        fail_bins = [(v, "1 fail" if v == 1 else f"{v} fails", counts[v]) for v in sorted(counts)]
         next_free = max(
             next_free,
             write_bin_table(
-                ws, table_row, fail_bins, theme,
-                WAFER_FAIL_TABLE_TITLE, fail_table_name,
+                ws,
+                table_row,
+                fail_bins,
+                theme,
+                WAFER_FAIL_TABLE_TITLE,
+                fail_table_name,
                 first_col=1,
                 count_map_range=map_range,
                 headers=WAFER_FAIL_TABLE_HEADERS,

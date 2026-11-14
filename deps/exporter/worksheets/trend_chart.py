@@ -26,11 +26,11 @@ Trend Chart worksheet writer (moved verbatim from generator.py,
 worksheets split 2026-11-12).
 """
 
-from deps.SharedSrc import tab
-from deps.uic_stdExporter import ReportSelection
 from deps.exporter.sheets import insert_report_image
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.writer import FOOTER_TEXT
+from deps.SharedSrc import tab
+from deps.uic_stdExporter import ReportSelection
 
 
 class TrendChartMixin:
@@ -42,9 +42,7 @@ class TrendChartMixin:
             return
 
         # get image and stat from main thread
-        image_io = self.waitForImage(
-            testTuple, head, [site], self.selectedFiles, tab.Trend
-        )
+        image_io = self.waitForImage(testTuple, head, [site], self.selectedFiles, tab.Trend)
         dataTable = self.waitForDataList(
             [head], [site], self.selectedFiles, tab.Trend, {"testTuples": [testTuple]}
         )
