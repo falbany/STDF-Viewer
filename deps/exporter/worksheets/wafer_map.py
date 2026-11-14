@@ -68,8 +68,12 @@ class WaferMapMixin:
         """The per-wafer cosmetics (2026-11-13 column plan — pinned AFTER
         the autofit so these win over the ledger (only A:D ever get
         notes, from the SW table): A=30 (keys/labels), B:D=8 (values),
-        E=3.5 (spacer)) + gridlines off, footer, tab color. Shared by
-        the per-file sheets and the merged sheet."""
+        E=3.5 (spacer)) + gridlines off, footer, tab color, and the
+        2026-11-14 print setup (A4 landscape, one page wide / unlimited
+        tall; rows 1-3 repeat on every printed page — a span coupled to
+        every wafer block anchoring X-headers at row 3 via start_row=1,
+        so moving a block's anchor moves this span). Shared by the
+        per-file sheets, the merged sheet and the stacked sheet."""
         self._autofit_columns(WaferSheet)
         WaferSheet.set_column(0, 0, WAFER_LABEL_COL_WIDTH)
         WaferSheet.set_column(1, 3, WAFER_VALUE_COL_WIDTH)
