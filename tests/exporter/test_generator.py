@@ -591,22 +591,21 @@ class TestStackedWaferSheet:
         )
         wb = load_workbook(reportPath)
         stacked = wb["Wafer Stacked Map (All Wafers)"]
-        # 3 info cells: title row 1, info lines 2-4, X headers row 6, dies
-        # row 7 — the canned payload's fail counts as ints (x=1..3 → 1,
-        # x=4 → 3), G-anchored; the count-0 die (probed, never failed)
-        # renders as 0 at K7; the info rows count FAILING coords only
+        # title row 1, legend rows 2-3, info lines 4-6, X headers row 8,
+        # dies row 9 — the canned payload's fail counts as ints (x=1..3 →
+        # 1, x=4 → 3), G-anchored; the count-0 die (probed, never failed)
+        # renders as 0 at K9; the info rows count FAILING coords only
         # (total = 0*1 + 1*3 + 3*1 = 6, coordinates = 4)
         assert stacked["A1"].value == "Stacked Wafer Map – All Sites"
-        assert [stacked.cell(row=7, column=c).value for c in range(7, 12)] == [1, 1, 1, 3, 0]
-        assert stacked["B2"].value == "6"
-        assert stacked["B3"].value == "4"
+        assert [stacked.cell(row=9, column=c).value for c in range(7, 12)] == [1, 1, 1, 3, 0]
+        assert stacked["B4"].value == "6"
+        assert stacked["B5"].value == "4"
         # spec Goal 4: the stacked sheet reuses the per-sheet cosmetics —
-        # its grid freezes like every wafer sheet (G7 = first die cell:
-        # title + info lines + X-header row stay visible)
-        assert stacked.freeze_panes == "G7"
-        # the reading legend rides under the grid (row 9: what the sheet
-        # aggregates)
-        assert stacked["A9"].value == WAFER_STACKED_LEGEND[0]
+        # its grid freezes like every wafer sheet (G9 = first die cell:
+        # title + legend + info lines + X-header row stay visible)
+        assert stacked.freeze_panes == "G9"
+        # the reading legend sits right below the title (rows 2-3)
+        assert stacked["A2"].value == WAFER_STACKED_LEGEND[0]
 
     def test_setting_independence(self, tmp_path, qapp, monkeypatch):
         for hide in (False, True):
@@ -644,7 +643,7 @@ class TestStackedWaferSheet:
             styles = read_xml(fh.read(), "xl/styles.xml")
         assert "C55A11" in styles  # the merged sheet carries the border
         stacked = wb["Wafer Stacked Map (All Wafers)"]
-        for coord in ("G7", "H7", "I7", "J7"):
+        for coord in ("G9", "H9", "I9", "J9"):
             border = stacked[coord].border
             for side in (border.top, border.bottom, border.left, border.right):
                 assert side.style is None

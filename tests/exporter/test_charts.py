@@ -1488,16 +1488,17 @@ class TestStackedWaferBlock:
     def test_counts_written_as_values(self, env):
         nxt = self.written(env)
         reloaded = env["reload"]()
-        # 3 info cells: lines on rows 2-4, blank row 5, X headers row 6,
-        # dies row 7, G-anchored per the layout constants (x=1..5 → G..K);
-        # count 1 at (x=1..3), 3 at (x=4), (x=5) has no fails → unwritten
-        assert [reloaded.cell(row=7, column=c).value for c in range(7, 12)] == [
+        # title row 1, legend rows 2-3, 3 info cells: lines on rows 4-6,
+        # blank row 7, X headers row 8, dies row 9, G-anchored per the
+        # layout constants (x=1..5 → G..K); count 1 at (x=1..3), 3 at
+        # (x=4), (x=5) has no fails → unwritten
+        assert [reloaded.cell(row=9, column=c).value for c in range(7, 12)] == [
             1, 1, 1, 3, None,
         ]
-        assert reloaded["G6"].value == "1"  # first X header, str(x)
-        assert reloaded["F7"].value == "1"  # Y-axis header
+        assert reloaded["G8"].value == "1"  # first X header, str(x)
+        assert reloaded["F9"].value == "1"  # Y-axis header
         assert reloaded.tables == {}  # no SW bin table on the stacked sheet
-        assert nxt == 11  # dies end 7, blank 8, legend 9-10 → next free 11
+        assert nxt == 10  # grid ends at xh_row 8 + 1 die row → next free 10
 
     def test_gradient_cf_rule_present(self, env):
         self.written(env)
@@ -1522,14 +1523,17 @@ class TestStackedWaferBlock:
         xml = read_xml(env["book"], "xl/worksheets/sheet1.xml")
         assert "conditionalFormatting" not in xml  # no grid → no CF rule
         assert "A1:D1" in {str(r) for r in reloaded.merged_cells.ranges}
-        assert reloaded["A9"].value is None  # no grid → no reading legend
-        assert reloaded["A2"].value == "Total Failed DUTs:"
-        assert reloaded["B2"].value == "0"
-        assert reloaded["A3"].value == "Fail Coordinates:"
-        assert reloaded["B3"].value == "0"
-        assert reloaded["A4"].value == "Files:"
-        assert reloaded["B4"].value == "1"
-        assert nxt == 5
+        # the legend still rides below the title (it explains the SHEET,
+        # not the grid), merged across a 5-die map's span A:K
+        assert reloaded["A2"].value == WAFER_STACKED_LEGEND[0]
+        assert reloaded["A3"].value == WAFER_STACKED_LEGEND[1]
+        assert reloaded["A4"].value == "Total Failed DUTs:"
+        assert reloaded["B4"].value == "0"
+        assert reloaded["A5"].value == "Fail Coordinates:"
+        assert reloaded["B5"].value == "0"
+        assert reloaded["A6"].value == "Files:"
+        assert reloaded["B6"].value == "1"
+        assert nxt == 7
 
     def test_single_count_renders(self, env):
         # every coordinate shares one fail count (min == max): the rule is
@@ -1537,7 +1541,7 @@ class TestStackedWaferBlock:
         m = dict(STACKED_MAP, Data={2: {"x": [1, 2], "y": [1, 1]}}, Bounds=(2, 1, 1, 1))
         self.written(env, map_data=m)
         reloaded = env["reload"]()
-        assert [reloaded.cell(row=7, column=c).value for c in range(7, 9)] == [2, 2]
+        assert [reloaded.cell(row=9, column=c).value for c in range(7, 9)] == [2, 2]
         xml = read_xml(env["book"], "xl/worksheets/sheet1.xml")
         assert xml.count('type="colorScale"') == 1
 
@@ -1547,32 +1551,33 @@ class TestStackedWaferBlock:
         m = dict(STACKED_MAP, Data={1: {"x": [1, 5], "y": [2, 2]}}, Bounds=(5, 1, 2, 2))
         self.written(env, map_data=m)
         reloaded = env["reload"]()
-        assert [reloaded.cell(row=6, column=c).value for c in range(7, 12)] == [
+        assert [reloaded.cell(row=8, column=c).value for c in range(7, 12)] == [
             "1", "2", "3", "4", "5",
         ]
-        assert reloaded["G7"].value == 1 and reloaded["K7"].value == 1
-        assert all(reloaded.cell(row=7, column=c).value is None for c in range(8, 11))
+        assert reloaded["G9"].value == 1 and reloaded["K9"].value == 1
+        assert all(reloaded.cell(row=9, column=c).value is None for c in range(8, 11))
 
     def test_title_and_info_lines(self, env):
         self.written(env)
         reloaded = env["reload"]()
         assert "A1:K1" in {str(r) for r in reloaded.merged_cells.ranges}
         assert reloaded["A1"].value == "Stacked Wafer Map – All Sites"
-        assert reloaded["A2"].value == "Total Failed DUTs:"
-        assert reloaded["B2"].value == "6"
-        assert reloaded["A3"].value == "Fail Coordinates:"
-        assert reloaded["B3"].value == "4"
-        assert reloaded["A4"].value == "Files:"
-        assert reloaded["B4"].value == "2"
+        assert reloaded["A4"].value == "Total Failed DUTs:"
+        assert reloaded["B4"].value == "6"
+        assert reloaded["A5"].value == "Fail Coordinates:"
+        assert reloaded["B5"].value == "4"
+        assert reloaded["A6"].value == "Files:"
+        assert reloaded["B6"].value == "2"
 
-    def test_legend_lines_under_grid(self, env):
-        # reading legend (2026-11-13 user ask): what the map aggregates +
-        # how to read the gradient and the blank vs 0 distinction — two
-        # italic lines merged across the map width, under the grid
+    def test_legend_lines_below_title(self, env):
+        # reading legend (2026-11-13 user ask; 2026-11-14 ruling: rows 2-3
+        # right below the title — it drives the sheet's comprehension, so
+        # it reads before the numbers): two italic lines merged across
+        # the map width
         nxt = self.written(env)
         reloaded = env["reload"]()
-        assert reloaded["A9"].value == WAFER_STACKED_LEGEND[0]
-        assert reloaded["A10"].value == WAFER_STACKED_LEGEND[1]
+        assert reloaded["A2"].value == WAFER_STACKED_LEGEND[0]
+        assert reloaded["A3"].value == WAFER_STACKED_LEGEND[1]
         merges = {str(r) for r in reloaded.merged_cells.ranges}
-        assert "A9:K9" in merges and "A10:K10" in merges
-        assert nxt == 11
+        assert "A2:K2" in merges and "A3:K3" in merges
+        assert nxt == 10

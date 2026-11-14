@@ -1225,11 +1225,12 @@ def write_wafer_map_block(
     return max(sw_start + len(bins_present) + 3, xh_row + len(y_axis) + 1)
 
 
-# issue #5 reading legend (2026-11-13 user ask): two italic lines under
-# the stacked grid — what the map aggregates (cross-file fail-count
-# hot-spot view) and how to read the gradient plus the blank-vs-0
-# distinction (0 = probed & passed, blank = never probed). Lines sized
-# to render inside the A:map-width merge without wrapping.
+# issue #5 reading legend (2026-11-13 user ask; 2026-11-14 ruling: rows
+# 2-3 right below the title): two italic lines — what the map aggregates
+# (cross-file fail-count hot-spot view) and how to read the gradient
+# plus the blank-vs-0 distinction (0 = probed & passed, blank = never
+# probed). Lines sized to render inside the A:map-width merge without
+# wrapping; the empty branch merges across a 5-die map's span (A:K).
 WAFER_STACKED_LEGEND = (
     "Fail count per die, accumulated over every selected file (hot-spot view)",
     "Green: few fails → Red: many · 0: probed, passed · blank: never probed",
@@ -1252,14 +1253,16 @@ def write_stacked_wafer_block(
     F — under ONE 3_color_scale rule (green #00CC00 low → yellow #FFFF00
     → red #CC0000 high; default min / percentile-50 / max anchors, the
     sbin palette's pass/fail hexes with Excel's canonical mid). No KPI
-    cards, no SW bin table — there are no software bins to table. Real
-    aggregations carry a count-0 bucket (getStackedWaferData seeds every
-    probed coordinate): probed-but-passing dies render as 0 at the green
-    end of the gradient, wafer-outline style; only never-probed gap
-    coordinates stay unwritten (CF ignores blanks). One blank row below
-    the grid, the two-line reading legend (WAFER_STACKED_LEGEND, merged
-    across the map width). Empty grid → title + info lines only. Returns
-    the next free row."""
+    cards, no SW bin table — there are no software bins to table. The
+    two-line reading legend (WAFER_STACKED_LEGEND) sits on rows 2-3 right
+    below the title (2026-11-14 user ruling: it drives the sheet's
+    comprehension, so it reads before the numbers — both branches, empty
+    included: it explains the SHEET, not the grid). Real aggregations
+    carry a count-0 bucket (getStackedWaferData seeds every probed
+    coordinate): probed-but-passing dies render as 0 at the green end of
+    the gradient, wafer-outline style; only never-probed gap coordinates
+    stay unwritten (CF ignores blanks). Empty grid → title + legend +
+    info lines only. Returns the next free row."""
     info = map_data.get("Info") or (1.0, "", False, False, "", [])
     wafer_id = info[4] if len(info) > 4 else ""
     sites = info[5] if len(info) > 5 else []
@@ -1271,26 +1274,39 @@ def write_stacked_wafer_block(
 
     if not grid:
         # empty stacked aggregation (no failed DUTs in the selection):
-        # title + info lines only — the export must not break
+        # title + legend + info lines — the export must not break
         ws.merge_range(
             start_row - 1, 0, start_row - 1, 3, title, theme.lookalike("title")
         )
+        # no grid → no map-width span: merge across a 5-die map's span
+        # (A:K) so both branches carry the same legend
+        for offset, line in enumerate(WAFER_STACKED_LEGEND):
+            ws.merge_range(
+                start_row + offset, 0, start_row + offset,
+                WAFER_FIRST_DIE_COL0 + 4, line, _wafer_prop_fmt(theme, ""),
+            )
         for offset, cell in enumerate(info_cells):
             key, _, value = cell.partition(":")
-            _wafer_kv_row(ws, start_row + 1 + offset, key.strip() + ":", value.strip(), theme)
-        return start_row + len(info_cells) + 1
+            _wafer_kv_row(ws, start_row + 3 + offset, key.strip() + ":", value.strip(), theme)
+        return start_row + len(info_cells) + 3
 
     last_col0 = WAFER_FIRST_DIE_COL0 + len(x_axis) - 1
     ws.merge_range(
         start_row - 1, 0, start_row - 1, last_col0, title, theme.lookalike("title")
     )
 
-    # info lines right below the title (one blank row before the map)
+    # reading legend right below the title (rows 2-3), then the info
+    # lines (one blank row before the map)
+    for offset, line in enumerate(WAFER_STACKED_LEGEND):
+        ws.merge_range(
+            start_row + offset, 0, start_row + offset, last_col0,
+            line, _wafer_prop_fmt(theme, ""),
+        )
     for offset, cell in enumerate(info_cells):
         key, _, value = cell.partition(":")
-        _wafer_kv_row(ws, start_row + 1 + offset, key.strip() + ":", value.strip(), theme)
+        _wafer_kv_row(ws, start_row + 3 + offset, key.strip() + ":", value.strip(), theme)
 
-    xh_row = start_row + len(info_cells) + 2  # 1-based X-header row
+    xh_row = start_row + len(info_cells) + 4  # 1-based X-header row
     first_letter = xlutil.xl_col_to_name(WAFER_FIRST_DIE_COL0)
     last_letter = xlutil.xl_col_to_name(last_col0)
 
@@ -1330,13 +1346,4 @@ def write_stacked_wafer_block(
          "min_color": "#00CC00", "mid_color": "#FFFF00", "max_color": "#CC0000"},
     )
 
-    # reading legend under the grid (one blank row after the last die
-    # row), the "Explanatory Text" lookalike like the properties box
-    legend_row = xh_row + len(y_axis) + 2  # 1-based; blank row sits at +1
-    for offset, line in enumerate(WAFER_STACKED_LEGEND):
-        ws.merge_range(
-            legend_row - 1 + offset, 0, legend_row - 1 + offset, last_col0,
-            line, _wafer_prop_fmt(theme, ""),
-        )
-
-    return xh_row + len(y_axis) + 4
+    return xh_row + len(y_axis) + 1
