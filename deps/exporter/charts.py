@@ -1225,15 +1225,15 @@ def write_wafer_map_block(
     return max(sw_start + len(bins_present) + 3, xh_row + len(y_axis) + 1)
 
 
-# issue #5 reading legend (2026-11-13 user ask; 2026-11-14 ruling: rows
-# 2-3 right below the title): two italic lines — what the map aggregates
-# (cross-file fail-count hot-spot view) and how to read the gradient
-# plus the blank-vs-0 distinction (0 = probed & passed, blank = never
-# probed). Lines sized to render inside the A:map-width merge without
-# wrapping; the empty branch merges across a 5-die map's span (A:K).
+# issue #5 reading legend (2026-11-13 user ask; 2026-11-14 sbin-uniform
+# layout: ONE line on row 2, the identity slot — the map anchor at F3
+# leaves a single full-width row, and the "what it aggregates" moved into
+# the headline card's subtitle): how to read the gradient plus the
+# blank-vs-0 distinction (0 = probed & passed, blank = never probed).
+# Sized to render inside the A:map-width merge without wrapping; the
+# empty branch merges across a 5-die map's span (A:K).
 WAFER_STACKED_LEGEND = (
-    "Fail count per die, accumulated over every selected file (hot-spot view)",
-    "Green: few fails → Red: many · 0: probed, passed · blank: never probed",
+    "Green: few fails → Red: many · 0: probed, passed · blank: never probed"
 )
 
 
@@ -1245,24 +1245,24 @@ def write_stacked_wafer_block(
     start_row: int,
     freeze_panes: bool = False,
 ) -> int:
-    """One stacked wafer block (issue #5): title band, the info lines
-    (total failed DUTs / fail coordinates / files — NOT passed through
-    wafer_info_rows: there are no KPI cells to drop), then the live
-    fail-count die grid anchored at F{start + len(info) + 2} — counts as
-    the cell VALUES from G, X headers on the anchor row, Y-axis header in
-    F — under ONE 3_color_scale rule (green #00CC00 low → yellow #FFFF00
-    → red #CC0000 high; default min / percentile-50 / max anchors, the
-    sbin palette's pass/fail hexes with Excel's canonical mid). No KPI
-    cards, no SW bin table — there are no software bins to table. The
-    two-line reading legend (WAFER_STACKED_LEGEND) sits on rows 2-3 right
-    below the title (2026-11-14 user ruling: it drives the sheet's
-    comprehension, so it reads before the numbers — both branches, empty
-    included: it explains the SHEET, not the grid). Real aggregations
-    carry a count-0 bucket (getStackedWaferData seeds every probed
-    coordinate): probed-but-passing dies render as 0 at the green end of
-    the gradient, wafer-outline style; only never-probed gap coordinates
-    stay unwritten (CF ignores blanks). Empty grid → title + legend +
-    info lines only. Returns the next free row."""
+    """One stacked wafer block (issue #5; 2026-11-14 sbin-uniform layout):
+    title band, the reading legend on row 2 (the sbin identity slot), the
+    live fail-count die grid anchored at F{start + 2} EXACTLY like the
+    sbin sheets (X headers on the anchor row, Y-axis header in F, dies
+    from the next one — counts as the cell VALUES from G) under ONE
+    3_color_scale rule (green #00CC00 low → yellow #FFFF00 → red #CC0000
+    high; default min / percentile-50 / max anchors), and the three info
+    items as KPI cards across A:D with the sbin geometry (Total Failed
+    DUTs full-width rows 4-6 =SUM over the die grid; Fail Coordinates
+    col A + Files B:D side by side rows 7-9, =COUNTIF ">0" / plain count
+    — cached results ride the formulas). No SW bin table — there are no
+    software bins to table. Real aggregations carry a count-0 bucket
+    (getStackedWaferData seeds every probed coordinate): probed-but-
+    passing dies render as 0 at the green end of the gradient,
+    wafer-outline style; only never-probed gap coordinates stay unwritten
+    (CF ignores blanks). Empty grid → title + legend + the info items as
+    plain kv lines, no cards (the sbin empty shape). Returns the next
+    free row."""
     info = map_data.get("Info") or (1.0, "", False, False, "", [])
     wafer_id = info[4] if len(info) > 4 else ""
     sites = info[5] if len(info) > 5 else []
@@ -1280,38 +1280,33 @@ def write_stacked_wafer_block(
         )
         # no grid → no map-width span: merge across a 5-die map's span
         # (A:K) so both branches carry the same legend
-        for offset, line in enumerate(WAFER_STACKED_LEGEND):
-            ws.merge_range(
-                start_row + offset, 0, start_row + offset,
-                WAFER_FIRST_DIE_COL0 + 4, line, _wafer_prop_fmt(theme, ""),
-            )
+        ws.merge_range(
+            start_row, 0, start_row, WAFER_FIRST_DIE_COL0 + 4,
+            WAFER_STACKED_LEGEND, _wafer_prop_fmt(theme, ""),
+        )
         for offset, cell in enumerate(info_cells):
             key, _, value = cell.partition(":")
-            _wafer_kv_row(ws, start_row + 3 + offset, key.strip() + ":", value.strip(), theme)
-        return start_row + len(info_cells) + 3
+            _wafer_kv_row(ws, start_row + 2 + offset, key.strip() + ":", value.strip(), theme)
+        return start_row + len(info_cells) + 2
 
     last_col0 = WAFER_FIRST_DIE_COL0 + len(x_axis) - 1
     ws.merge_range(
         start_row - 1, 0, start_row - 1, last_col0, title, theme.lookalike("title")
     )
 
-    # reading legend right below the title (rows 2-3), then the info
-    # lines (one blank row before the map)
-    for offset, line in enumerate(WAFER_STACKED_LEGEND):
-        ws.merge_range(
-            start_row + offset, 0, start_row + offset, last_col0,
-            line, _wafer_prop_fmt(theme, ""),
-        )
-    for offset, cell in enumerate(info_cells):
-        key, _, value = cell.partition(":")
-        _wafer_kv_row(ws, start_row + 3 + offset, key.strip() + ":", value.strip(), theme)
+    # reading legend on row 2, the sbin identity slot (full width, the
+    # "Explanatory Text" lookalike)
+    ws.merge_range(
+        start_row, 0, start_row, last_col0,
+        WAFER_STACKED_LEGEND, _wafer_prop_fmt(theme, ""),
+    )
 
-    xh_row = start_row + len(info_cells) + 4  # 1-based X-header row
+    xh_row = start_row + 2  # 1-based X-header row — the sbin F3 anchor
     first_letter = xlutil.xl_col_to_name(WAFER_FIRST_DIE_COL0)
     last_letter = xlutil.xl_col_to_name(last_col0)
 
     if freeze_panes:
-        # keep title + info lines + X-header rows and columns A:F (the
+        # keep title + legend + X-header rows and columns A:F (the
         # Y-axis header) visible while scrolling the die grid — same
         # cosmetics as the sbin sheets (spec Goal 4)
         ws.freeze_panes(xh_row, WAFER_FIRST_DIE_COL0)
@@ -1346,4 +1341,39 @@ def write_stacked_wafer_block(
          "min_color": "#00CC00", "mid_color": "#FFFF00", "max_color": "#CC0000"},
     )
 
-    return xh_row + len(y_axis) + 1
+    # KPI cards across A:D with the sbin geometry (WAFER_KPI_SPANS/ROWS):
+    # the three info items as cards, values LIVE over the die grid —
+    # SUM = total failed DUTs (count-0 dies contribute nothing),
+    # COUNTIF ">0" = coordinates with at least one fail; Files has no
+    # grid source — parsed from the payload rows. Cached results ride
+    # the formulas (xlsxwriter-migration convention).
+    map_range = f"${first_letter}${xh_row + 1}:${last_letter}${xh_row + len(y_axis)}"
+    total = sum(grid.values())
+    coords = sum(1 for v in grid.values() if v > 0)
+    files = 0
+    for cell in info_cells:
+        if isinstance(cell, str) and cell.strip().startswith("Files:"):
+            try:
+                files = int(cell.partition(":")[2])
+            except ValueError:
+                files = 0
+    card_defs = (
+        ("Total Failed DUTs", (f"=SUM({map_range})", total),
+         "fail count per die, summed across all files", False),
+        ("Fail Coordinates", (f'=COUNTIF({map_range},">0")', coords),
+         "dies failing at least once", False),
+        ("Files", files, "stacked hot-spot view", False),
+    )
+    write_kpi_cards(
+        ws,
+        start_row + 3,  # legend row 2 → cards rows 4-9 (sbin geometry)
+        {},  # kpi / n_files unused: card_defs replaces the built cards
+        1,
+        theme,
+        note_widths=False,  # pinned columns — never the ledger
+        card_spans=WAFER_KPI_SPANS,
+        card_rows=WAFER_KPI_ROWS,
+        card_defs=card_defs,
+    )
+
+    return max(start_row + 9, xh_row + len(y_axis) + 1)
