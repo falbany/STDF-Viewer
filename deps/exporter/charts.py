@@ -69,6 +69,7 @@ from deps.exporter.helpers import sanitize_cell
 from deps.exporter.theme import (
     FONT_NAME,
     KPI_BORDER_DARK_BLUE,
+    KPI_BORDER_DARK_GREEN,
     KPI_BORDER_DARK_RED,
     KPI_BORDER_DARK_YELLOW,
 )
@@ -970,6 +971,13 @@ WAFER_KPI_SPANS = (
     (2, 4, "E9EEF6", KPI_BORDER_DARK_BLUE),  # Total: B:D (rows 7-9)
 )
 WAFER_KPI_ROWS = (0, 1, 1)  # Yield slot 0 (4-6); Fails+Total share slot 1 (7-9)
+
+# 2026-11-14: the stacked sheet adds a 4th card slot (rows 10-12, light
+# green — the classic Excel "Good" fill/border pair) carrying the total
+# DUTs across the stacked wafers; the sbin sheets keep the 3-card
+# WAFER_KPI_SPANS untouched
+WAFER_STACKED_KPI_SPANS = WAFER_KPI_SPANS + ((1, 4, "C6EFCE", KPI_BORDER_DARK_GREEN),)
+WAFER_STACKED_KPI_ROWS = WAFER_KPI_ROWS + (2,)
 WAFER_LABEL_COL_WIDTH = 30  # column A — keys / labels (pinned post-autofit)
 WAFER_VALUE_COL_WIDTH = 8  # columns B:D — values
 WAFER_SPACER_PINNED_WIDTH = 3.5  # column E (2026-11-13: was the 2.71 square)
@@ -1250,9 +1258,10 @@ def stacked_wafer_table_rows(payloads: list) -> tuple:
     payload)`` pair. bin 1 = the wafer's DEDUP-grid dies at sbin 1 (the
     same dedup its own sheet renders — table = map by construction);
     yield = aggregate_kpi over the payload's info rows (DUT-level,
-    pass / (total - superseded)). Returns ``(rows, overall_yield)`` —
-    overall = Σpass / Σ(total - superseded) across the payloads, None
-    when nothing is effective."""
+    pass / (total - superseded)). Returns ``(rows, overall_yield,
+    total_duts)`` — overall = Σpass / Σ(total - superseded) across the
+    payloads (None when nothing is effective), total_duts = Σ of the
+    per-wafer DUT totals (the stacked sheet's 4th KPI card)."""
     rows = []
     sums = dict.fromkeys(KPI_KEYS, 0)
     for wafer_id, payload in payloads:
@@ -1267,7 +1276,7 @@ def stacked_wafer_table_rows(payloads: list) -> tuple:
             sums[key] += kpi.get(key, 0)
     effective = sums["total"] - sums["superseded"]
     overall = (sums["pass"] / effective) if effective else None
-    return rows, overall
+    return rows, overall, sums["total"]
 
 
 WAFER_STACKED_TABLE_TITLE = "Stacked Wafers — per-wafer metrics"
@@ -1370,6 +1379,7 @@ def write_stacked_wafer_block(
     freeze_panes: bool = False,
     wafer_rows: "list | None" = None,
     overall_yield: "float | None" = None,
+    total_duts: int = 0,
     wafer_table_name: "str | None" = None,
     fail_table_name: "str | None" = None,
 ) -> int:
@@ -1513,20 +1523,22 @@ def write_stacked_wafer_block(
         ("Fail Coordinates", (f'=COUNTIF({map_range},">0")', coords),
          "dies failing at least once", False),
         ("Files", files, "stacked hot-spot view", False),
+        # 2026-11-14 user ask: 4th card slot (rows 10-12, light green)
+        ("Total DUTs per Wafer", total_duts, "Σ of the per-wafer DUT totals", False),
     )
     write_kpi_cards(
         ws,
-        start_row + 3,  # legend row 2 → cards rows 4-9 (sbin geometry)
+        start_row + 3,  # legend row 2 → cards rows 4-12 (sbin geometry
         {},  # kpi / n_files unused: card_defs replaces the built cards
         1,
         theme,
         note_widths=False,  # pinned columns — never the ledger
-        card_spans=WAFER_KPI_SPANS,
-        card_rows=WAFER_KPI_ROWS,
+        card_spans=WAFER_STACKED_KPI_SPANS,
+        card_rows=WAFER_STACKED_KPI_ROWS,
         card_defs=card_defs,
     )
 
-    next_free = max(start_row + 9, xh_row + len(y_axis) + 1)
+    next_free = max(start_row + 12, xh_row + len(y_axis) + 1)
     table_row = start_row + 14  # the sbin SW-table slot (row 15, A:D zone)
     if wafer_rows and wafer_table_name:
         wafers_end = write_stacked_wafer_table(

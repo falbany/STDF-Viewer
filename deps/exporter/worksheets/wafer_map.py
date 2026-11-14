@@ -177,7 +177,7 @@ class WaferMapMixin:
             StackedSheet = self._wb.add_worksheet(name)
             # per-wafer ID table: every fetched payload is already in
             # hand — no new fetch round-trip
-            wafer_rows, overall_yield = stacked_wafer_table_rows(
+            wafer_rows, overall_yield, total_duts = stacked_wafer_table_rows(
                 [(w[2], p) for _i, w, p in fetched]
             )
             write_stacked_wafer_block(
@@ -189,6 +189,7 @@ class WaferMapMixin:
                 freeze_panes=True,  # same grid freeze as the sbin sheets
                 wafer_rows=wafer_rows,
                 overall_yield=overall_yield,
+                total_duts=total_duts,
                 wafer_table_name=wafer_table_name(
                     stacked_index, "StackedWafers"
                 ),

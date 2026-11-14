@@ -1499,7 +1499,7 @@ class TestStackedWaferBlock:
         assert reloaded["G3"].value == "1"  # first X header, str(x)
         assert reloaded["F4"].value == "1"  # Y-axis header
         assert reloaded.tables == {}  # no table by default (opt-in param)
-        assert nxt == 10  # cards end at 9 → next free 10 (die end 4)
+        assert nxt == 13  # 4 cards end at row 12 → next free 13
 
     def test_gradient_cf_rule_present(self, env):
         self.written(env)
@@ -1584,8 +1584,10 @@ class TestStackedWaferBlock:
         # items become cards — Total Failed DUTs full-width A:D (rows 4-6,
         # =SUM over the die grid), Fail Coordinates (col A) + Files (B:D)
         # side by side (rows 7-9, =COUNTIF ">0" / plain count); cached
-        # results ride the formulas (xlsxwriter convention)
-        nxt = self.written(env)
+        # results ride the formulas (xlsxwriter convention). 2026-11-14:
+        # a 4th card slot (rows 10-12, light green) carries the per-wafer
+        # DUT total
+        nxt = self.written(env, total_duts=25)
         reloaded = env["reload"]()
         assert reloaded["A4"].value == "Total Failed DUTs"
         assert reloaded["A5"].value == "=SUM($G$4:$K$4)"
@@ -1596,10 +1598,13 @@ class TestStackedWaferBlock:
         assert reloaded["B7"].value == "Files"
         assert reloaded["B8"].value == 2
         assert reloaded["B9"].value == "stacked hot-spot view"
+        assert reloaded["A10"].value == "Total DUTs per Wafer"
+        assert reloaded["A11"].value == 25
+        assert reloaded["A12"].value == "Σ of the per-wafer DUT totals"
         data_only = env.reload_data_only()
         assert data_only["A5"].value == 6  # Σ of the die grid (0s free)
         assert data_only["A8"].value == 4  # coords with ≥ 1 fail
-        assert nxt == 10
+        assert nxt == 13  # cards end at row 12
 
     def test_legend_below_title(self, env):
         # reading legend (2026-11-13 ask; 2026-11-14 sbin-uniform layout:
@@ -1610,7 +1615,7 @@ class TestStackedWaferBlock:
         reloaded = env["reload"]()
         assert reloaded["A2"].value == WAFER_STACKED_LEGEND
         assert "A2:K2" in {str(r) for r in reloaded.merged_cells.ranges}
-        assert nxt == 10
+        assert nxt == 13
 
     def test_stacked_wafer_table_rows_arithmetic(self):
         # bin 1 = the wafer's DEDUP-grid dies at sbin 1 (the same dedup
@@ -1636,12 +1641,13 @@ class TestStackedWaferBlock:
                 },
             ),
         ]
-        rows, overall = stacked_wafer_table_rows(payloads)
+        rows, overall, total_duts = stacked_wafer_table_rows(payloads)
         # MAP: sbin-1 dies in the dedup grid = 3 — (-1,0), (1,0), (0,1);
         # the duplicate (0,0) last-write-wins to sbin 2
         assert rows[0] == ("W08", 3, 0.6)
         assert rows[1] == ("W09", 1, 0.5)
         assert overall == 8 / 14  # Σpass 8 / Σ(total - superseded) 14
+        assert total_duts == 14  # Σ of the per-wafer DUT totals
 
     def test_stacked_wafers_table(self, env):
         # per-wafer metrics table (2026-11-14 user ask) in the SW-bin-table
