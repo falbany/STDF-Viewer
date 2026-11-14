@@ -1648,3 +1648,59 @@ class TestStackedWaferBlock:
         assert reloaded["B19"].value == "=SUM(B17:B18)"
         assert "SW_0_StackedWafers" in reloaded.tables
         assert nxt == 20
+
+    def test_fail_map_count_table(self, env):
+        # Fail Map Count (2026-11-14 user ask): the SW-bin-table mimicry —
+        # one row per DISTINCT count value in the grid (ascending), the
+        # Count cells LIVE =COUNTIF over the die map keyed on the row's
+        # own Value cell, Distribution fractions + data bar, bold Total
+        # (live =SUM, cached). At the 15 slot when no wafer table precedes.
+        nxt = self.written(env, fail_table_name="SW_0_FailMapCount")
+        reloaded = env["reload"]()
+        assert reloaded["A15"].value == "Fail Map Count — All Wafers"
+        assert [reloaded.cell(row=16, column=c).value for c in range(1, 5)] == [
+            "Fails per Die", "Value", "Count", "Distribution",
+        ]
+        assert reloaded["A17"].value == "1 fail"
+        assert reloaded["B17"].value == 1
+        assert reloaded["C17"].value == "=COUNTIF($G$4:$K$4,B17)"
+        assert reloaded["A18"].value == "3 fails"
+        assert reloaded["B18"].value == 3
+        assert reloaded["A19"].value == "Total"
+        data_only = env.reload_data_only()
+        assert data_only["C17"].value == 3  # three dies with 1 fail
+        assert data_only["C18"].value == 1  # one die with 3 fails
+        assert data_only["D17"].value == 0.75  # 3/4 probed coordinates
+        assert data_only["C19"].value == 4  # Σ = probed coordinates
+        assert nxt == 20
+
+    def test_fail_map_count_includes_probed_passed(self, env):
+        # the count-0 bucket is its own row (0 = probed & passed dies) —
+        # the distribution covers every written die cell
+        m = dict(STACKED_MAP, Data={0: {"x": [5], "y": [1]}, 1: {"x": [1, 2, 3], "y": [1, 1, 1]}})
+        self.written(env, map_data=m, fail_table_name="SW_0_FailMapCount")
+        reloaded = env["reload"]()
+        assert reloaded["A17"].value == "0 fails"
+        assert reloaded["B17"].value == 0
+        data_only = env.reload_data_only()
+        assert data_only["C17"].value == 1
+        assert data_only["C18"].value == 3
+        assert data_only["C19"].value == 4
+
+    def test_fail_map_count_below_wafer_table(self, env):
+        # the Fail Map Count table sits BELOW the stacked-wafers ID table
+        # (2026-11-14 user ruling), one blank row after its Total
+        nxt = self.written(
+            env,
+            wafer_rows=[("W08", 1, 0.6)],
+            overall_yield=0.6,
+            wafer_table_name="SW_0_StackedWafers",
+            fail_table_name="SW_0_FailMapCount",
+        )
+        reloaded = env["reload"]()
+        assert reloaded["A15"].value == "Stacked Wafers — per-wafer metrics"
+        assert reloaded["A20"].value == "Fail Map Count — All Wafers"
+        data_only = env.reload_data_only()
+        assert data_only["B18"].value == 1  # ID table Total (1 wafer row)
+        assert data_only["C22"].value == 3  # fail table: 1 fail × 3 dies
+        assert nxt == 25

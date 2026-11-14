@@ -76,7 +76,10 @@ native live cell grid.
 | Die cell value | Fail count (integer, live) |
 | Gradient | `3_color_scale`, Green `#00CC00` → Yellow `#FFFF00` → Red `#CC0000` |
 | Block extras | Info rows only; no KPI cards, no SW-bin table |
-| Reading legend | Two italic lines on rows 2-3, right below the title (2026-11-13 user ask; 2026-11-14 ruling — it drives the sheet's comprehension, so it reads before the numbers; renders on the empty branch too) |
+| Sheet layout | sbin-uniform (2026-11-14 ruling): map anchored F3, the three info items as KPI cards across A:D with the sbin geometry — reverses the original "info rows only, no cards" decision |
+| Reading legend | ONE italic line on row 2, the identity slot (2026-11-13 ask; 2026-11-14 sbin-uniform layout collapsed the two rows — the map anchor at F3 leaves a single full-width row; "what it aggregates" moved into the headline card's subtitle; renders on the empty branch too) |
+| Stacked Wafers table | Per-wafer ID table at the sbin SW-table slot (row 15, A:C): WAFER_ID / bin-1 die count from the wafer's dedup grid / DUT yield from the info rows; live =SUM total + cross-wafer yield (2026-11-14 user ask) |
+| Fail Map Count table | Below the ID table (one blank row after its Total): the SW-bin-table machinery with live COUNTIF counts over the die map, one row per DISTINCT count value ("0 fails" = probed & passed dies), Distribution = share of probed coordinates, Total = Σ (2026-11-14 user ask) |
 | Renderer | New stacked block in `charts.py`, called from `writeWaferMap` |
 
 ## Constraints

@@ -654,6 +654,30 @@ class TestStackedWaferSheet:
         data_only = load_workbook(reportPath, data_only=True)["Wafer Stacked Map (All Wafers)"]
         assert data_only["B18"].value == 1  # live =SUM(B17:B17), cached
 
+    def test_fail_map_count_table(self, tmp_path, qapp, monkeypatch):
+        # Fail Map Count below the ID table (row 20): live COUNTIF
+        # distribution of the fail-count values — the count-0 die (probed,
+        # passed) is its own row, "Total" = probed coordinates
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=False,
+        )
+        wb = load_workbook(reportPath)
+        stacked = wb["Wafer Stacked Map (All Wafers)"]
+        assert stacked["A20"].value == "Fail Map Count — All Wafers"
+        assert [stacked.cell(row=21, column=c).value for c in range(1, 5)] == [
+            "Fails per Die", "Value", "Count", "Distribution",
+        ]
+        assert stacked["A22"].value == "0 fails"
+        assert stacked["B22"].value == 0
+        assert stacked["A23"].value == "1 fail"
+        assert stacked["A24"].value == "3 fails"
+        data_only = load_workbook(reportPath, data_only=True)["Wafer Stacked Map (All Wafers)"]
+        assert data_only["C22"].value == 1  # one probed-passed die
+        assert data_only["C23"].value == 3  # three single-fail dies
+        assert data_only["C24"].value == 1  # one triple-fail die
+        assert data_only["C25"].value == 5  # Σ = probed coordinates
+
     def test_orange_border_absent_on_stacked(self, tmp_path, qapp, monkeypatch):
         # issue #4's superseded border exists in this export (merged W08
         # group) but never reaches the stacked sheet — its CF rule defines

@@ -192,6 +192,9 @@ class WaferMapMixin:
                 wafer_table_name=wafer_table_name(
                     stacked_index, "StackedWafers"
                 ),
+                fail_table_name=wafer_table_name(
+                    stacked_index, "FailMapCount"
+                ),
             )
             self._style_wafer_sheet(StackedSheet)
         self._row[key] = row

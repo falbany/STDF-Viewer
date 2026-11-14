@@ -632,6 +632,7 @@ def write_bin_table(
     first_col: int = BIN_TABLE_FIRST_COL,
     bin_fills: "dict | None" = None,
     count_map_range: "str | None" = None,
+    headers: "tuple | None" = None,
 ) -> int:
     """Write one structured bin table (sixth wave) starting at 1-based
     ``start_row`` and return the next free row.
@@ -660,11 +661,17 @@ def write_bin_table(
     user edits die values. Default None keeps the static Bin-sheet
     tables byte-identical.
 
+    ``headers`` (2026-11-14): overrides the column headers — the stacked
+    sheet's Fail Map Count table reuses this whole renderer for fail-count
+    values ("Fails per Die / Value / Count / Distribution"); default None
+    keeps BIN_TABLE_HEADERS and the Bin-sheet tables byte-identical.
+
     ``bins`` empty → no-op (returns ``start_row`` unchanged)."""
     if not bins:
         return start_row
+    table_headers = headers or BIN_TABLE_HEADERS
     total = sum(count for _num, _name, count in bins)
-    last_col = first_col + len(BIN_TABLE_HEADERS) - 1
+    last_col = first_col + len(table_headers) - 1
     first0 = first_col - 1
     last0 = last_col - 1
 
@@ -697,7 +704,7 @@ def write_bin_table(
             "autofilter": True,
             "columns": [
                 {"header": header, "header_format": header_fmt}
-                for header in BIN_TABLE_HEADERS
+                for header in table_headers
             ],
         },
     )
@@ -1266,6 +1273,12 @@ def stacked_wafer_table_rows(payloads: list) -> tuple:
 WAFER_STACKED_TABLE_TITLE = "Stacked Wafers — per-wafer metrics"
 WAFER_STACKED_TABLE_HEADERS = ("Wafer ID", "Bin 1", "Yield")
 
+# Fail Map Count (2026-11-14 user ask): the fail-count distribution
+# table below the ID table — write_bin_table with live COUNTIF counts
+# over the die map, one row per DISTINCT count value in the grid
+WAFER_FAIL_TABLE_TITLE = "Fail Map Count — All Wafers"
+WAFER_FAIL_TABLE_HEADERS = ("Fails per Die", "Value", "Count", "Distribution")
+
 
 def write_stacked_wafer_table(
     ws,
@@ -1358,6 +1371,7 @@ def write_stacked_wafer_block(
     wafer_rows: "list | None" = None,
     overall_yield: "float | None" = None,
     wafer_table_name: "str | None" = None,
+    fail_table_name: "str | None" = None,
 ) -> int:
     """One stacked wafer block (issue #5; 2026-11-14 sbin-uniform layout):
     title band, the reading legend on row 2 (the sbin identity slot), the
@@ -1375,9 +1389,13 @@ def write_stacked_wafer_block(
     wafer-outline style; only never-probed gap coordinates stay unwritten
     (CF ignores blanks). ``wafer_rows`` + ``wafer_table_name`` render the
     per-wafer ID table (write_stacked_wafer_table) at the sbin SW-table
-    slot (row 15). Empty grid → title + legend + the info items as plain
-    kv lines, no cards, no tables (the sbin empty shape). Returns the
-    next free row."""
+    slot (row 15); ``fail_table_name`` renders the Fail Map Count below
+    it (one blank row after the ID table's Total) — write_bin_table with
+    live COUNTIF counts over the die map, one row per DISTINCT count
+    value in the grid ("0 fails" = probed & passed dies, Distribution =
+    share of the probed coordinates, Total = Σ = probed coordinates).
+    Empty grid → title + legend + the info items as plain kv lines, no
+    cards, no tables (the sbin empty shape). Returns the next free row."""
     info = map_data.get("Info") or (1.0, "", False, False, "", [])
     wafer_id = info[4] if len(info) > 4 else ""
     sites = info[5] if len(info) > 5 else []
@@ -1492,13 +1510,33 @@ def write_stacked_wafer_block(
     )
 
     next_free = max(start_row + 9, xh_row + len(y_axis) + 1)
+    table_row = start_row + 14  # the sbin SW-table slot (row 15, A:D zone)
     if wafer_rows and wafer_table_name:
-        # per-wafer ID table at the sbin SW-table slot (row 15, A:D zone)
+        wafers_end = write_stacked_wafer_table(
+            ws, table_row, wafer_rows, overall_yield, theme,
+            wafer_table_name,
+        )
+        next_free = max(next_free, wafers_end)
+        table_row = wafers_end + 1  # Fail Map Count sits below, one blank row
+    if fail_table_name:
+        # one row per DISTINCT count value in the grid (ascending; the
+        # count-0 bucket = probed & passed dies) — counts cached against
+        # the live COUNTIF over the die map
+        counts = {}
+        for v in grid.values():
+            counts[v] = counts.get(v, 0) + 1
+        fail_bins = [
+            (v, "1 fail" if v == 1 else f"{v} fails", counts[v])
+            for v in sorted(counts)
+        ]
         next_free = max(
             next_free,
-            write_stacked_wafer_table(
-                ws, start_row + 14, wafer_rows, overall_yield, theme,
-                wafer_table_name,
+            write_bin_table(
+                ws, table_row, fail_bins, theme,
+                WAFER_FAIL_TABLE_TITLE, fail_table_name,
+                first_col=1,
+                count_map_range=map_range,
+                headers=WAFER_FAIL_TABLE_HEADERS,
             ),
         )
     return next_free
