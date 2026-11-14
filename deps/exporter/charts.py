@@ -1360,6 +1360,11 @@ def write_stacked_wafer_table(
 
     total_row = last_data + 1
     total_fmt = theme.cell_format(font="bold_body", align="center", border=True)
+    # the Total yield displays as a percent like the data rows (the
+    # write_bin_table Total-row convention)
+    total_pct_fmt = theme.cell_format(
+        font="bold_body", align="center", border=True, num_fmt=BIN_PCT_FORMAT
+    )
     ws.write(total_row - 1, 0, BIN_TOTAL_LABEL, total_fmt)
     bin_letter = xlutil.xl_col_to_name(1)
     ws.write_formula(
@@ -1367,13 +1372,10 @@ def write_stacked_wafer_table(
         f"=SUM({bin_letter}{first_data}:{bin_letter}{last_data})",
         total_fmt, bin1_total,
     )
-    ws.write(
-        total_row - 1, 2,
-        float(overall_yield) if overall_yield is not None else "",
-        total_fmt
-        if overall_yield is not None
-        else theme.cell_format(font="bold_body", align="center", border=True),
-    )
+    if overall_yield is not None:
+        ws.write(total_row - 1, 2, float(overall_yield), total_pct_fmt)
+    else:
+        ws.write(total_row - 1, 2, "", total_fmt)
 
     return total_row + 1
 

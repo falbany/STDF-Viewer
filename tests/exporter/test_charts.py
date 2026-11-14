@@ -1671,6 +1671,10 @@ class TestStackedWaferBlock:
         assert reloaded["C18"].value in ("", None)  # missing yield → blank
         assert reloaded["A19"].value == "Total"
         assert reloaded["B19"].value == "=SUM(B17:B18)"
+        # the Total yield displays as a percent like the data rows'
+        # (2026-11-14 user catch: it wrote with the plain bold format)
+        assert reloaded["C17"].number_format == "0.00%"
+        assert reloaded["C19"].number_format == "0.00%"
         assert "SW_0_StackedWafers" in reloaded.tables
         assert nxt == 20
 
