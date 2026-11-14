@@ -1247,6 +1247,14 @@ def write_wafer_map_block(
 # blank-vs-0 distinction (0 = probed & passed, blank = never probed).
 # Sized to render inside the A:map-width merge without wrapping; the
 # empty branch merges across a 5-die map's span (A:K).
+# The fail-count gradient (issue #5, colors pinned verbatim): green low
+# → yellow mid → red hot — the sbin palette's pass/fail hexes with
+# Excel's canonical mid; shared verbatim by the die map and the Fail Map
+# Count legend column.
+WAFER_GRADIENT_MIN_HEX = "#00CC00"
+WAFER_GRADIENT_MID_HEX = "#FFFF00"
+WAFER_GRADIENT_MAX_HEX = "#CC0000"
+
 WAFER_STACKED_LEGEND = (
     "Green: few fails → Red: many · 0: probed, passed · blank: never probed"
 )
@@ -1491,7 +1499,9 @@ def write_stacked_wafer_block(
     die_mid = die_values[lo] + (die_values[min(lo + 1, n - 1)] - die_values[lo]) * (idx - lo)
     gradient = {
         "type": "3_color_scale",
-        "min_color": "#00CC00", "mid_color": "#FFFF00", "max_color": "#CC0000",
+        "min_color": WAFER_GRADIENT_MIN_HEX,
+        "mid_color": WAFER_GRADIENT_MID_HEX,
+        "max_color": WAFER_GRADIENT_MAX_HEX,
         "min_type": "num", "min_value": die_values[0],
         "mid_type": "num", "mid_value": die_mid,
         "max_type": "num", "max_value": die_values[-1],
