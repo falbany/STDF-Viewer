@@ -1466,12 +1466,29 @@ def write_stacked_wafer_block(
             if count is not None:
                 ws.write(row0, WAFER_FIRST_DIE_COL0 + col_offset, int(count), die_fmt)
 
-    # ONE CF rule over the die range: fail counts on the green→yellow→red
-    # gradient — lower = greener, hot spots = deep red
+    # ONE gradient definition shared by every color-scale rule on the
+    # sheet (2026-11-14 legend ruling): explicit num anchors — min /
+    # PERCENTILE.INC-50 / max of the die values — so the Fail Map Count
+    # Value column renders EXACTLY the map's colors for equal values
+    # (the legend's distinct-value population would otherwise get its
+    # own percentile mid, drifting from the map's weighted mid on the
+    # skewed real distributions). The die range itself renders exactly
+    # as before: Excel derives the same anchors from these values.
+    die_values = sorted(grid.values())
+    n = len(die_values)
+    idx = 0.5 * (n - 1)
+    lo = int(idx)
+    die_mid = die_values[lo] + (die_values[min(lo + 1, n - 1)] - die_values[lo]) * (idx - lo)
+    gradient = {
+        "type": "3_color_scale",
+        "min_color": "#00CC00", "mid_color": "#FFFF00", "max_color": "#CC0000",
+        "min_type": "num", "min_value": die_values[0],
+        "mid_type": "num", "mid_value": die_mid,
+        "max_type": "num", "max_value": die_values[-1],
+    }
     ws.conditional_format(
         f"{first_letter}{xh_row + 1}:{last_letter}{xh_row + len(y_axis)}",
-        {"type": "3_color_scale",
-         "min_color": "#00CC00", "mid_color": "#FFFF00", "max_color": "#CC0000"},
+        dict(gradient),
     )
 
     # KPI cards across A:D with the sbin geometry (WAFER_KPI_SPANS/ROWS):
@@ -1538,5 +1555,11 @@ def write_stacked_wafer_block(
                 count_map_range=map_range,
                 headers=WAFER_FAIL_TABLE_HEADERS,
             ),
+        )
+        # the Value column IS the legend (2026-11-14 user ask): the same
+        # gradient as the map, over the Value data rows only
+        ws.conditional_format(
+            f"B{table_row + 2}:B{table_row + 1 + len(fail_bins)}",
+            dict(gradient),
         )
     return next_free

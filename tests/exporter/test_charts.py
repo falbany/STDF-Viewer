@@ -1505,14 +1505,33 @@ class TestStackedWaferBlock:
         self.written(env)
         env["reload"]()
         xml = read_xml(env["book"], "xl/worksheets/sheet1.xml")
-        # exactly ONE color-scale rule over the die range
+        # ONE color-scale rule here (no fail table); 2026-11-14 legend
+        # ruling: EXPLICIT num anchors (min / PERCENTILE.INC-50 / max of
+        # the die values) shared by every gradient on the sheet — the map
+        # and its legend color identical values identically, even on
+        # skewed distributions where Excel's per-range percentile would
+        # land elsewhere for the legend's distinct values
         assert xml.count('type="colorScale"') == 1
         for hex8 in ("FF00CC00", "FFFFFF00", "FFCC0000"):
             assert xml.count(hex8) == 1
-        # default anchors (min / 50th percentile / max) — no type overrides
-        assert '<cfvo type="min" val="0"/>' in xml
-        assert '<cfvo type="percentile" val="50"/>' in xml
-        assert '<cfvo type="max" val="0"/>' in xml
+        assert xml.count('<cfvo type="num"') == 3  # min / mid / max
+        assert '<cfvo type="percentile"' not in xml  # no per-range anchors
+
+    def test_legend_gradient_on_value_column(self, env):
+        # the Fail Map Count Value column carries the SAME gradient as the
+        # map (2026-11-14 user ask) — a live color legend: identical
+        # anchors, so equal values render identical colors; data rows only
+        self.written(env, fail_table_name="SW_0_FailMapCount")
+        env["reload"]()
+        xml = read_xml(env["book"], "xl/worksheets/sheet1.xml")
+        assert xml.count('type="colorScale"') == 2  # die range + legend column
+        for hex8 in ("FF00CC00", "FFFFFF00", "FFCC0000"):
+            assert xml.count(hex8) == 2  # same three colors on both rules
+        # 3 anchors × 2 gradient rules, + the data bar's own 2 cfvos
+        assert xml.count('<cfvo type="num"') == 8
+        # the legend range covers the Value column data rows (B17:B18 —
+        # the fail table's two distinct values), not the Total row
+        assert 'sqref="B17:B18"' in xml
 
     def test_empty_stacked_degrades(self, env):
         nxt = self.written(
