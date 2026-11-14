@@ -75,6 +75,16 @@ class WaferMapMixin:
         WaferSheet.set_column(1, 3, WAFER_VALUE_COL_WIDTH)
         WaferSheet.set_column(4, 4, WAFER_SPACER_PINNED_WIDTH)
         WaferSheet.hide_gridlines(2)
+        # 2026-11-14 print design (approach A): A4 landscape, one page
+        # wide / unlimited tall — fit-to-width never enlarges, so small
+        # maps print at 100% — and rows 1-3 repeat on every printed page
+        # (title / identity-legend / X-headers: every wafer block anchors
+        # them at rows 1-3 because every caller passes start_row=1 —
+        # moving a block's anchor moves this span too)
+        WaferSheet.set_paper(9)  # A4
+        WaferSheet.set_landscape()
+        WaferSheet.fit_to_pages(1, 0)
+        WaferSheet.repeat_rows(0, 2)
         WaferSheet.set_footer(FOOTER_TEXT)
         WaferSheet.set_tab_color(f"#{TAB_COLOR_HEXES['wafer']}")
 

@@ -546,6 +546,18 @@ class TestMergedWaferSheets:
         # 2 per-file ticks + 1 merged tick
         assert gen.loopCount == gen.totalLoopCnt == 3
 
+    def test_print_setup_a4_landscape(self, tmp_path, qapp, monkeypatch):
+        # merged sheets flow through _style_wafer_sheet too — the same
+        # print setup as their per-file siblings
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=True,
+        )
+        merged = load_workbook(reportPath)["Wafer W08 (Merged)"]
+        assert merged.page_setup.paperSize == int(merged.PAPERSIZE_A4)
+        assert merged.page_setup.orientation == "landscape"
+        assert merged.print_title_rows == "$1:$3"
+
     def test_orange_border_only_on_merged(self, tmp_path, qapp, monkeypatch):
         _, reportPath = build_wafer_report(
             tmp_path, qapp, monkeypatch, [(0, 0, "W08"), (2, 1, "W08")],
@@ -638,6 +650,21 @@ class TestStackedWaferSheet:
             hide_remeasured=False,
         )
         assert gen.loopCount == gen.totalLoopCnt == 2
+
+    def test_print_setup_a4_landscape(self, tmp_path, qapp, monkeypatch):
+        # the stacked sheet prints like every wafer sheet (design
+        # 2026-11-14, approach A): A4 landscape, fit one page wide,
+        # rows 1-3 (title, legend, X-headers) repeated
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=False,
+        )
+        stacked = load_workbook(reportPath)["Wafer Stacked Map (All Wafers)"]
+        assert stacked.page_setup.paperSize == int(stacked.PAPERSIZE_A4)
+        assert stacked.page_setup.orientation == "landscape"
+        assert stacked.page_setup.fitToHeight == 0
+        assert stacked.sheet_properties.pageSetUpPr.fitToPage is True
+        assert stacked.print_title_rows == "$1:$3"
 
     def test_stacked_wafer_table(self, tmp_path, qapp, monkeypatch):
         # per-wafer metrics table at the sbin SW-table slot (row 15): one

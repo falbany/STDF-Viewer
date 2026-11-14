@@ -1058,6 +1058,11 @@ class TestChartSheets:
         assert ws.sheet_properties.pageSetUpPr.fitToPage is True
         assert wb["Trend Chart"].page_setup.paperSize is None
         assert wb["DUT Summary"].page_setup.paperSize is None
+        # and never landscape: the 2026-11-14 wafer print ruling extends
+        # A4/landscape to the wafer sheets ONLY (the DUT Summary's
+        # fit_to_pages serializes the explicit 'portrait' default)
+        assert wb["Trend Chart"].page_setup.orientation is None
+        assert wb["DUT Summary"].page_setup.orientation in (None, "portrait")
 
 
 # --------------------------------------------------------------------------
@@ -1771,6 +1776,19 @@ class TestWaferCellMap:
             ws = wb[name]
             assert ws.sheet_view.showGridLines is False
             assert ws.column_dimensions["A"].width == 7862 / 256
+
+    def test_print_setup_a4_landscape(self, generated):
+        # 2026-11-14 print design (approach A): every wafer sheet prints
+        # A4 landscape, one page wide / unlimited tall, with rows 1-3
+        # (title, identity, X-headers) repeated on each printed page
+        _, wb, _, _, _ = generated
+        ws = wb["Wafer W01"]
+        assert ws.page_setup.paperSize == int(ws.PAPERSIZE_A4)
+        assert ws.page_setup.orientation == "landscape"
+        assert ws.page_setup.fitToHeight == 0
+        assert ws.page_setup.fitToWidth in (1, None)  # 1 = OOXML default, omitted
+        assert ws.sheet_properties.pageSetUpPr.fitToPage is True
+        assert ws.print_title_rows == "$1:$3"
 
     def test_wafer_sheet_names_sanitized_and_unique(self, tmp_path, qapp):
         # illegal sheet-name characters become underscores; same-ID wafers

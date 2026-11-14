@@ -633,8 +633,10 @@ def render_matrix_sheet(ws, spec: dict, theme) -> None:
     ws.hide_gridlines(2)  # screen + printed, matching showGridLines=False
     ws.set_footer(FOOTER_TEXT)
     ws.set_tab_color(f"#{DUT_TAB_HEX}")
-    # NO set_paper here: the wave-8 ruling gives A4 to the Bin sheet ONLY —
-    # the DUT Summary keeps fit-to-page with no explicit paper size
+    # NO set_paper here: the wave-8 ruling gave A4 to the Bin sheet ONLY
+    # (extended 2026-11-14: the wafer sheets print A4 landscape too —
+    # _style_wafer_sheet); the DUT Summary keeps fit-to-page with no
+    # explicit paper size
     ws.fit_to_pages(1, 0)
     header_row0 = _header_row(spec) - 1
     ws.repeat_rows(header_row0, header_row0)
