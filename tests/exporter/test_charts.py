@@ -1585,8 +1585,9 @@ class TestStackedWaferBlock:
         # =SUM over the die grid), Fail Coordinates (col A) + Files (B:D)
         # side by side (rows 7-9, =COUNTIF ">0" / plain count); cached
         # results ride the formulas (xlsxwriter convention). 2026-11-14:
-        # a 4th card slot (rows 10-12, light green) carries the per-wafer
-        # DUT total
+        # slot 2 splits in two — DUTs per Wafer (col A, lavender, live
+        # =COUNT over the die grid: the Total Parts analog) + Total DUTs
+        # Tested (B:D, light green, Σ of the per-wafer DUT totals)
         nxt = self.written(env, total_duts=25)
         reloaded = env["reload"]()
         assert reloaded["A4"].value == "Total Failed DUTs"
@@ -1598,12 +1599,19 @@ class TestStackedWaferBlock:
         assert reloaded["B7"].value == "Files"
         assert reloaded["B8"].value == 2
         assert reloaded["B9"].value == "stacked hot-spot view"
-        assert reloaded["A10"].value == "Total DUTs per Wafer"
-        assert reloaded["A11"].value == 25
-        assert reloaded["A12"].value == "Σ of the per-wafer DUT totals"
+        assert reloaded["A10"].value == "DUTs per Wafer"
+        assert reloaded["A11"].value == "=COUNT($G$4:$K$4)"
+        assert reloaded["A12"].value == "probed dies across all wafers"
+        assert reloaded["B10"].value == "Total DUTs Tested"
+        assert reloaded["B11"].value == 25
+        assert reloaded["B12"].value == "Σ of the per-wafer DUT totals"
+        # lavender (classic Excel Lavender + 604A7B) / light green (Good pair)
+        assert reloaded["A10"].fill.fgColor.rgb.endswith("E4DFEC")
+        assert reloaded["B10"].fill.fgColor.rgb.endswith("C6EFCE")
         data_only = env.reload_data_only()
         assert data_only["A5"].value == 6  # Σ of the die grid (0s free)
         assert data_only["A8"].value == 4  # coords with ≥ 1 fail
+        assert data_only["A11"].value == 4  # COUNT = the 4 probed dies
         assert nxt == 13  # cards end at row 12
 
     def test_legend_below_title(self, env):

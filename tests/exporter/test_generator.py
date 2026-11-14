@@ -605,12 +605,15 @@ class TestStackedWaferSheet:
         assert stacked["A1"].value == "Stacked Wafer Map – All Sites"
         assert [stacked.cell(row=4, column=c).value for c in range(7, 12)] == [1, 1, 1, 3, 0]
         # sbin-uniform KPI cards: cached =SUM headline + =COUNTIF coords;
-        # the 4th card carries the per-wafer DUT total (W08's "Total: 5")
+        # slot 2: DUTs per Wafer (=COUNT over the 5 probed dies) + Total
+        # DUTs Tested (Σ of the per-wafer totals — W08's "Total: 5")
         assert stacked["A4"].value == "Total Failed DUTs"
+        assert stacked["B10"].value == "Total DUTs Tested"
         data_only = load_workbook(reportPath, data_only=True)["Wafer Stacked Map (All Wafers)"]
         assert data_only["A5"].value == 6
         assert data_only["A8"].value == 4
-        assert data_only["A11"].value == 5
+        assert data_only["A11"].value == 5  # =COUNT: 5 probed dies
+        assert data_only["B11"].value == 5  # Σ of the per-wafer DUT totals
         # the reading legend sits on row 2; freeze like the sbin sheets
         # (G4 = first die cell: title + legend + X-header row stay visible)
         assert stacked["A2"].value == WAFER_STACKED_LEGEND

@@ -70,6 +70,7 @@ from deps.exporter.theme import (
     FONT_NAME,
     KPI_BORDER_DARK_BLUE,
     KPI_BORDER_DARK_GREEN,
+    KPI_BORDER_DARK_LAVENDER,
     KPI_BORDER_DARK_RED,
     KPI_BORDER_DARK_YELLOW,
 )
@@ -972,12 +973,17 @@ WAFER_KPI_SPANS = (
 )
 WAFER_KPI_ROWS = (0, 1, 1)  # Yield slot 0 (4-6); Fails+Total share slot 1 (7-9)
 
-# 2026-11-14: the stacked sheet adds a 4th card slot (rows 10-12, light
-# green — the classic Excel "Good" fill/border pair) carrying the total
-# DUTs across the stacked wafers; the sbin sheets keep the 3-card
-# WAFER_KPI_SPANS untouched
-WAFER_STACKED_KPI_SPANS = WAFER_KPI_SPANS + ((1, 4, "C6EFCE", KPI_BORDER_DARK_GREEN),)
-WAFER_STACKED_KPI_ROWS = WAFER_KPI_ROWS + (2,)
+# 2026-11-14: the stacked sheet adds a 3rd card slot (rows 10-12) split
+# in two — DUTs per Wafer (column A, the classic Excel Lavender pair
+# E4DFEC/604A7B, live =COUNT over the die grid: the sbin sheets' Total
+# Parts analog) + Total DUTs Tested (B:D, the classic Excel "Good" pair
+# C6EFCE/006100, Σ of the per-wafer DUT totals); the sbin sheets keep
+# the 3-card WAFER_KPI_SPANS untouched
+WAFER_STACKED_KPI_SPANS = WAFER_KPI_SPANS + (
+    (1, 1, "E4DFEC", KPI_BORDER_DARK_LAVENDER),  # DUTs per Wafer (col A)
+    (2, 4, "C6EFCE", KPI_BORDER_DARK_GREEN),  # Total DUTs Tested (B:D)
+)
+WAFER_STACKED_KPI_ROWS = WAFER_KPI_ROWS + (2, 2)
 WAFER_LABEL_COL_WIDTH = 30  # column A — keys / labels (pinned post-autofit)
 WAFER_VALUE_COL_WIDTH = 8  # columns B:D — values
 WAFER_SPACER_PINNED_WIDTH = 3.5  # column E (2026-11-13: was the 2.71 square)
@@ -1399,11 +1405,14 @@ def write_stacked_wafer_block(
     sbin sheets (X headers on the anchor row, Y-axis header in F, dies
     from the next one — counts as the cell VALUES from G) under ONE
     3_color_scale rule (green #00CC00 low → yellow #FFFF00 → red #CC0000
-    high; default min / percentile-50 / max anchors), and the three info
-    items as KPI cards across A:D with the sbin geometry (Total Failed
-    DUTs full-width rows 4-6 =SUM over the die grid; Fail Coordinates
-    col A + Files B:D side by side rows 7-9, =COUNTIF ">0" / plain count
-    — cached results ride the formulas). Real aggregations carry a
+    high; default min / percentile-50 / max anchors), and the info items
+    as KPI cards across A:D with the sbin geometry (Total Failed DUTs
+    full-width rows 4-6 =SUM over the die grid; Fail Coordinates col A +
+    Files B:D side by side rows 7-9, =COUNTIF ">0" / plain count; slot 2
+    rows 10-12 splits in two — DUTs per Wafer col A lavender =COUNT over
+    the die grid (the sbin Total Parts analog) + Total DUTs Tested B:D
+    light green (Σ of the per-wafer DUT totals) — cached results ride
+    the formulas). Real aggregations carry a
     count-0 bucket (getStackedWaferData seeds every probed coordinate):
     probed-but-passing dies render as 0 at the green end of the gradient,
     wafer-outline style; only never-probed gap coordinates stay unwritten
@@ -1535,12 +1544,16 @@ def write_stacked_wafer_block(
         ("Fail Coordinates", (f'=COUNTIF({map_range},">0")', coords),
          "dies failing at least once", False),
         ("Files", files, "stacked hot-spot view", False),
-        # 2026-11-14 user ask: 4th card slot (rows 10-12, light green)
-        ("Total DUTs per Wafer", total_duts, "Σ of the per-wafer DUT totals", False),
+        # 2026-11-14 user ask: slot 2 (rows 10-12) splits in two — the
+        # Total Parts analog (live COUNT over the die grid, lavender) +
+        # the per-wafer DUT total (light green)
+        ("DUTs per Wafer", (f"=COUNT({map_range})", len(grid)),
+         "probed dies across all wafers", False),
+        ("Total DUTs Tested", total_duts, "Σ of the per-wafer DUT totals", False),
     )
     write_kpi_cards(
         ws,
-        start_row + 3,  # legend row 2 → cards rows 4-12 (sbin geometry
+        start_row + 3,  # legend row 2 → cards rows 4-12 (sbin geometry)
         {},  # kpi / n_files unused: card_defs replaces the built cards
         1,
         theme,

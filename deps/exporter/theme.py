@@ -43,12 +43,14 @@ KPI_LABEL_HEX = "64748B"
 KPI_SUB_HEX = "94A3B8"
 # Ninth wave (design goal 5): dark KPI border accents — dark yellow for
 # the Yield card, dark red for Fails, dark blue for Total Parts.
-# 2026-11-14: dark green for the stacked sheet's 4th card (the classic
-# Excel "Good" pair with its C6EFCE fill).
+# 2026-11-14: dark green for the stacked sheet's Total DUTs Tested card
+# (the classic Excel "Good" pair with its C6EFCE fill), dark lavender
+# for its DUTs per Wafer card (the classic Lavender pair E4DFEC/604A7B).
 KPI_BORDER_DARK_YELLOW = "9C6500"
 KPI_BORDER_DARK_RED = "9C0006"
 KPI_BORDER_DARK_BLUE = "1E40AF"
 KPI_BORDER_DARK_GREEN = "006100"
+KPI_BORDER_DARK_LAVENDER = "604A7B"
 CPK_BAND_HEXES = ("A7F3D0", "D1FAE5", "FEF3C7", "FECACA")
 
 # Sheet tab colors (xlsxwriter migration upgrade 5): keyed by English sheet
