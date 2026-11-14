@@ -95,6 +95,9 @@ class WaferMapMixin(ReportHost):
         WaferSheet.set_tab_color(f"#{TAB_COLOR_HEXES['wafer']}")
 
     def writeWaferMap(self):
+        """The Wafer Map sheets: one sheet per wafer tuple, plus a merged
+        sheet per re-measured ID (issue #4) and the stacked all-wafers
+        sheet last (issue #5); payloads fetched in tuple order."""
         key = ReportSelection.Wafer
         base_sheet = self.sheetDict.get(key, None)
         # report_core binds workbook and theme before any write* runs
@@ -208,7 +211,7 @@ class WaferMapMixin(ReportHost):
                 wafer_rows=wafer_rows,
                 overall_yield=overall_yield,
                 total_duts=total_duts,
-                wafer_table_name=wafer_table_name(stacked_index, "StackedWafers"),
+                wafer_id_table_name=wafer_table_name(stacked_index, "StackedWafers"),
                 fail_table_name=wafer_table_name(stacked_index, "FailMapCount"),
             )
             self._style_wafer_sheet(StackedSheet)

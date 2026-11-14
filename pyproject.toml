@@ -75,7 +75,7 @@ disable = "C0103,C0301,R0801"
 [tool.pylint.DESIGN]
 # Documented raises over the template defaults to admit the existing shape of
 # the rendering functions (see deps/exporter/IDEAS.md for the refactor item).
-max-ancestors = 11 # ModernReportGenerator = 8 mixins + ReportHost + reportGenerator + QObject
+max-parents = 11 # ModernReportGenerator = 8 mixins + ReportHost + reportGenerator + QObject
 max-args = 12
 max-positional-arguments = 12
 max-attributes = 15

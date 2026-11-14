@@ -38,6 +38,8 @@ class HistogramMixin(ReportHost):
     """Histogram worksheet writer."""
 
     def writeHistogram(self, testTuple: tuple, head: int, site: int):
+        """One Histogram block: the embedded PNG plus its stat rows, for
+        one (test, head, site)."""
         HistoSheet = self.sheetDict.get(ReportSelection.Histo, None)
         if HistoSheet is None:
             return

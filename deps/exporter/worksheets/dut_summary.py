@@ -474,7 +474,7 @@ def _flag_cell(flag):
 # --------------------------------------------------------------------------
 
 
-def _metadata_cell(meta, summaryTable, fid, dut_index, global_index, file_temperatures=None):
+def _metadata_cell(meta, summaryTable, fid, dut_index, file_temperatures=None):
     name = meta["name"]
     info = summaryTable.get("dutInfo", {}).get(fid, {}).get(dut_index) or ()
 
@@ -581,7 +581,7 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die, file_tempera
     for position, meta in enumerate(METADATA_ROWS):
         excel_row = METADATA_START + position
         values = [
-            _metadata_cell(meta, summaryTable, fid, dut_index, global_index, file_temperatures)
+            _metadata_cell(meta, summaryTable, fid, dut_index, file_temperatures)
             for global_index, fid, dut_index in chunk_cells
         ]
         prefix = [
@@ -973,6 +973,9 @@ class DUTSummaryMixin(ReportHost):
         return order, dut_ids
 
     def writeDUT_Summary(self):
+        """The DUT Summary sheet: the die-part matrix (spec-built), plus
+        the FTR cache fill, the re-measure drop-set hand-off (§7.2), the
+        die-chunk overflow sheets and the temperature splits (§7.4)."""
         DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
         if DutSheet is None:
             return

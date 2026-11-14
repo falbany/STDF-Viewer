@@ -58,6 +58,8 @@ class BinChartMixin(ReportHost):
     """Bin Chart worksheet writer (moved verbatim from generator.py)."""
 
     def writeBinChart(self):
+        """The Bin Chart sheet: banner, KPI cards, HB/SB donut band and
+        contribution tables, one block per head/site."""
         BinSheet = self.sheetDict.get(ReportSelection.Bin, None)
         if BinSheet is None:
             return

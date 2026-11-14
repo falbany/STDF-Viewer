@@ -37,6 +37,8 @@ class GdrDtrMixin(ReportHost):
     """GDR & DTR Summary worksheet writer."""
 
     def writeGDR_DTR(self):
+        """The GDR & DTR sheet: raw record types and values as a plain
+        three-column table."""
         GDR_DTR_Sheet = self.sheetDict.get(ReportSelection.GDR_DTR, None)
         if GDR_DTR_Sheet is None:
             return

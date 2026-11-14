@@ -144,6 +144,8 @@ class FileInfoMixin(ReportHost):
     """File Info worksheet writer (moved verbatim from generator.py)."""
 
     def writeFileInfo(self):
+        """The File Info sheet: per-file metadata table, numericized where
+        the classic labels resolve; stashes the Bin-sheet banner."""
         InfoSheet = self.sheetDict.get(ReportSelection.FileInfo, None)
         if InfoSheet is None:
             return

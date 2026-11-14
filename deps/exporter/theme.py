@@ -286,72 +286,90 @@ class ModernTheme:  # pylint: disable=too-many-public-methods
 
     @property
     def header_font(self):
+        """Table-header row font (bold, header color)."""
         return self.cell_format(font="header")
 
     @property
     def header_fill(self):
+        """Table-header row background fill."""
         return self._format({"bg_color": f"#{HEADER_FILL_HEX}"})
 
     @property
     def header_alignment(self):
+        """Centered cell alignment for header cells."""
         return self.cell_format(align="center")
 
     @property
     def border(self):
+        """Thin-border format for gridded cells."""
         return self.cell_format(border=True)
 
     @property
     def banner_font(self):
+        """Row-1 report banner font (bold, banner color)."""
         return self.cell_format(font="banner")
 
     @property
     def banner_fill(self):
+        """Row-1 report banner background fill."""
         return self._format({"bg_color": f"#{BANNER_FILL_HEX}"})
 
     @property
     def metadata_label_font(self):
+        """File Info metadata label column font."""
         return self.cell_format(font="metadata")
 
     @property
     def block_title_font(self):
+        """Per-block title font (e.g. chart section headings)."""
         return self.cell_format(font="block")
 
     @property
     def kpi_label_font(self):
+        """KPI card label (top slot) font."""
         return self.cell_format(font="kpi_label")
 
     @property
     def kpi_value_font(self):
+        """KPI card value (middle slot) font."""
         return self.cell_format(font="kpi_value")
 
     @property
     def kpi_sub_font(self):
+        """KPI card subtitle (bottom slot) font."""
         return self.cell_format(font="kpi_sub")
 
     @property
     def body_font(self):
+        """Table body cell font."""
         return self.cell_format(font="body")
 
     @property
     def body_alignment(self):
+        """Centered cell alignment for body cells."""
         return self.cell_format(align="center")
 
     @property
     def pass_fill(self):
+        """Pass cell background fill."""
         return self._format({"bg_color": f"#{PASS_FILL_HEX}"})
 
     @property
     def fail_fill(self):
+        """Fail cell background fill."""
         return self._format({"bg_color": f"#{FAIL_FILL_HEX}"})
 
     @property
     def neutral_fill(self):
+        """Neutral (unknown/N.A.) cell background fill."""
         return self._format({"bg_color": f"#{NEUTRAL_FILL_HEX}"})
 
     @property
     def group_fill(self):
+        """Band fill for grouped/alternating rows."""
         return self._format({"bg_color": f"#{GROUP_FILL_HEX}"})
 
     # Cpk conditional-formatting band colors, best to worst.
     def cpk_band_fills(self) -> list[str]:
+        """Cpk conditional-formatting band colors, best to worst."""
         return list(CPK_BAND_HEXES)

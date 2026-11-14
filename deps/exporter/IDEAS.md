@@ -95,3 +95,25 @@ checks still wait on real data before a PR makes sense:
 
 One session with your real STDFs closes all three and turns the whole
 wafer branch into a PR.
+
+## 6. Refactor the mega rendering functions — *medium, code-quality debt*
+
+**What.** Split the three functions pylint's design rules flag as
+outliers (each carries a narrow inline `pylint: disable` today):
+`write_wafer_map_block` (60 locals), `write_stacked_wafer_block`
+(54 locals) — both `deps/exporter/charts.py` — and
+`ModernReportGenerator.report_core` (26 branches). Natural seams: the
+KPI-card zone vs the die-grid zone in the wafer blocks; the
+sheet-creation / fetch / write phases of `report_core`.
+
+**Why.** The 2026-11-14 lint hardening (ruff/pylint/pyright gates,
+pylint 9.98) chose documented thresholds over refactoring freshly-
+shipped issue #5 code before its live-export validation. These three
+are the only functions the thresholds still admit; everything else
+passes the strict limits.
+
+**Where.** `charts.py` helpers stay pure functions (theme passed in);
+`report_core` phases can extract into private methods on
+`ModernReportGenerator`. Do it AFTER the live-export gates in item 5 —
+regression risk on rendering geometry, covered by the 767-test suite
+plus a visual check.

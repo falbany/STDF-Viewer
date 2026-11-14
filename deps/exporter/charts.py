@@ -879,9 +879,9 @@ def _pf_from_palette(hex6: str) -> str:
         r, g, b = int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16)
     except ValueError:
         return ""
-    if g >= 100 and g > r and g >= b:
+    if 100 <= g > r and g >= b:
         return "P"
-    if r >= 100 and r > g and g < 100:
+    if 100 <= r > g and g < 100:
         return "F"
     return ""
 
@@ -1013,7 +1013,7 @@ def _wafer_kv_row(ws, row: int, key: str, value: str, theme, sides: str = "") ->
         ws.merge_range(row - 1, 1, row - 1, 3, value, _wafer_prop_fmt(theme, value_sides))
 
 
-def write_wafer_map_block(
+def write_wafer_map_block(  # pylint: disable=too-many-locals
     ws,
     theme,
     rows: list,
@@ -1048,7 +1048,7 @@ def write_wafer_map_block(
     site_info = _wafer_site_info(sites)
     title = f"{wafer_id} – {site_info}" if wafer_id else site_info
 
-    x_axis, y_axis, grid, total = build_wafer_grid(map_data)
+    x_axis, y_axis, grid, _ = build_wafer_grid(map_data)
     identity_cells = [cell for row in wafer_info_rows(rows) for cell in row]
 
     if not grid:
@@ -1074,7 +1074,7 @@ def write_wafer_map_block(
     # formulas — Total Parts counts the die map, Yield/Fails reference
     # the SW table's own COUNTIF cells (pass/fail rows selected via the
     # shared PF classifier) — so the whole sheet recalculates on edits
-    bins_present = sorted({sbin for sbin in grid.values()})
+    bins_present = sorted(set(grid.values()))
     counts = {sbin: sum(1 for v in grid.values() if v == sbin) for sbin in bins_present}
     pf_map = wafer_bin_pf_map(grid, map_data.get("BinPF") or {}, map_data.get("Palette"))
     kpi = wafer_kpi_from_grid(grid, map_data.get("BinPF") or {}, map_data.get("Palette"))
@@ -1382,7 +1382,7 @@ def write_stacked_wafer_table(
     return total_row + 1
 
 
-def write_stacked_wafer_block(
+def write_stacked_wafer_block(  # pylint: disable=too-many-locals
     ws,
     theme,
     rows: list,
@@ -1392,7 +1392,7 @@ def write_stacked_wafer_block(
     wafer_rows: "list | None" = None,
     overall_yield: "float | None" = None,
     total_duts: int = 0,
-    wafer_table_name: "str | None" = None,
+    wafer_id_table_name: "str | None" = None,
     fail_table_name: "str | None" = None,
 ) -> int:
     """One stacked wafer block (issue #5; 2026-11-14 sbin-uniform layout):
@@ -1412,7 +1412,7 @@ def write_stacked_wafer_block(
     count-0 bucket (getStackedWaferData seeds every probed coordinate):
     probed-but-passing dies render as 0 at the green end of the gradient,
     wafer-outline style; only never-probed gap coordinates stay unwritten
-    (CF ignores blanks). ``wafer_rows`` + ``wafer_table_name`` render the
+    (CF ignores blanks). ``wafer_rows`` + ``wafer_id_table_name`` render the
     per-wafer ID table (write_stacked_wafer_table) at the sbin SW-table
     slot (row 15); ``fail_table_name`` renders the Fail Map Count below
     it (one blank row after the ID table's Total) — write_bin_table with
@@ -1578,14 +1578,14 @@ def write_stacked_wafer_block(
 
     next_free = max(start_row + 12, xh_row + len(y_axis) + 1)
     table_row = start_row + 14  # the sbin SW-table slot (row 15, A:D zone)
-    if wafer_rows and wafer_table_name:
+    if wafer_rows and wafer_id_table_name:
         wafers_end = write_stacked_wafer_table(
             ws,
             table_row,
             wafer_rows,
             overall_yield,
             theme,
-            wafer_table_name,
+            wafer_id_table_name,
         )
         next_free = max(next_free, wafers_end)
         table_row = wafers_end + 1  # Fail Map Count sits below, one blank row

@@ -110,15 +110,20 @@ class ModernReportGenerator(
     HistogramMixin,
     reportGenerator,
 ):
+    """Modern xlsxwriter report generator: the worksheet mixins composed
+    over the legacy ``reportGenerator`` threading base — instance state
+    replaces the classic module statics (layout history in the module
+    docstring)."""
+
     def __init__(
         self,
-        signals: signals,
+        sig: signals,
         mutex: QtCore.QMutex,
         conditionWait: QtCore.QWaitCondition,
         reportInfo: tuple,
         channel: dataChannel,
     ):
-        super().__init__(signals, mutex, conditionWait, reportInfo, channel)
+        super().__init__(sig, mutex, conditionWait, reportInfo, channel)
         # instance state replacing the classic module-level sv statics
         self._wb: xlsxwriter.Workbook | None = None
         self._theme = None  # ModernTheme binds to the workbook in report_core
@@ -152,7 +157,7 @@ class ModernReportGenerator(
     # report assembly
     # ----------------------------------------------------------------------
 
-    def report_core(self):
+    def report_core(self):  # pylint: disable=too-many-branches
         # strings_to_urls MUST stay off: URL-looking strings (File Info
         # paths) would silently become hyperlinks (xlsxwriter's default)
         self._wb = xlsxwriter.Workbook(

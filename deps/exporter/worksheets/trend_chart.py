@@ -38,6 +38,8 @@ class TrendChartMixin(ReportHost):
     """Trend Chart worksheet writer."""
 
     def writeTrendPlot(self, testTuple: tuple, head: int, site: int):
+        """One Trend Chart block: the embedded PNG plus its stat rows,
+        for one (test, head, site)."""
         TrendSheet = self.sheetDict.get(ReportSelection.Trend, None)
         if TrendSheet is None:
             return

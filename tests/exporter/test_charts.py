@@ -1666,7 +1666,7 @@ class TestStackedWaferBlock:
             env,
             wafer_rows=[("W08", 2, 0.6), ("W09", 1, None)],
             overall_yield=0.5,
-            wafer_table_name="SW_0_StackedWafers",
+            wafer_id_table_name="SW_0_StackedWafers",
         )
         reloaded = env["reload"]()
         assert reloaded["A15"].value == "Stacked Wafers — per-wafer metrics"
@@ -1731,7 +1731,7 @@ class TestStackedWaferBlock:
             env,
             wafer_rows=[("W08", 1, 0.6)],
             overall_yield=0.6,
-            wafer_table_name="SW_0_StackedWafers",
+            wafer_id_table_name="SW_0_StackedWafers",
             fail_table_name="SW_0_FailMapCount",
         )
         reloaded = env["reload"]()

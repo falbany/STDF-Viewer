@@ -31,6 +31,7 @@ Pure module-level code moved verbatim from generator.py (worksheets split,
 extraction wave.
 """
 
+import math
 import re
 
 import xlsxwriter.utility as xlutil
@@ -348,7 +349,7 @@ def _is_number(value) -> bool:
     """Real numeric cell (bools and NaN excluded)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
-    return value == value  # NaN != NaN
+    return not math.isnan(value)  # NaN != NaN
 
 
 def _stat_formula_values(stat_row: list, header_info: dict) -> dict:
@@ -386,6 +387,8 @@ class TestStatisticsMixin(ReportHost):
     `_stat_formula_values` function)."""
 
     def writeStatistic(self, testTuples: list, heads: list[int], sites: list[int]):
+        """The Test Statistics sheet: transformed header/rows, FTR
+        pseudo-limits, live Cp/Cpk formulas with cached results."""
         # Sheet for statistics of test items, e.g. cpk, mean, etc.
         StatSheet = self.sheetDict.get(ReportSelection.Stat, None)
         if StatSheet is None:

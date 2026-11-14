@@ -93,7 +93,7 @@ def parse_temperature_text(value) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        return float(value) if value == value else None  # NaN -> None
+        return None if math.isnan(value) else float(value)  # NaN -> None
     text = str(value).strip()
     if "\n" in text:
         # multi-subfile composite ("#1 → 25C\n#2 → -40C"): first subfile wins
