@@ -30,6 +30,7 @@ Pure module-level code moved verbatim from generator.py (worksheets split,
 2026-11-12); the FileInfoMixin writer joins this file in the extraction wave.
 """
 
+from deps.exporter.contract import ReportHost
 from deps.exporter.helpers import parse_temperature_text
 from deps.exporter.sheets import plain_table_spec
 from deps.exporter.theme import TAB_COLOR_HEXES
@@ -139,13 +140,16 @@ def _numeric_file_info_cell(value):
         return value, None
 
 
-class FileInfoMixin:
+class FileInfoMixin(ReportHost):
     """File Info worksheet writer (moved verbatim from generator.py)."""
 
     def writeFileInfo(self):
         InfoSheet = self.sheetDict.get(ReportSelection.FileInfo, None)
         if InfoSheet is None:
             return
+        # report_core binds the theme before any write* runs (contract.py)
+        theme = self._theme
+        assert theme is not None
 
         # get file info table
         dataTable = self.waitForTableData(isFileInfo=True)
@@ -185,7 +189,7 @@ class FileInfoMixin:
         )
         spec["tab_color"] = TAB_COLOR_HEXES["file_info"]
         spec["repeat_header_row"] = 1
-        render_plain_table(InfoSheet, spec, self._theme)
+        render_plain_table(InfoSheet, spec, theme)
         self._autofit_columns(InfoSheet)
 
         # ninth wave: stash the Bin-sheet banner text when the English

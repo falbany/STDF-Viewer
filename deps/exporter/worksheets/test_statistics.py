@@ -35,6 +35,7 @@ import re
 
 import xlsxwriter.utility as xlutil
 
+from deps.exporter.contract import ReportHost
 from deps.exporter.dedup import drops_to_exclusion
 from deps.exporter.helpers import (
     apply_cp_formula,
@@ -240,7 +241,7 @@ def transform_stat_row(row, header_info: dict) -> list:
     cells = list(row)
     raw_vheader = cells[0] if cells else ""
     parsed = parse_vheader(raw_vheader)
-    out = list(parsed) if parsed is not None else [raw_vheader, "", "", ""]
+    out: list = list(parsed) if parsed is not None else [raw_vheader, "", "", ""]
     rest = cells[1:]
     if header_info.get("param_inserted"):
         name = rest[0] if rest else ""
@@ -379,7 +380,7 @@ def _stat_formula_values(stat_row: list, header_info: dict) -> dict:
     }
 
 
-class TestStatisticsMixin:
+class TestStatisticsMixin(ReportHost):
     """Test Statistics worksheet writer (moved verbatim from generator.py;
     the former staticmethod `_stat_formula_values` demotes to this module's
     `_stat_formula_values` function)."""
@@ -389,11 +390,14 @@ class TestStatisticsMixin:
         StatSheet = self.sheetDict.get(ReportSelection.Stat, None)
         if StatSheet is None:
             return
+        # report_core binds the theme before any write* runs (contract.py)
+        theme = self._theme
+        assert theme is not None
 
         # re-measure filter (§7.2): Test Statistics honors the same kept-DUT
         # set as the DUT Summary — the stored drop-set when the DUT sheet
         # ran, a light dutInfo-only fetch otherwise (stat-only exports)
-        kargs = {"testTuples": testTuples}
+        kargs: dict = {"testTuples": testTuples}
         if getSetting().gen.hide_remeasured:
             drops = self._resolve_remeasure_drops()
             if drops:
@@ -449,7 +453,7 @@ class TestStatisticsMixin:
         spec["repeat_header_row"] = 1
         if cf_ranges:
             spec["conditional_formatting"] = cf_ranges
-        render_plain_table(StatSheet, spec, self._theme)
+        render_plain_table(StatSheet, spec, theme)
 
         # data rows keep the classic cadence: forceQuit check, one loopCount
         # and one sendProgress per row — the transforms happen per row
@@ -479,7 +483,7 @@ class TestStatisticsMixin:
                 StatSheet,
                 2 + offset,
                 stat_row,
-                self._theme,
+                theme,
                 band=(theme_group_fill_hex if offset % 2 == 0 else None),
                 number_formats=number_formats,
                 column_fills=column_fills,

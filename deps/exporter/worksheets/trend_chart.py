@@ -26,6 +26,7 @@ Trend Chart worksheet writer (moved verbatim from generator.py,
 worksheets split 2026-11-12).
 """
 
+from deps.exporter.contract import ReportHost
 from deps.exporter.sheets import insert_report_image
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.writer import FOOTER_TEXT
@@ -33,7 +34,7 @@ from deps.SharedSrc import tab
 from deps.uic_stdExporter import ReportSelection
 
 
-class TrendChartMixin:
+class TrendChartMixin(ReportHost):
     """Trend Chart worksheet writer."""
 
     def writeTrendPlot(self, testTuple: tuple, head: int, site: int):

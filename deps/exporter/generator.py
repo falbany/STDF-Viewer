@@ -123,6 +123,14 @@ class ModernReportGenerator(
         self._wb: xlsxwriter.Workbook | None = None
         self._theme = None  # ModernTheme binds to the workbook in report_core
         self._row: dict[ReportSelection, int] = {}  # per-sheet row cursors
+        # per-run state — report_core re-binds every one of these before
+        # any write* mixin runs (declared here so the attributes exist
+        # from construction on)
+        self._bin_banner = ""
+        self._ftr_tests: set = set()
+        self._remeasure_drops: set | None = None
+        self._fid_ranks_cache: dict | None = None
+        self._dut_sheet_block: list = []
 
     # ----------------------------------------------------------------------
     # helpers

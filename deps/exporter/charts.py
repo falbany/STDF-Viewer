@@ -260,14 +260,16 @@ def aggregate_kpi(rows) -> dict:
     bin lists (HB or SB) — upstream writes the SAME summary cells into
     both rows, so summing both double-counts.
     """
-    sums = dict.fromkeys(KPI_KEYS, 0)
+    counts = dict.fromkeys(KPI_KEYS, 0)
     for row in rows:
         for key, value in parse_kpi_row(row).items():
-            if key in sums:
-                sums[key] += value
-    effective = sums["total"] - sums["superseded"]
-    sums["yield"] = (sums["pass"] / effective) if effective else None
-    return sums
+            if key in counts:
+                counts[key] += value
+    effective = counts["total"] - counts["superseded"]
+    return {
+        **counts,
+        "yield": (counts["pass"] / effective) if effective else None,
+    }
 
 
 def bin_table_ranges(title_row: int, n_bins: int, first_col: int = BIN_TABLE_FIRST_COL):
@@ -392,11 +394,11 @@ def build_bin_donut(
 
     def _abs(ref: str) -> str:
         """$-lock an A1 cell/range ("B3:B4" -> "$B$3:$B$4")."""
-        import re as _re
-
         parts = []
         for part in ref.split(":"):
-            match = _re.match(r"([A-Z]+)(\d+)$", part.replace("$", ""))
+            match = re.match(r"([A-Z]+)(\d+)$", part.replace("$", ""))
+            if match is None:
+                raise ValueError(f"not an A1 cell reference: {part!r}")
             parts.append(f"${match.group(1)}${match.group(2)}")
         return ":".join(parts)
 
@@ -818,11 +820,12 @@ def wafer_sheet_name(index: int, wafer_id: str, taken: set, suffix: str = "") ->
     collision logic."""
     safe = re.sub(r"[\[\]:\\/\?\*]", "_", str(wafer_id)).strip() or str(index)
     name = f"Wafer {safe}{suffix}"[:31].rstrip() or f"Wafer {index}"
-    candidate, suffix = name, 2
+    candidate = name
+    collision = 2
     while candidate in taken:
-        tail = f"_{suffix}"
+        tail = f"_{collision}"
         candidate = name[: 31 - len(tail)] + tail
-        suffix += 1
+        collision += 1
     return candidate
 
 
@@ -1174,7 +1177,11 @@ def write_wafer_map_block(
         for col_offset, x in enumerate(x_axis):
             sbin = grid.get((x, y))
             if sbin is not None:
-                if sup_die_fmt is not None and (x, y) in superseded_coords:
+                if (
+                    sup_die_fmt is not None
+                    and superseded_coords is not None
+                    and (x, y) in superseded_coords
+                ):
                     ws.write(row0, WAFER_FIRST_DIE_COL0 + col_offset, int(sbin), sup_die_fmt)
                 else:
                     ws.write(row0, WAFER_FIRST_DIE_COL0 + col_offset, int(sbin), die_fmt)

@@ -55,6 +55,7 @@ from deps.exporter.charts import (
     write_stacked_wafer_block,
     write_wafer_map_block,
 )
+from deps.exporter.contract import ReportHost
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.wafer_merge import merge_wafer_payloads, merged_wafer_groups
 from deps.exporter.writer import FOOTER_TEXT
@@ -62,7 +63,7 @@ from deps.SharedSrc import getSetting, tab
 from deps.uic_stdExporter import ReportSelection
 
 
-class WaferMapMixin:
+class WaferMapMixin(ReportHost):
     """Wafer Map worksheet writer (one worksheet per wafer)."""
 
     def _style_wafer_sheet(self, WaferSheet):
@@ -96,17 +97,19 @@ class WaferMapMixin:
     def writeWaferMap(self):
         key = ReportSelection.Wafer
         base_sheet = self.sheetDict.get(key, None)
+        # report_core binds workbook and theme before any write* runs
+        wb = self._wb
+        theme = self._theme
+        assert wb is not None and theme is not None
         # the pre-created single sheet is replaced by per-wafer sheets:
         # xlsxwriter 3.3.1 cannot rename a worksheet, so the (always
         # still-empty) base sheet is dropped from the workbook list and
         # one sheet per wafer is added — they land at the workbook end,
         # which is exactly the "Wafer Map" tab position of the classic
         # creation order
-        if self._wb is not None and base_sheet is not None:
-            self._wb.worksheets_objs = [
-                ws for ws in self._wb.worksheets_objs if ws is not base_sheet
-            ]
-        taken = {ws.get_name() for ws in self._wb.worksheets_objs}
+        if base_sheet is not None:
+            wb.worksheets_objs = [ws for ws in wb.worksheets_objs if ws is not base_sheet]
+        taken = {ws.get_name() for ws in wb.worksheets_objs}
         row = self._row.get(key, 0)
         # merged groups only exist when the filter is ON (2026-11-13
         # wafer merge): real IDs spanning 2+ tuples; NULL/empty excluded
@@ -161,11 +164,11 @@ class WaferMapMixin:
         for index, wafer, payload in fetched:
             name = wafer_sheet_name(index, wafer[2], taken)
             taken.add(name)
-            WaferSheet = self._wb.add_worksheet(name)
+            WaferSheet = wb.add_worksheet(name)
             start_row = 1  # block rows are 1-based; the sheet starts A1
             write_wafer_map_block(
                 WaferSheet,
-                self._theme,
+                theme,
                 payload["rows"],
                 payload["map"],
                 start_row,
@@ -189,7 +192,7 @@ class WaferMapMixin:
         if stacked_payload is not None:
             name = wafer_sheet_name(stacked_index, "Stacked Map (All Wafers)", taken)
             taken.add(name)
-            StackedSheet = self._wb.add_worksheet(name)
+            StackedSheet = wb.add_worksheet(name)
             # per-wafer ID table: every fetched payload is already in
             # hand — no new fetch round-trip
             wafer_rows, overall_yield, total_duts = stacked_wafer_table_rows(
@@ -197,7 +200,7 @@ class WaferMapMixin:
             )
             write_stacked_wafer_block(
                 StackedSheet,
-                self._theme,
+                theme,
                 stacked_payload["rows"],
                 stacked_payload["map"],
                 1,
@@ -217,16 +220,19 @@ class WaferMapMixin:
         ascending by the shared supersede ranks — the LAST payload wins
         each die coordinate and owns the identity rows; re-measured dies
         get the thick orange border (merged sheets only)."""
+        wb = self._wb
+        theme = self._theme
+        assert wb is not None and theme is not None  # report_core binds them
         ranks = self._fid_ranks()
         ordered = sorted(group, key=lambda wp: ranks.get(wp[0][1], wp[0][1]))
         merged_map, superseded = merge_wafer_payloads([p for _, p in ordered])
         name = wafer_sheet_name(index, wafer_id, taken, suffix=" (Merged)")
         taken.add(name)
-        WaferSheet = self._wb.add_worksheet(name)
+        WaferSheet = wb.add_worksheet(name)
         start_row = 1
         write_wafer_map_block(
             WaferSheet,
-            self._theme,
+            theme,
             ordered[-1][1]["rows"],  # identity rows from the winner
             merged_map,
             start_row,

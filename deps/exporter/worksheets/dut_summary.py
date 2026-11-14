@@ -37,6 +37,7 @@ import re
 
 import numpy as np
 
+from deps.exporter.contract import ReportHost
 from deps.exporter.dedup import compute_remeasure_drops, dut_info_from_partial
 from deps.exporter.helpers import (
     DUT_CHUNK_CAP,
@@ -453,8 +454,10 @@ def _lookup_value_flag(summaryTable, test_tuple, fid, dut_index):
 
 def _die_cell(value):
     """Parametric die cell: real float, or blank for NaN."""
+    if value is None:
+        return ""
     try:
-        if value is None or np.isnan(value):
+        if np.isnan(value):
             return ""
     except (TypeError, ValueError):
         pass
@@ -926,10 +929,10 @@ def order_dut_block(worksheets: list, block: list) -> list:
     return without_derived[: base_at + 1] + derived + without_derived[base_at + 1 :]
 
 
-class DUTSummaryMixin:
+class DUTSummaryMixin(ReportHost):
     """DUT Summary worksheet writer (moved verbatim from generator.py)."""
 
-    def _resolve_remeasure_drops(self) -> "set | set()":
+    def _resolve_remeasure_drops(self) -> set:
         """The filter's drop-set, either direction of the sheet selection.
 
         writeDUT_Summary stores its drop-set before writeStatistic runs
@@ -973,6 +976,10 @@ class DUTSummaryMixin:
         DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
         if DutSheet is None:
             return
+        # report_core binds workbook and theme before any write* runs
+        wb = self._wb
+        theme = self._theme
+        assert wb is not None and theme is not None
 
         # a complex dict structure from the GUI thread
         # key: Data, value:     testTuple -> {fid, testDataDict}
@@ -1046,8 +1053,8 @@ class DUTSummaryMixin:
         # first, report_core appended it at creation) so the close-time
         # reorder keeps the DUT block adjacent to the base sheet.
         for chunk_index, spec in enumerate(specs):
-            ws = DutSheet if chunk_index == 0 else self._wb.add_worksheet(spec["name"])
-            render_matrix_sheet(ws, spec, self._theme)
+            ws = DutSheet if chunk_index == 0 else wb.add_worksheet(spec["name"])
+            render_matrix_sheet(ws, spec, theme)
             if chunk_index > 0:
                 self._dut_sheet_block.append(ws)
 
@@ -1076,8 +1083,8 @@ class DUTSummaryMixin:
                         file_temperatures=file_temperatures,
                     )
                     for spec in split_specs:
-                        ws = self._wb.add_worksheet(spec["name"])
-                        render_matrix_sheet(ws, spec, self._theme)
+                        ws = wb.add_worksheet(spec["name"])
+                        render_matrix_sheet(ws, spec, theme)
                         self._dut_sheet_block.append(ws)
 
         # classic cadence: one tick after the DUT info part...

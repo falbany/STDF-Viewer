@@ -26,6 +26,7 @@ Histogram worksheet writer (moved verbatim from generator.py,
 worksheets split 2026-11-12).
 """
 
+from deps.exporter.contract import ReportHost
 from deps.exporter.sheets import insert_report_image
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.writer import FOOTER_TEXT
@@ -33,7 +34,7 @@ from deps.SharedSrc import tab
 from deps.uic_stdExporter import ReportSelection
 
 
-class HistogramMixin:
+class HistogramMixin(ReportHost):
     """Histogram worksheet writer."""
 
     def writeHistogram(self, testTuple: tuple, head: int, site: int):

@@ -26,19 +26,23 @@
 GDR & DTR Summary worksheet writer (moved verbatim from generator.py).
 """
 
+from deps.exporter.contract import ReportHost
 from deps.exporter.sheets import plain_table_spec
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.writer import render_plain_table
 from deps.uic_stdExporter import ReportSelection
 
 
-class GdrDtrMixin:
+class GdrDtrMixin(ReportHost):
     """GDR & DTR Summary worksheet writer."""
 
     def writeGDR_DTR(self):
         GDR_DTR_Sheet = self.sheetDict.get(ReportSelection.GDR_DTR, None)
         if GDR_DTR_Sheet is None:
             return
+        # report_core binds the theme before any write* runs (contract.py)
+        theme = self._theme
+        assert theme is not None
 
         dataTable = self.waitForTableData(isFileInfo=False)
         if self.forceQuit:
@@ -54,7 +58,7 @@ class GdrDtrMixin:
         )
         spec["tab_color"] = TAB_COLOR_HEXES["gdr"]
         spec["repeat_header_row"] = 1
-        render_plain_table(GDR_DTR_Sheet, spec, self._theme)
+        render_plain_table(GDR_DTR_Sheet, spec, theme)
         self._autofit_columns(GDR_DTR_Sheet)
 
         self.loopCount += 1

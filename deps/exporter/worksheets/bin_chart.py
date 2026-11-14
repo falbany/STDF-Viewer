@@ -47,19 +47,24 @@ from deps.exporter.charts import (
     write_kpi_cards,
     write_merged_headline,
 )
+from deps.exporter.contract import ReportHost
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.writer import FOOTER_TEXT
 from deps.SharedSrc import tab
 from deps.uic_stdExporter import ReportSelection
 
 
-class BinChartMixin:
+class BinChartMixin(ReportHost):
     """Bin Chart worksheet writer (moved verbatim from generator.py)."""
 
     def writeBinChart(self):
         BinSheet = self.sheetDict.get(ReportSelection.Bin, None)
         if BinSheet is None:
             return
+        # report_core binds workbook and theme before any write* runs
+        theme = self._theme
+        wb = self._wb
+        assert theme is not None and wb is not None
 
         # ninth wave: row 1 carries the merged A:F Title-lookalike banner
         # (Product ID / Sublot ID from File Info, or the sheet-name
@@ -72,7 +77,7 @@ class BinChartMixin:
             0,
             5,
             self._bin_banner,
-            self._theme.lookalike("title", wrap=True),
+            theme.lookalike("title", wrap=True),
         )
         BinSheet.set_row(0, BIN_BANNER_ROW_HEIGHT_PT)
         key = ReportSelection.Bin
@@ -101,16 +106,14 @@ class BinChartMixin:
             # outline riding the row-merge format) after ONE blank
             # separator row — the head/site identification lives in the
             # chart and table titles only
-            row = write_kpi_cards(BinSheet, row + 1, kpi, n_files, self._theme)
+            row = write_kpi_cards(BinSheet, row + 1, kpi, n_files, theme)
 
             # "Bin Charts" headline (tenth wave rename) with a blank row
             # on BOTH sides, then the charts band: ONE 250 pt row with
             # the 8.5 cm donuts cell-anchored HB at A{chart_row} and SB
             # at D{chart_row} (user ruling); empty bin lists leave the
             # band reserved, keeping the dashboard above intact
-            row = write_merged_headline(
-                BinSheet, row + 1, BIN_CHARTS_HEADLINE, "headline1", self._theme
-            )
+            row = write_merged_headline(BinSheet, row + 1, BIN_CHARTS_HEADLINE, "headline1", theme)
             row += 1  # blank between the headline and the band
             chart_row = row
             BinSheet.set_row(chart_row - 1, BIN_CHART_BAND_HEIGHT_PT)
@@ -126,7 +129,7 @@ class BinChartMixin:
                 chart_row + 2,
                 BIN_CONTRIBUTION_HEADLINE,
                 "headline1",
-                self._theme,
+                theme,
             )
             row += 1  # blank below the contribution headline
             section_refs = []
@@ -138,7 +141,7 @@ class BinChartMixin:
                     BinSheet,
                     row,
                     bins,
-                    self._theme,
+                    theme,
                     f"{kind} Bins — Head{head} / {site_label}",
                     f"{prefix}_Head{head}_{site_tag}",
                 )
@@ -156,7 +159,7 @@ class BinChartMixin:
                     continue
                 name_cell, cat_range, val_range = refs
                 build_bin_donut(
-                    self._wb,
+                    wb,
                     BinSheet,
                     f"{kind} Bin — Head{head} / {site_label}",
                     bins,

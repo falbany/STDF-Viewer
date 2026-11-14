@@ -129,13 +129,15 @@ def number_format_from_settings(precision: int, notation: str) -> str:
     return "General"
 
 
-class ModernTheme:
+class ModernTheme:  # pylint: disable=too-many-public-methods
     """Factory of cached xlsxwriter Format objects for the exporter.
 
     Takes the workbook (formats are workbook-scoped in xlsxwriter and
     immutable — every distinct style decision needs its own Format, so a
     composition cache keys the kwargs). Palette tokens are identical to
-    the openpyxl era; only the object layer changed.
+    the openpyxl era; only the object layer changed. One named-style
+    property per style is the factory's whole point, so the public
+    accessor count is deliberate.
     """
 
     def __init__(self, wb):
@@ -156,7 +158,7 @@ class ModernTheme:
         return fmt
 
     @staticmethod
-    def _font_kwargs(key: str) -> dict:
+    def _font_kwargs(key: str | None) -> dict:
         """Font layer per FontKey."""
         if key is None:
             return {}
@@ -215,7 +217,7 @@ class ModernTheme:
         return {"font_name": FONT_NAME, "font_size": FONT_SIZE}
 
     @staticmethod
-    def _align_kwargs(key: str) -> dict:
+    def _align_kwargs(key: str | None) -> dict:
         """Alignment layer per AlignKey (vertical center everywhere, like
         the openpyxl Alignment(horizontal=..., vertical='center'))."""
         if key is None:
