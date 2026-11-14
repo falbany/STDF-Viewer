@@ -563,8 +563,10 @@ class TestMergedWaferSheets:
 
 class TestStackedWaferSheet:
     """Issue #5: the stacked wafer tuple renders ONE sheet — 'Wafer
-    Stacked Map (All Wafers)' — FIRST among the wafer sheets, whenever
-    Wafer Map content is selected, independent of hide_remeasured."""
+    Stacked Map (All Wafers)' — LAST among the wafer sheets (2026-11-14
+    user ruling: extended engineering view, appended after the per-wafer
+    and merged sheets), whenever Wafer Map content is selected,
+    independent of hide_remeasured."""
 
     # getExportWaferTuples order: the stacked tuple always comes first
     TUPLES = [(-1, -1, "Stacked Wafer Map"), (0, 0, "W08")]
@@ -576,13 +578,14 @@ class TestStackedWaferSheet:
     }
     DATES = {0: (1, "2026-01-01", "")}
 
-    def test_stacked_sheet_first(self, tmp_path, qapp, monkeypatch):
+    def test_stacked_sheet_last(self, tmp_path, qapp, monkeypatch):
         _, reportPath = build_wafer_report(
             tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
             hide_remeasured=False,
         )
         wb = load_workbook(reportPath)
-        assert wb.sheetnames == ["Wafer Stacked Map (All Wafers)", "Wafer W08"]
+        # extended engineering view: after every wafer-dedicated sheet
+        assert wb.sheetnames == ["Wafer W08", "Wafer Stacked Map (All Wafers)"]
 
     def test_stacked_sheet_rendered(self, tmp_path, qapp, monkeypatch):
         _, reportPath = build_wafer_report(
@@ -614,7 +617,7 @@ class TestStackedWaferSheet:
                 self.DATES, hide_remeasured=hide,
             )
             wb = load_workbook(reportPath)
-            assert wb.sheetnames[0] == "Wafer Stacked Map (All Wafers)"
+            assert wb.sheetnames[-1] == "Wafer Stacked Map (All Wafers)"
             assert gen.loopCount == gen.totalLoopCnt
 
     def test_progress_unchanged(self, tmp_path, qapp, monkeypatch):

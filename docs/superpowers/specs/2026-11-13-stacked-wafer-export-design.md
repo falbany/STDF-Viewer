@@ -15,10 +15,11 @@ native live cell grid.
 ## Goals
 
 1. When `Wafer Map` content is selected, the Modern report emits **one** sheet
-   named `Wafer Stacked Map (All Wafers)`, positioned **first** among the
-   wafer sheets (mirroring the GUI, where stacked sits at the top of
-   `Wafer Selection`). It renders whenever Wafer Map is selected —
-   independent of the "Hide re-measured DUTs" setting.
+   named `Wafer Stacked Map (All Wafers)`, positioned **last** among the
+   wafer sheets (2026-11-14 user ruling: an extended engineering view of
+   the wafer, appended after the per-wafer and merged sheets — reverses
+   the original GUI-mirroring first placement). It renders whenever Wafer
+   Map is selected — independent of the "Hide re-measured DUTs" setting.
 2. Each die cell holds the **fail count as its value** (integer), so the map
    is live and user-editable like the sbin sheets.
 3. One conditional-format **`3_color_scale`** rule over the die range:
@@ -70,7 +71,7 @@ native live cell grid.
 
 | Decision | Call |
 |---|---|
-| Sheet count / placement | One sheet, first among wafer sheets |
+| Sheet count / placement | One sheet, last among the wafer sheets (2026-11-14 user ruling: extended engineering view appended after the per-wafer and merged sheets; originally first, mirroring the GUI — reversed post-implementation) |
 | Appearance condition | Always when Wafer Map content selected (setting-independent) |
 | Die cell value | Fail count (integer, live) |
 | Gradient | `3_color_scale`, Green `#00CC00` → Yellow `#FFFF00` → Red `#CC0000` |

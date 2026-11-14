@@ -36,10 +36,13 @@ thick-orange-bordered, counts recomputed from the merged grid.
 
 2026-11-13 stacked wafer map (issue #5): the stacked tuple
 (`waferIndex == -1`) renders ONE sheet — "Wafer Stacked Map (All
-Wafers)" — FIRST among the wafer sheets (GUI ruling: stacked sits on
-top of Wafer Selection), whenever Wafer Map content is selected and
-independent of the hide-remeasured setting: the cross-wafer fail-count
-heatmap as a live cell grid under one green→yellow→red color-scale.
+Wafers)" — LAST among the wafer sheets (2026-11-14 user ruling: an
+extended engineering view of the wafer, appended after the per-wafer
+and merged sheets; reverses the original GUI-mirroring first
+placement), whenever Wafer Map content is selected and independent of
+the hide-remeasured setting: the cross-wafer fail-count heatmap as a
+live cell grid under one green→yellow→red color-scale, with its
+reading legend right below the title.
 """
 from deps.SharedSrc import getSetting, tab
 from deps.uic_stdExporter import ReportSelection
@@ -106,8 +109,9 @@ class WaferMapMixin:
                 return
             if wafer[0] == -1:
                 # stacked wafer (fail-count colormap, issue #5): fetch the
-                # aggregation here, write its sheet FIRST in pass 2 — the
-                # tick stays with the tuple exactly as today
+                # aggregation here, write its sheet LAST in pass 2 (after
+                # every wafer-dedicated sheet) — the tick stays with the
+                # tuple exactly as today
                 stacked_payload = self.waitForDataList(
                     [],
                     self.selectedSites,
@@ -129,26 +133,11 @@ class WaferMapMixin:
                 {"testTuples": [wafer], "waferMapData": wafer},
             )
             fetched.append((index, wafer, payload))
-        # pass 2 — the stacked sheet first (issue #5: one sheet, first
-        # among the wafer sheets, no workbook surgery needed since it is
-        # written before every per-file sheet), then per-file sheets in
-        # the SAME order as today; after the LAST tuple of a merge group,
-        # write its merged sheet
-        if stacked_payload is not None:
-            name = wafer_sheet_name(
-                stacked_index, "Stacked Map (All Wafers)", taken
-            )
-            taken.add(name)
-            StackedSheet = self._wb.add_worksheet(name)
-            write_stacked_wafer_block(
-                StackedSheet,
-                self._theme,
-                stacked_payload["rows"],
-                stacked_payload["map"],
-                1,
-                freeze_panes=True,  # same grid freeze as the sbin sheets
-            )
-            self._style_wafer_sheet(StackedSheet)
+        # pass 2 — per-file sheets in the SAME order as today; after the
+        # LAST tuple of a merge group, write its merged sheet; the
+        # stacked sheet LAST (2026-11-14 user ruling: an extended
+        # engineering view of the wafer, appended after every
+        # wafer-dedicated sheet)
         group_last = {
             wafer[2]: index
             for index, wafer, _ in fetched  # later tuples overwrite: last wins
@@ -179,6 +168,21 @@ class WaferMapMixin:
                 row = start_row
                 self.loopCount += 1
                 self.sendProgress()
+        if stacked_payload is not None:
+            name = wafer_sheet_name(
+                stacked_index, "Stacked Map (All Wafers)", taken
+            )
+            taken.add(name)
+            StackedSheet = self._wb.add_worksheet(name)
+            write_stacked_wafer_block(
+                StackedSheet,
+                self._theme,
+                stacked_payload["rows"],
+                stacked_payload["map"],
+                1,
+                freeze_panes=True,  # same grid freeze as the sbin sheets
+            )
+            self._style_wafer_sheet(StackedSheet)
         self._row[key] = row
 
     def _write_merged_wafer_sheet(self, wafer_id, index, taken, group):
