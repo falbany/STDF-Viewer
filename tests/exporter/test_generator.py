@@ -377,14 +377,18 @@ class TestFidRanks:
 
 
 def wafer_payload(dies: dict, wafer_id: str = "W08") -> dict:
-    """Flagged tab.Wafer payload (issue #2 shape): dies = {sbin: [(x, y), ...]}."""
+    """Flagged tab.Wafer payload (issue #2 shape): dies = {sbin: [(x, y), ...]}.
+    The info rows carry the classic KPI cells (wafer_info_rows drops them
+    from the per-file identity lines; the stacked sheet's per-wafer table
+    parses the yield back out of them)."""
     data = {sbin: {"x": [x for x, _ in coords], "y": [y for _, y in coords]}
             for sbin, coords in dies.items()}
     n = sum(len(coords) for coords in dies.values())
     stat = {sbin: (f"Bin {sbin}", len(coords), 100.0 * len(coords) / n)
             for sbin, coords in dies.items()}
     return {
-        "rows": [["Yield: 60.00%", "Total: 5", f"WAFER_ID: {wafer_id}"]],
+        "rows": [["Yield: 60.00%", "Total: 5", "Pass: 3", "Failed: 2",
+                  f"WAFER_ID: {wafer_id}"]],
         "map": {
             "Bounds": (1, -1, 1, -1),
             "ID": (0, 0),
@@ -629,6 +633,26 @@ class TestStackedWaferSheet:
             hide_remeasured=False,
         )
         assert gen.loopCount == gen.totalLoopCnt == 2
+
+    def test_stacked_wafer_table(self, tmp_path, qapp, monkeypatch):
+        # per-wafer metrics table at the sbin SW-table slot (row 15): one
+        # row per fetched wafer — ID, bin-1 die count from ITS dedup grid,
+        # DUT yield parsed back from the info rows; live =SUM total
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=False,
+        )
+        wb = load_workbook(reportPath)
+        stacked = wb["Wafer Stacked Map (All Wafers)"]
+        assert stacked["A15"].value == "Stacked Wafers — per-wafer metrics"
+        assert [stacked.cell(row=16, column=c).value for c in range(1, 4)] == [
+            "Wafer ID", "Bin 1", "Yield",
+        ]
+        assert stacked["A17"].value == "W08"
+        assert stacked["B17"].value == 1  # the one dedup die at sbin 1
+        assert stacked["C17"].value == 0.6  # 3 pass / 5 total
+        data_only = load_workbook(reportPath, data_only=True)["Wafer Stacked Map (All Wafers)"]
+        assert data_only["B18"].value == 1  # live =SUM(B17:B17), cached
 
     def test_orange_border_absent_on_stacked(self, tmp_path, qapp, monkeypatch):
         # issue #4's superseded border exists in this export (merged W08

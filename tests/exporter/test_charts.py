@@ -55,6 +55,7 @@ from deps.exporter.charts import (
     write_bin_table,
     write_kpi_cards,
     write_merged_headline,
+    stacked_wafer_table_rows,
     write_stacked_wafer_block,
     write_wafer_map_block,
     wafer_info_rows,
@@ -1476,13 +1477,14 @@ class TestStackedWaferBlock:
     (counts as cell values) under ONE green→yellow→red color-scale rule;
     title + info lines only, no KPI cards, no SW bin table."""
 
-    def written(self, env, rows=None, map_data=None, start_row=1):
+    def written(self, env, rows=None, map_data=None, start_row=1, **kwargs):
         return write_stacked_wafer_block(
             env["ws"],
             env["theme"],
             rows if rows is not None else STACKED_ROWS,
             map_data if map_data is not None else STACKED_MAP,
             start_row,
+            **kwargs,
         )
 
     def test_counts_written_as_values(self, env):
@@ -1590,3 +1592,59 @@ class TestStackedWaferBlock:
         assert reloaded["A2"].value == WAFER_STACKED_LEGEND
         assert "A2:K2" in {str(r) for r in reloaded.merged_cells.ranges}
         assert nxt == 10
+
+    def test_stacked_wafer_table_rows_arithmetic(self):
+        # bin 1 = the wafer's DEDUP-grid dies at sbin 1 (the same dedup
+        # its own sheet renders — table = map by construction); yield =
+        # aggregate_kpi over the payload's info rows; overall = Σpass /
+        # Σ(total - superseded) across the payloads
+        payloads = [
+            (
+                "W08",
+                {
+                    "map": MAP,
+                    "rows": [["Total: 10", "Pass: 6", "Superseded: 0"]],
+                },
+            ),
+            (
+                "W09",
+                {
+                    "map": {
+                        "Bounds": (1, -1, 1, -1),
+                        "Data": {1: {"x": [0], "y": [0]}, 2: {"x": [1], "y": [0]}},
+                    },
+                    "rows": [["Total: 4", "Pass: 2"]],
+                },
+            ),
+        ]
+        rows, overall = stacked_wafer_table_rows(payloads)
+        # MAP: sbin-1 dies in the dedup grid = 3 — (-1,0), (1,0), (0,1);
+        # the duplicate (0,0) last-write-wins to sbin 2
+        assert rows[0] == ("W08", 3, 0.6)
+        assert rows[1] == ("W09", 1, 0.5)
+        assert overall == 8 / 14  # Σpass 8 / Σ(total - superseded) 14
+
+    def test_stacked_wafers_table(self, env):
+        # per-wafer metrics table (2026-11-14 user ask) in the SW-bin-table
+        # look at the sbin table slot: band A15:C15, blue-header Excel
+        # table (Wafer ID / Bin 1 / Yield) 16, data 17-18, bold Total 19
+        # (live =SUM over the Bin-1 column, cached; cross-wafer yield)
+        nxt = self.written(
+            env,
+            wafer_rows=[("W08", 2, 0.6), ("W09", 1, None)],
+            overall_yield=0.5,
+            wafer_table_name="SW_0_StackedWafers",
+        )
+        reloaded = env["reload"]()
+        assert reloaded["A15"].value == "Stacked Wafers — per-wafer metrics"
+        assert [reloaded.cell(row=16, column=c).value for c in range(1, 4)] == [
+            "Wafer ID", "Bin 1", "Yield",
+        ]
+        assert reloaded["A17"].value == "W08"
+        assert reloaded["B17"].value == 2
+        assert reloaded["C17"].value == 0.6
+        assert reloaded["C18"].value in ("", None)  # missing yield → blank
+        assert reloaded["A19"].value == "Total"
+        assert reloaded["B19"].value == "=SUM(B17:B18)"
+        assert "SW_0_StackedWafers" in reloaded.tables
+        assert nxt == 20

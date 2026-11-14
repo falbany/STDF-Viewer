@@ -50,6 +50,7 @@ from deps.exporter.charts import (
     WAFER_LABEL_COL_WIDTH,
     WAFER_SPACER_PINNED_WIDTH,
     WAFER_VALUE_COL_WIDTH,
+    stacked_wafer_table_rows,
     wafer_sheet_name,
     wafer_table_name,
     write_stacked_wafer_block,
@@ -174,6 +175,11 @@ class WaferMapMixin:
             )
             taken.add(name)
             StackedSheet = self._wb.add_worksheet(name)
+            # per-wafer ID table: every fetched payload is already in
+            # hand — no new fetch round-trip
+            wafer_rows, overall_yield = stacked_wafer_table_rows(
+                [(w[2], p) for _i, w, p in fetched]
+            )
             write_stacked_wafer_block(
                 StackedSheet,
                 self._theme,
@@ -181,6 +187,11 @@ class WaferMapMixin:
                 stacked_payload["map"],
                 1,
                 freeze_panes=True,  # same grid freeze as the sbin sheets
+                wafer_rows=wafer_rows,
+                overall_yield=overall_yield,
+                wafer_table_name=wafer_table_name(
+                    stacked_index, "StackedWafers"
+                ),
             )
             self._style_wafer_sheet(StackedSheet)
         self._row[key] = row

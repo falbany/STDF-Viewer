@@ -1237,6 +1237,117 @@ WAFER_STACKED_LEGEND = (
 )
 
 
+def stacked_wafer_table_rows(payloads: list) -> tuple:
+    """Per-wafer rows for the stacked sheet's ID table (2026-11-14 user
+    ask): ``[(wafer_id, bin1_dies, yield | None)]`` per ``(wafer_id,
+    payload)`` pair. bin 1 = the wafer's DEDUP-grid dies at sbin 1 (the
+    same dedup its own sheet renders — table = map by construction);
+    yield = aggregate_kpi over the payload's info rows (DUT-level,
+    pass / (total - superseded)). Returns ``(rows, overall_yield)`` —
+    overall = Σpass / Σ(total - superseded) across the payloads, None
+    when nothing is effective."""
+    rows = []
+    sums = dict.fromkeys(KPI_KEYS, 0)
+    for wafer_id, payload in payloads:
+        _x, _y, grid, _n = build_wafer_grid(payload.get("map") or {})
+        kpi = aggregate_kpi(payload.get("rows") or [])
+        rows.append((
+            wafer_id,
+            sum(1 for v in grid.values() if v == 1),
+            kpi["yield"],
+        ))
+        for key in KPI_KEYS:
+            sums[key] += kpi.get(key, 0)
+    effective = sums["total"] - sums["superseded"]
+    overall = (sums["pass"] / effective) if effective else None
+    return rows, overall
+
+
+WAFER_STACKED_TABLE_TITLE = "Stacked Wafers — per-wafer metrics"
+WAFER_STACKED_TABLE_HEADERS = ("Wafer ID", "Bin 1", "Yield")
+
+
+def write_stacked_wafer_table(
+    ws,
+    start_row: int,
+    wafer_rows: list,
+    overall_yield: "float | None",
+    theme,
+    table_name: str,
+) -> int:
+    """The stacked sheet's per-wafer ID table (2026-11-14 user ask) in
+    the SW-bin-table look: Headline-2 band across A:C, the themed
+    blue-header Excel table (style None, filter arrows), one bordered
+    row per wafer (ID, bin-1 die count, DUT yield in the "0.00%" format
+    — blank when unparseable), then a bold Total row OUTSIDE the table:
+    live =SUM over the Bin-1 column (cached) and the cross-wafer yield.
+    ``wafer_rows`` empty → no-op (returns ``start_row``)."""
+    if not wafer_rows:
+        return start_row
+    last0 = len(WAFER_STACKED_TABLE_HEADERS) - 1  # A:C
+
+    ws.merge_range(
+        start_row - 1, 0, start_row - 1, last0,
+        WAFER_STACKED_TABLE_TITLE, theme.lookalike(BIN_SECTION_STYLE),
+    )
+    note_width(ws, 1, WAFER_STACKED_TABLE_TITLE)
+
+    header_row = start_row + 1
+    first_data = header_row + 1
+    last_data = first_data + len(wafer_rows) - 1
+    header_fmt = theme.cell_format(
+        font="header", align="center", border=True, fill_hex="1E40AF"
+    )
+    ws.add_table(
+        header_row - 1, 0, last_data - 1, last0,
+        {
+            "name": table_name,
+            "style": None,  # keep the hand-tuned theme (no gallery stripes)
+            "autofilter": True,
+            "columns": [
+                {"header": header, "header_format": header_fmt}
+                for header in WAFER_STACKED_TABLE_HEADERS
+            ],
+        },
+    )
+
+    body_fmt = theme.cell_format(font="body", align="center", border=True)
+    pct_fmt = theme.cell_format(
+        font="body", align="center", border=True, num_fmt=BIN_PCT_FORMAT
+    )
+    bin1_total = 0
+    for offset, (wafer_id, bin1, yld) in enumerate(wafer_rows):
+        row0 = first_data - 1 + offset
+        ws.write(row0, 0, sanitize_cell(str(wafer_id)), body_fmt)
+        note_width(ws, 1, str(wafer_id))
+        ws.write(row0, 1, int(bin1), body_fmt)
+        note_width(ws, 2, str(bin1))
+        if yld is not None:
+            ws.write(row0, 2, float(yld), pct_fmt)
+        else:
+            ws.write(row0, 2, "", body_fmt)
+        bin1_total += int(bin1)
+
+    total_row = last_data + 1
+    total_fmt = theme.cell_format(font="bold_body", align="center", border=True)
+    ws.write(total_row - 1, 0, BIN_TOTAL_LABEL, total_fmt)
+    bin_letter = xlutil.xl_col_to_name(1)
+    ws.write_formula(
+        total_row - 1, 1,
+        f"=SUM({bin_letter}{first_data}:{bin_letter}{last_data})",
+        total_fmt, bin1_total,
+    )
+    ws.write(
+        total_row - 1, 2,
+        float(overall_yield) if overall_yield is not None else "",
+        total_fmt
+        if overall_yield is not None
+        else theme.cell_format(font="bold_body", align="center", border=True),
+    )
+
+    return total_row + 1
+
+
 def write_stacked_wafer_block(
     ws,
     theme,
@@ -1244,6 +1355,9 @@ def write_stacked_wafer_block(
     map_data: dict,
     start_row: int,
     freeze_panes: bool = False,
+    wafer_rows: "list | None" = None,
+    overall_yield: "float | None" = None,
+    wafer_table_name: "str | None" = None,
 ) -> int:
     """One stacked wafer block (issue #5; 2026-11-14 sbin-uniform layout):
     title band, the reading legend on row 2 (the sbin identity slot), the
@@ -1255,14 +1369,15 @@ def write_stacked_wafer_block(
     items as KPI cards across A:D with the sbin geometry (Total Failed
     DUTs full-width rows 4-6 =SUM over the die grid; Fail Coordinates
     col A + Files B:D side by side rows 7-9, =COUNTIF ">0" / plain count
-    — cached results ride the formulas). No SW bin table — there are no
-    software bins to table. Real aggregations carry a count-0 bucket
-    (getStackedWaferData seeds every probed coordinate): probed-but-
-    passing dies render as 0 at the green end of the gradient,
+    — cached results ride the formulas). Real aggregations carry a
+    count-0 bucket (getStackedWaferData seeds every probed coordinate):
+    probed-but-passing dies render as 0 at the green end of the gradient,
     wafer-outline style; only never-probed gap coordinates stay unwritten
-    (CF ignores blanks). Empty grid → title + legend + the info items as
-    plain kv lines, no cards (the sbin empty shape). Returns the next
-    free row."""
+    (CF ignores blanks). ``wafer_rows`` + ``wafer_table_name`` render the
+    per-wafer ID table (write_stacked_wafer_table) at the sbin SW-table
+    slot (row 15). Empty grid → title + legend + the info items as plain
+    kv lines, no cards, no tables (the sbin empty shape). Returns the
+    next free row."""
     info = map_data.get("Info") or (1.0, "", False, False, "", [])
     wafer_id = info[4] if len(info) > 4 else ""
     sites = info[5] if len(info) > 5 else []
@@ -1376,4 +1491,14 @@ def write_stacked_wafer_block(
         card_defs=card_defs,
     )
 
-    return max(start_row + 9, xh_row + len(y_axis) + 1)
+    next_free = max(start_row + 9, xh_row + len(y_axis) + 1)
+    if wafer_rows and wafer_table_name:
+        # per-wafer ID table at the sbin SW-table slot (row 15, A:D zone)
+        next_free = max(
+            next_free,
+            write_stacked_wafer_table(
+                ws, start_row + 14, wafer_rows, overall_yield, theme,
+                wafer_table_name,
+            ),
+        )
+    return next_free
