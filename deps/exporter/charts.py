@@ -65,7 +65,6 @@ import zipfile
 
 import xlsxwriter.utility as xlutil
 
-from deps.SharedSrc import getSetting
 from deps.exporter.helpers import sanitize_cell
 from deps.exporter.theme import (
     FONT_NAME,
@@ -76,6 +75,7 @@ from deps.exporter.theme import (
     KPI_BORDER_DARK_YELLOW,
 )
 from deps.exporter.writer import note_width
+from deps.SharedSrc import getSetting
 
 # Chart geometry (tenth user-feedback wave, 2026-11-10): the two donuts
 # sit on ONE band row sized to the row height (user ruling: 250 pt ≈
@@ -1044,7 +1044,7 @@ def _wafer_kv_row(ws, row: int, key: str, value: str, theme, sides: str = "") ->
         ws.merge_range(row - 1, 1, row - 1, 3, value, _wafer_prop_fmt(theme, value_sides))
 
 
-def write_wafer_map_block(  # pylint: disable=too-many-locals
+def write_wafer_map_block(  # pylint: disable=too-many-locals, too-many-branches, too-many-statements
     ws,
     theme,
     rows: list,
