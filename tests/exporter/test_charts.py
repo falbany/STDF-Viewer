@@ -113,7 +113,7 @@ def env():
         def __getitem__(self, key):  # env["ws"] and env.ws both work
             return getattr(self, key)
 
-    holder = Env(ws=ws, theme=theme, book=None)
+    holder = Env(ws=ws, theme=theme, book=None, wb=wb)
 
     def reload():
         if holder.book is None:
@@ -1759,3 +1759,87 @@ class TestStackedWaferBlock:
         assert data_only["B18"].value == 1  # ID table Total (1 wafer row)
         assert data_only["C22"].value == 3  # fail table: 1 fail × 3 dies
         assert nxt == 25
+
+
+# --------------------------------------------------------------------------
+# issue #7: donut under the wafer sheets' tables
+# --------------------------------------------------------------------------
+
+
+class TestWaferSheetDonut:
+    """Issue #7: the per-wafer Soft Bins table gets a palette-matched donut
+    one blank row below its Total, in columns A:D."""
+
+    def written(self, env, map_data=None, **kwargs):
+        kwargs.setdefault("wb", env["wb"])
+        write_wafer_map_block(
+            env["ws"],
+            env["theme"],
+            [["Yield: 60.00%", "Total: 5", "WAFER_ID: W01"]],
+            map_data if map_data is not None else MAP,
+            1,
+            "SW_0_W01",
+            **kwargs,
+        )
+
+    def test_donut_anchored_below_the_table(self, env):
+        self.written(env)
+        env["reload"]()
+        import re
+
+        drawing = read_xml(env["book"], "xl/drawings/drawing1.xml")
+        frm = re.search(
+            r"<xdr:from><xdr:col>(\d+)</xdr:col>.*?<xdr:row>(\d+)</xdr:row>", drawing, re.S
+        )
+        # A21 — one blank row (20) after the Total (19): from col 0, row 20
+        assert frm and frm.group(1) == "0" and frm.group(2) == "20"
+
+    def test_donut_slices_match_the_map_palette(self, env):
+        self.written(env)
+        env["reload"]()
+        xml = read_xml(env["book"], "xl/charts/chart1.xml")
+        assert '<a:srgbClr val="00CC00"/>' in xml  # sbin 1
+        assert '<a:srgbClr val="CC0000"/>' in xml  # sbin 2
+
+    def test_slice_falls_back_to_orange_when_palette_missing(self, env):
+        self.written(env, map_data=dict(MAP, Palette={}))
+        env["reload"]()
+        xml = read_xml(env["book"], "xl/charts/chart1.xml")
+        assert '<a:srgbClr val="FE7B00"/>' in xml
+
+    def test_donut_reads_the_visible_table(self, env):
+        self.written(env)
+        env["reload"]()
+        xml = read_xml(env["book"], "xl/charts/chart1.xml")
+        assert "Sheet!$A$15" in xml  # series name = section-title cell
+        assert "Sheet!$A$17:$A$18" in xml  # categories = bin names
+        assert "Sheet!$C$17:$C$18" in xml  # values = live COUNTIF counts
+        assert "<c:doughnutChart>" in xml and '<c:legendPos val="r"/>' in xml
+
+    def test_single_bin_wafer_still_renders(self, env):
+        self.written(
+            env,
+            map_data=dict(MAP, Data={1: MAP["Data"][1]}, Statistic={1: MAP["Statistic"][1]}),
+        )
+        env["reload"]()
+        xml = read_xml(env["book"], "xl/charts/chart1.xml")
+        assert xml.count("<c:dPt>") == 1
+
+    def test_no_wb_no_chart(self, env):
+        write_wafer_map_block(
+            env["ws"],
+            env["theme"],
+            [["Yield: 60.00%", "Total: 5", "WAFER_ID: W01"]],
+            MAP,
+            1,
+            "SW_0_W01",
+        )
+        env["reload"]()
+        import io
+        import zipfile
+
+        assert not [
+            n
+            for n in zipfile.ZipFile(io.BytesIO(env["book"])).namelist()
+            if n.startswith("xl/charts/chart")
+        ]

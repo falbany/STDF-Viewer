@@ -177,6 +177,7 @@ class WaferMapMixin(ReportHost):
                 start_row,
                 wafer_table_name(index, wafer[2]),
                 freeze_panes=True,  # every sheet freezes its own grid
+                wb=wb,  # issue #7: the SW table gets its palette donut
             )
             self._style_wafer_sheet(WaferSheet)
             row = start_row  # kept for _row bookkeeping symmetry
@@ -243,5 +244,6 @@ class WaferMapMixin(ReportHost):
             freeze_panes=True,
             superseded_coords=superseded,
             source_files=len(ordered),
+            wb=wb,  # issue #7: the merged sheet's SW table gets its donut
         )
         self._style_wafer_sheet(WaferSheet)

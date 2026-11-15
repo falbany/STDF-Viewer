@@ -1040,6 +1040,7 @@ def write_wafer_map_block(  # pylint: disable=too-many-locals
     freeze_panes: bool = False,
     superseded_coords: "set | None" = None,
     source_files: "int | None" = None,
+    wb=None,
 ) -> int:
     """One wafer block (issue #2, 2026-11-13 layout v2): title band, the
     identity line (WAFER_ID — key col A, value merged B:D) on row 2, the
@@ -1052,6 +1053,13 @@ def write_wafer_map_block(  # pylint: disable=too-many-locals
     table) and the F.. map zone are vertically independent. Empty map ->
     title + identity rows only. Returns the next free row (the caller
     adds the inter-block gap).
+
+    2026-11-15 donut (issue #7): ``wb`` given → ONE palette-matched donut
+    sits ONE blank row below the SW table's Total, anchored ``A{end+1}``
+    in the A:D zone (an overlay over the empty rows there — the return
+    value is unchanged), its slices taking each sbin's ``Palette`` color
+    (#FE7B00 fallback) so the chart doubles as the map's color-legend,
+    reading the VISIBLE table refs like every ``build_bin_donut``.
 
     2026-11-13 wafer merge (issue #4): ``superseded_coords`` (merged
     sheets only) draws a thick orange border around re-measured dies —
@@ -1239,7 +1247,10 @@ def write_wafer_map_block(  # pylint: disable=too-many-locals
     bins_rows = [
         (sbin, statistic.get(sbin, (f"Bin {sbin}",))[0], counts[sbin]) for sbin in bins_present
     ]
-    write_bin_table(
+    # table_end = the writer's returned row — the blank spacer after the
+    # Total; the issue #7 donut sits ONE blank row below that (A{end+1}),
+    # slices taking each sbin's palette color, reading the VISIBLE refs
+    table_end = write_bin_table(
         ws,
         sw_start,
         bins_rows,
@@ -1250,8 +1261,21 @@ def write_wafer_map_block(  # pylint: disable=too-many-locals
         bin_fills=palette,
         count_map_range=map_range,
     )
+    if wb is not None:
+        name_cell, cat_range, val_range = bin_table_ranges(sw_start, len(bins_present), first_col=1)
+        build_bin_donut(
+            wb,
+            ws,
+            f"Soft Bins — {wafer_id}",
+            bins_rows,
+            f"A{table_end + 1}",
+            name_cell,
+            cat_range,
+            val_range,
+            slice_colors=[palette.get(sbin, "#FE7B00") for sbin in bins_present],
+        )
 
-    return max(sw_start + len(bins_present) + 3, xh_row + len(y_axis) + 1)
+    return max(table_end, xh_row + len(y_axis) + 1)
 
 
 # issue #5 reading legend (2026-11-13 user ask; 2026-11-14 sbin-uniform
