@@ -696,7 +696,8 @@ class TestChartSheets:
 
     def test_bin_sheet_has_no_images(self, generated):
         # the package's drawings carry exactly the two trend image anchors
-        # and the two donut graphicFrames — Bin contributes charts only
+        # and the three donut graphicFrames (two Bin + the wafer sheet's
+        # issue-#7 donut) — Bin and the wafer sheets contribute charts only
         _, _, report_path, _, _ = generated
         with zipfile.ZipFile(report_path) as zf:
             pics, frames = 0, 0
@@ -706,7 +707,7 @@ class TestChartSheets:
                     pics += data.count(b"<xdr:pic>")
                     frames += data.count(b"<xdr:graphicFrame")  # tag carries attributes
         assert pics == 2
-        assert frames == 2
+        assert frames == 3
 
     # -- dashboard header (seventh wave) ------------------------------------
 
@@ -781,8 +782,10 @@ class TestChartSheets:
 
     def test_bin_native_donut_charts(self, generated):
         # chart internals via the saved package XML (openpyxl cannot read
-        # charts): two doughnuts titled HB/SB, hole 55, right legend,
-        # plotVisOnly=0 (completion), pinned show* zeros, anchored A9/D9
+        # charts): two Bin doughnuts titled HB/SB, hole 55, right legend,
+        # plotVisOnly pinned, anchored A9/D9 — plus the wafer sheet's
+        # issue-#7 donut ("Soft Bins — W01", palette-matched, anchored
+        # one blank row below its SW table)
         _, _, report_path, _, _ = generated
         with zipfile.ZipFile(report_path) as zf:
             charts = [
@@ -790,10 +793,11 @@ class TestChartSheets:
                 for n in sorted(zf.namelist())
                 if n.startswith("xl/charts/chart") and n.endswith(".xml")
             ]
-        assert len(charts) == 2
+        assert len(charts) == 3
         titles = sorted(chart_title_text(xml) for xml in charts)
         assert titles == [
             "Hardware Bin — Head1 / All Sites",
+            "Soft Bins — W01",
             "Software Bin — Head1 / All Sites",
         ]
         for xml in charts:
@@ -818,8 +822,10 @@ class TestChartSheets:
                     drawing = zf.read(n).decode()
                     if "graphicFrame" in drawing:
                         anchors += zip_charts_anchor_cols(drawing)
-        # both donuts cell-anchored on the band row 9 (0-based 8): cols 0/3
-        assert sorted(anchors) == [(0, 8), (3, 8)]
+        # both Bin donuts cell-anchored on the band row 9 (0-based 8):
+        # cols 0/3 — the wafer donut anchors at col 0, row 20 (A21, one
+        # blank row below its SW table's Total 19, issue #7)
+        assert sorted(anchors) == [(0, 8), (0, 20), (3, 8)]
         assert ws_row_height(generated, "Bin Chart", 9) == pytest.approx(250, abs=0.3)
         # the series feed the TABLES: categories B15:B16, counts D15:D16,
         # series name = the HB section title cell
@@ -832,17 +838,32 @@ class TestChartSheets:
         assert "'Bin Chart'!$D$21:$D$22" in sb
         assert "'Bin Chart'!$B$19" in sb
 
-    def test_bin_charts_use_modern_palette(self, generated):
-        # 2026-11-11: explicit per-slice modern palette colors
+    def test_bin_charts_use_the_user_settings_colors(self, tmp_path, qapp, monkeypatch):
+        # issue #7 (2026-11-15 user ruling): the HB/SB donut slices take
+        # the user's configured bin colors — the cycled modern palette is
+        # only the fallback for a bin missing from the settings. The wafer
+        # sheet's donut keeps its payload palette (color-legend of the
+        # map). Settings seeded BEFORE the export runs (bin_slice_colors
+        # reads them at chart-build time); bins: HB {1, 3}, SB {1, 3} —
+        # SB bin 3 deliberately unconfigured -> cycled fallback.
         from deps.exporter.charts import BIN_SLICE_PALETTE
 
-        _, _, report_path, _, _ = generated
+        monkeypatch.setattr(getSetting().color, "hbin_colors", {1: "#112233", 3: "#445566"})
+        monkeypatch.setattr(getSetting().color, "sbin_colors", {1: "#ABCDEF"})
+        _, _, report_path, _, _ = build_generated(tmp_path, qapp, monkeypatch=monkeypatch)
         with zipfile.ZipFile(report_path) as zf:
-            for name in zf.namelist():
-                if name.startswith("xl/charts/chart") and name.endswith(".xml"):
-                    data = zf.read(name).decode()
-                    assert "<c:dPt>" in data, name
-                    assert BIN_SLICE_PALETTE[0] in data, name
+            charts = [
+                zf.read(n).decode()
+                for n in sorted(zf.namelist())
+                if n.startswith("xl/charts/chart") and n.endswith(".xml")
+            ]
+        hb = next(c for c in charts if "Hardware" in c)
+        assert "112233" in hb and "445566" in hb  # user colors for bins 1 / 3
+        sb = next(c for c in charts if "Software" in c)
+        assert "ABCDEF" in sb  # user color for bin 1
+        assert BIN_SLICE_PALETTE[1].lower() in sb.lower()  # bin 3 -> cycled fallback
+        wafer = next(c for c in charts if "Soft Bins" in c)
+        assert "00CC00" in wafer and "CC0000" in wafer  # payload palette rides untouched
 
     def test_donuts_reference_the_visible_tables(self, generated):
         # 2026-11-11 ruling: the donuts feed from the HW/SW TABLES below
