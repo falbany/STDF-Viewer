@@ -214,6 +214,7 @@ class WaferMapMixin(ReportHost):
                 total_duts=total_duts,
                 wafer_id_table_name=wafer_table_name(stacked_index, "StackedWafers"),
                 fail_table_name=wafer_table_name(stacked_index, "FailMapCount"),
+                wb=wb,  # issue #7: the Fail Map Count table gets its donut
             )
             self._style_wafer_sheet(StackedSheet)
         self._row[key] = row

@@ -1760,6 +1760,40 @@ class TestStackedWaferBlock:
         assert data_only["C22"].value == 3  # fail table: 1 fail × 3 dies
         assert nxt == 25
 
+    def test_donut_anchored_below_the_fail_table(self, env):
+        # issue #7: ONE blank row below the fail table's Total (no ID
+        # table here: band 15 / data 17-18 / Total 19 → anchor A21)
+        self.written(env, wb=env["wb"], fail_table_name="SW_0_FailMapCount")
+        env["reload"]()
+        import re
+
+        drawing = read_xml(env["book"], "xl/drawings/drawing1.xml")
+        frm = re.search(
+            r"<xdr:from><xdr:col>(\d+)</xdr:col>.*?<xdr:row>(\d+)</xdr:row>", drawing, re.S
+        )
+        assert frm and frm.group(1) == "0" and frm.group(2) == "20"
+
+    def test_donut_slices_use_the_standard_palette(self, env):
+        # fail-count buckets have no user color (2026-11-15 ruling):
+        # cycled BIN_SLICE_PALETTE + the table title as chart title
+        self.written(env, wb=env["wb"], fail_table_name="SW_0_FailMapCount")
+        env["reload"]()
+        xml = read_xml(env["book"], "xl/charts/chart1.xml")
+        assert '<a:srgbClr val="1E40AF"/>' in xml and '<a:srgbClr val="0EA5E9"/>' in xml
+        assert "Fail Map Count — All Wafers" in xml
+
+    def test_no_fail_table_no_donut(self, env):
+        self.written(env, wb=env["wb"])
+        env["reload"]()
+        import io
+        import zipfile
+
+        assert not [
+            n
+            for n in zipfile.ZipFile(io.BytesIO(env["book"])).namelist()
+            if n.startswith("xl/charts/chart")
+        ]
+
 
 # --------------------------------------------------------------------------
 # issue #7: donut under the wafer sheets' tables

@@ -1435,6 +1435,7 @@ def write_stacked_wafer_block(  # pylint: disable=too-many-locals
     total_duts: int = 0,
     wafer_id_table_name: "str | None" = None,
     fail_table_name: "str | None" = None,
+    wb=None,
 ) -> int:
     """One stacked wafer block (issue #5; 2026-11-14 sbin-uniform layout):
     title band, the reading legend on row 2 (the sbin identity slot), the
@@ -1461,7 +1462,12 @@ def write_stacked_wafer_block(  # pylint: disable=too-many-locals
     value in the grid ("0 fails" = probed & passed dies, Distribution =
     share of the probed coordinates, Total = Σ = probed coordinates).
     Empty grid → title + legend + the info items as plain kv lines, no
-    cards, no tables (the sbin empty shape). Returns the next free row."""
+    cards, no tables (the sbin empty shape). Returns the next free row.
+
+    2026-11-15 donut (issue #7): ``wb`` given AND the fail table written
+    → ONE donut ONE blank row below its Total (anchor ``A{end+1}``, the
+    A:D zone), standard cycled ``BIN_SLICE_PALETTE`` slices — fail-count
+    buckets carry no user color — reading the VISIBLE table refs."""
     info = map_data.get("Info") or (1.0, "", False, False, "", [])
     wafer_id = info[4] if len(info) > 4 else ""
     sites = info[5] if len(info) > 5 else []
@@ -1638,24 +1644,36 @@ def write_stacked_wafer_block(  # pylint: disable=too-many-locals
         for v in grid.values():
             counts[v] = counts.get(v, 0) + 1
         fail_bins = [(v, "1 fail" if v == 1 else f"{v} fails", counts[v]) for v in sorted(counts)]
-        next_free = max(
-            next_free,
-            write_bin_table(
-                ws,
-                table_row,
-                fail_bins,
-                theme,
-                WAFER_FAIL_TABLE_TITLE,
-                fail_table_name,
-                first_col=1,
-                count_map_range=map_range,
-                headers=WAFER_FAIL_TABLE_HEADERS,
-            ),
+        # table_end = the writer's returned row — the blank spacer after
+        # the Total; the issue #7 donut sits ONE blank row below that
+        table_end = write_bin_table(
+            ws,
+            table_row,
+            fail_bins,
+            theme,
+            WAFER_FAIL_TABLE_TITLE,
+            fail_table_name,
+            first_col=1,
+            count_map_range=map_range,
+            headers=WAFER_FAIL_TABLE_HEADERS,
         )
+        next_free = max(next_free, table_end)
         # the Value column IS the legend (2026-11-14 user ask): the same
         # gradient as the map, over the Value data rows only
         ws.conditional_format(
             f"B{table_row + 2}:B{table_row + 1 + len(fail_bins)}",
             dict(gradient),
         )
+        if wb is not None:
+            name_cell, cat_range, val_range = bin_table_ranges(table_row, len(fail_bins), first_col=1)
+            build_bin_donut(
+                wb,
+                ws,
+                WAFER_FAIL_TABLE_TITLE,
+                fail_bins,
+                f"A{table_end + 1}",
+                name_cell,
+                cat_range,
+                val_range,
+            )
     return next_free
