@@ -370,6 +370,7 @@ def build_bin_donut(
     name_cell: str,
     cat_range: str,
     val_range: str,
+    slice_colors: "list | None" = None,
 ) -> None:
     """Add one native doughnut chart fed by the VISIBLE bin table below it
     (2026-11-11 user ruling — the old hidden BJ/BK helper block is gone).
@@ -380,6 +381,12 @@ def build_bin_donut(
       rows) the categories, ``val_range`` (the Count column data rows) the
       values — so the chart follows the table, including user edits and
       filters;
+    - ``slice_colors`` (issue #7, 2026-11-15 user ruling): optional one
+      hex per bin overriding the slice fill — the wafer sheets pass the
+      payload's per-sbin palette (the donut becomes a color-legend of the
+      die map) and the Bin Chart sheet the user's configured bin colors.
+      A missing/short list entry or ``None`` falls back to the cycled
+      ``BIN_SLICE_PALETTE``; entries are normalized with ``lstrip("#")``;
     - the chart: title, doughnut with ``BIN_DONUT_HOLE_SIZE`` hole,
       ``BIN_CHART_STYLE`` (2 — xlsxwriter's default, no <c:style> element),
       percent data labels in a white bold label font (the show* flag zeros
@@ -403,6 +410,14 @@ def build_bin_donut(
         return ":".join(parts)
 
     val_range, cat_range, name_cell = _abs(val_range), _abs(cat_range), _abs(name_cell)
+
+    def _slice_fill(i: int) -> str:
+        """One slice hex: ``slice_colors`` wins per index when given and
+        non-None (issue #7); the cycled modern palette covers every gap."""
+        if slice_colors is not None and i < len(slice_colors) and slice_colors[i]:
+            return slice_colors[i].lstrip("#")
+        return BIN_SLICE_PALETTE[i % len(BIN_SLICE_PALETTE)]
+
     chart = wb.add_chart({"type": "doughnut"})
     chart.set_title(
         {
@@ -431,10 +446,12 @@ def build_bin_donut(
             "categories": f"{qualified}{cat_range}",
             "name": f"{qualified}{name_cell}",
             "data_labels": {"percentage": True, "font": BIN_LABEL_FONT},
-            # per-slice modern palette with white borders (cycled)
+            # per-slice color with white borders (cycled): slice_colors
+            # wins per index when given and non-None (issue #7), the
+            # modern palette covers every gap
             "points": [
                 {
-                    "fill": {"color": f"#{BIN_SLICE_PALETTE[i % len(BIN_SLICE_PALETTE)]}"},
+                    "fill": {"color": f"#{_slice_fill(i)}"},
                     "border": {"color": f"#{BIN_SLICE_BORDER_HEX}"},
                 }
                 for i in range(len(bins))

@@ -567,11 +567,13 @@ class TestBuildBinDonut:
         anchor="A6",
         sheet_name="Sheet",
         complete=True,
+        **donut_kwargs,
     ):
         """Write a fake HW-style table (title B1, header row 2, data rows
         3-4: names in B, counts in D) and build the donut referencing it —
         the 2026-11-11 ruling: the charts are driven by the VISIBLE tables
-        below them, not a hidden helper block."""
+        below them, not a hidden helper block. ``donut_kwargs`` rides
+        through to ``build_bin_donut`` (issue #7 slice-color tests)."""
         use_bins = BINS if bins is None else bins
 
         def build(wb, ws_by_name):
@@ -593,6 +595,7 @@ class TestBuildBinDonut:
                 name_cell="B1",
                 cat_range=f"B3:B{last}",
                 val_range=f"D3:D{last}",
+                **donut_kwargs,
             )
 
         book = render_workbook([sheet_name], build)
@@ -679,6 +682,21 @@ class TestBuildBinDonut:
         assert to and frm
         assert int(to.group(1)) > int(frm.group(1))  # spans columns
         assert int(to.group(2)) > int(frm.group(2))  # spans rows
+
+    def test_default_slices_cycle_the_palette(self):
+        _ws, xml, _book = self.render()
+        assert '<a:srgbClr val="1E40AF"/>' in xml  # BIN_SLICE_PALETTE[0]
+        assert '<a:srgbClr val="0EA5E9"/>' in xml  # BIN_SLICE_PALETTE[1] (BINS has 2 rows)
+
+    def test_slice_colors_override(self):
+        _ws, xml, _book = self.render(slice_colors=["#00CC00", "#CC0000"])
+        assert '<a:srgbClr val="00CC00"/>' in xml
+        assert '<a:srgbClr val="CC0000"/>' in xml
+
+    def test_slice_colors_missing_entry_falls_back(self):
+        _ws, xml, _book = self.render(slice_colors=["#00CC00", None])
+        assert '<a:srgbClr val="00CC00"/>' in xml
+        assert '<a:srgbClr val="0EA5E9"/>' in xml  # cycled fallback for the None entry
 
     def test_series_references_the_visible_table(self):
         # 2026-11-11 ruling: the donut reads the HW/SW tables BELOW it —
