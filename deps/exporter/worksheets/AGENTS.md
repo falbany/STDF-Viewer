@@ -64,9 +64,10 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
   `write()`. The KPI-card sites in `charts.py` carry the guard (commit
   `2020ec3`); new merge sites need one too.
 - **Cross-mixin calls exist only by convention.** `test_statistics` calls
-  `dut_summary`'s `_resolve_remeasure_drops`; both call
-  `reportGenerator._fid_ranks`. They work only because both sides inherit
-  `ReportHost`, where those members are declared.
+  `dut_summary`'s `_resolve_remeasure_drops` (its route to the shared
+  supersede ranks); `dut_summary` and `wafer_map` call
+  `reportGenerator._fid_ranks` directly. They work only because both
+  sides inherit `ReportHost`, where those members are declared.
 
 ## Adding a sheet type
 

@@ -59,8 +59,10 @@ No `matrix.py` exists; `dut_summary.py` builds them
 1. Read `contract.py`.
 2. Skim the class statement of `ModernReportGenerator` in `generator.py` —
    the bases list *is* the sheet inventory.
-3. Run the tests: they live in `tests/exporter/`, one test file per module
-   plus `conftest.py`:
+3. Run the tests: they live in `tests/exporter/`, one test file per area
+   plus `conftest.py` — the sheet mixins are covered by the
+   `test_generator*.py` integration files and `test_matrix.py`
+   (dut_summary's pre-rename name), not by per-mixin files:
 
    ```bash
    uv run pytest tests/exporter        # 774 tests collected as of 2026-11-16
@@ -111,11 +113,12 @@ affected areas:
   single cells go through `write()`. The KPI-card merge sites carry a
   guard (commit `2020ec3`); any new merge site needs the same guard.
 - **Cross-mixin couplings exist only by convention.**
-  `test_statistics` calls `dut_summary`'s `_resolve_remeasure_drops`, and
-  both call `reportGenerator._fid_ranks`. These are real calls with no
-  runtime base: they must be declared in `contract.py` (annotation-only)
-  or pyright and pylint cannot see them. Any new coupling gets declared
-  there too.
+  `test_statistics` calls `dut_summary`'s `_resolve_remeasure_drops`
+  (its route to the shared supersede ranks); `dut_summary` and
+  `wafer_map` call `reportGenerator._fid_ranks` directly. These are real
+  calls with no runtime base: they must be declared in `contract.py`
+  (annotation-only) or pyright and pylint cannot see them. Any new
+  coupling gets declared there too.
 
 ## Pointers
 
