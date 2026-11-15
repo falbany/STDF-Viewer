@@ -732,6 +732,53 @@ class TestStackedWaferSheet:
                 assert side.style is None
 
 
+class TestWaferSheetDonuts:
+    """Issue #7 plumbing: every wafer-dedicated sheet ends with its donut
+    (per-wafer + merged via write_wafer_map_block's wb param, stacked via
+    write_stacked_wafer_block's), slices palette-matched on the sbin
+    sheets."""
+
+    DATES = {0: (1, "2026-01-01", ""), 1: (1, "2026-01-09", ""), 2: (1, "2026-01-05", "")}
+    TUPLES = [(0, 0, "W08"), (1, 1, "W09"), (2, 1, "W08")]
+    PAYLOADS = {
+        (0, 0, "W08"): wafer_payload({1: [(-1, 0), (0, 0)]}),
+        (1, 1, "W09"): wafer_payload({1: [(0, 0)]}),
+        (2, 1, "W08"): wafer_payload({2: [(0, 0)]}),
+    }
+
+    def test_every_per_wafer_and_merged_sheet_carries_a_chart(self, tmp_path, qapp, monkeypatch):
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=True,
+        )
+        import zipfile
+
+        with zipfile.ZipFile(reportPath) as zf:
+            charts = [n for n in zf.namelist() if n.startswith("xl/charts/chart")]
+        assert len(charts) == 4  # 3 per-file sheets + the (Merged) sheet
+        with zipfile.ZipFile(reportPath) as zf:
+            joined = "".join(zf.read(n).decode() for n in charts)
+        assert "00CC00" in joined and "CC0000" in joined  # palette-matched slices ride the plumbing
+
+    def test_stacked_sheet_carries_a_chart(self, tmp_path, qapp, monkeypatch):
+        tuples = [(-1, -1, "Stacked Wafer Map"), (0, 0, "W08")]
+        payloads = {
+            (-1, -1, "Stacked Wafer Map"): stacked_payload({1: [(1, 1)], 3: [(2, 1)]}),
+            (0, 0, "W08"): wafer_payload({1: [(0, 0)]}),
+        }
+        _, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, tuples, payloads,
+            {0: (1, "2026-01-01", "")}, hide_remeasured=False,
+        )
+        import zipfile
+
+        with zipfile.ZipFile(reportPath) as zf:
+            charts = [n for n in zf.namelist() if n.startswith("xl/charts/chart")]
+            joined = "".join(zf.read(n).decode() for n in charts)
+        assert len(charts) == 2  # per-wafer sheet + stacked sheet
+        assert "$C$22:$C$23" in joined  # stacked donut reads the fail table BELOW its ID table
+
+
 class TestPlainSheets:
     def test_file_info_header_spans_selected_files(self, generated):
         _, wb, _, _, _ = generated

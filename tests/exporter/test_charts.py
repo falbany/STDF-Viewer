@@ -34,6 +34,7 @@ import numpy as np
 import pytest
 import xlsxwriter
 
+from deps.SharedSrc import getSetting
 from deps.exporter.charts import (
     BIN_CHART_BAND_HEIGHT_PT,
     BIN_CHART_HEIGHT_CM,
@@ -47,6 +48,7 @@ from deps.exporter.charts import (
     cm_to_px,
     aggregate_bin_counts,
     aggregate_kpi,
+    bin_slice_colors,
     build_bin_donut,
     build_wafer_grid,
     complete_chart_flags,
@@ -1877,3 +1879,16 @@ class TestWaferSheetDonut:
             for n in zipfile.ZipFile(io.BytesIO(env["book"])).namelist()
             if n.startswith("xl/charts/chart")
         ]
+
+
+class TestBinSliceColors:
+    """Issue #7: the Bin Chart sheet's donut slices come from the user's
+    configured bin colors (settings seeded per bin at file load); a bin
+    missing from the settings yields None -> build_bin_donut's cycled
+    fallback."""
+
+    def test_settings_colors_by_bin_number(self, monkeypatch):
+        monkeypatch.setattr(getSetting().color, "sbin_colors", {2: "#123456"})
+        monkeypatch.setattr(getSetting().color, "hbin_colors", {1: "#ABCDEF"})
+        assert bin_slice_colors([(2, "Fail", 5), (9, "Bin 9", 1)], False) == ["#123456", None]
+        assert bin_slice_colors([(1, "Good", 5)], True) == ["#ABCDEF"]

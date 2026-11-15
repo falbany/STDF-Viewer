@@ -41,6 +41,7 @@ from deps.exporter.charts import (
     BIN_PAGE_WIDTH_RANGE,
     aggregate_bin_counts,
     aggregate_kpi,
+    bin_slice_colors,
     bin_table_ranges,
     build_bin_donut,
     write_bin_table,
@@ -153,7 +154,9 @@ class BinChartMixin(ReportHost):
 
             # the donuts sit in the charts band ABOVE their tables, fed by
             # them (write order is irrelevant — refs are strings; xlsxwriter
-            # resolves the numCache from the already-written cells at close)
+            # resolves the numCache from the already-written cells at close).
+            # issue #7 (2026-11-15 user ruling): the slices take the user's
+            # configured bin colors (cycled-palette fallback per bin)
             for (kind, anchor_letter), refs, bins in zip(
                 (("Hardware", "A"), ("Software", "D")), section_refs, aggregated, strict=False
             ):
@@ -169,6 +172,7 @@ class BinChartMixin(ReportHost):
                     name_cell,
                     cat_range,
                     val_range,
+                    slice_colors=bin_slice_colors(bins, kind == "Hardware"),
                 )
             # block end: the cursor sits on the blank row after the SB
             # Total; the next block's KPI cards start after it

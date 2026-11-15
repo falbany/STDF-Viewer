@@ -65,6 +65,7 @@ import zipfile
 
 import xlsxwriter.utility as xlutil
 
+from deps.SharedSrc import getSetting
 from deps.exporter.helpers import sanitize_cell
 from deps.exporter.theme import (
     FONT_NAME,
@@ -359,6 +360,19 @@ def complete_chart_flags(path: str) -> None:
 # --------------------------------------------------------------------------
 # rendering
 # --------------------------------------------------------------------------
+
+
+def bin_slice_colors(bins: list, isHBIN: bool) -> list:
+    """Per-bin donut slice colors from the user's configured palette
+    (issue #7, 2026-11-15 user ruling — the Bin Chart sheet's HB/SB donuts
+    adopt the settings' bin colors): ``getSetting().color.hbin_colors`` /
+    ``sbin_colors``, seeded per bin at file load by
+    ``setSettingDefaultColor``. A bin missing from the settings yields
+    ``None`` — ``build_bin_donut`` falls back to the cycled
+    ``BIN_SLICE_PALETTE``. No data-layer hook: the settings dicts are
+    global, the exporter reads them directly (fork-merge constraint)."""
+    colors = getSetting().color.hbin_colors if isHBIN else getSetting().color.sbin_colors
+    return [colors.get(num) for num, _name, _count in bins]
 
 
 def build_bin_donut(
