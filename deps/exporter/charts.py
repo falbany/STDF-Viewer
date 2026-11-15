@@ -610,8 +610,12 @@ def write_kpi_cards(
         if isinstance(value, tuple):
             # (formula, cached_result): xlsxwriter's merge_range would
             # dispatch '=' strings to write_formula with cached 0 — write
-            # the anchor explicitly with the real cached result instead
-            ws.merge_range(card_value_row - 1, first0, card_value_row - 1, last0, "", mid_fmt)
+            # the anchor explicitly with the real cached result instead.
+            # Merge only real spans: a single-column card (Fails, Fail
+            # Coordinates) must skip it — xlsxwriter refuses 1-cell merges
+            # with a UserWarning (same guard as _put above)
+            if last0 > first0:
+                ws.merge_range(card_value_row - 1, first0, card_value_row - 1, last0, "", mid_fmt)
             ws.write_formula(card_value_row - 1, first0, value[0], mid_fmt, value[1])
             note_value = str(value[1])
         else:
@@ -1679,7 +1683,9 @@ def write_stacked_wafer_block(  # pylint: disable=too-many-locals
             dict(gradient),
         )
         if wb is not None:
-            name_cell, cat_range, val_range = bin_table_ranges(table_row, len(fail_bins), first_col=1)
+            name_cell, cat_range, val_range = bin_table_ranges(
+                table_row, len(fail_bins), first_col=1
+            )
             build_bin_donut(
                 wb,
                 ws,

@@ -75,9 +75,11 @@ Three known rough edges, one commit each:
 - **Reading-legend width guard** — the row-2 legend merge assumes a
   ~5-die-wide map; a degenerate 1-die grid clips it. Shrink the merge
   or wrap on narrow grids.
-- **`Can't merge single cell` warning** — the test suite carries an
-  xlsxwriter UserWarning nobody has traced to its source; chase and
-  silence it so suite output stays clean.
+- ~~`Can't merge single cell` warning~~ DONE (2026-11-15): traced to
+  write_kpi_cards' formula-card path merging its (formula, cached) value
+  without _put's single-column guard — the wafer Fails / stacked Fail
+  Coordinates cards span one column. Guarded identically; suite warnings
+  ~201 → 106 and the whole suite now passes with the warning fatal.
 
 ## 5. Close-out: the live-export gates — *small, gates everything*
 
