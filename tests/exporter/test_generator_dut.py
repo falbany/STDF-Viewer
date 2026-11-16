@@ -1928,6 +1928,14 @@ class TestDUTSummarySheet:
         names = wb.sheetnames
         assert names.index("DUT Summary") == names.index("Test Summary") + 1
 
+    def test_tab_colors_distinguish_families(self, tmp_path, qapp, monkeypatch):
+        # 2026-11-17 user ruling: the two DUT-block table kinds get
+        # different tab colors — Test Summary keeps the deep blue, the
+        # DUT Summary per-DUT sheets go purple
+        _, wb, _, _, _ = build_generated(tmp_path, qapp, monkeypatch=monkeypatch)
+        assert wb["Test Summary"].sheet_properties.tabColor.rgb == "FF1E40AF"
+        assert wb["DUT Summary"].sheet_properties.tabColor.rgb == "FFA855F7"
+
     def test_test_summary_untouched(self, tmp_path, qapp, monkeypatch):
         _, wb, _, _, _ = build_generated(tmp_path, qapp, monkeypatch=monkeypatch)
         dut = wb["Test Summary"]

@@ -460,7 +460,7 @@ class TestRenderer:
         ws = load_workbook_bytes(book)["DUT Summary"]
         assert ws.freeze_panes == "P14"
         assert ws.print_title_rows == "$1:$13"
-        assert ws.sheet_properties.tabColor.rgb.endswith("1E40AF")
+        assert ws.sheet_properties.tabColor.rgb.endswith("A855F7")  # DUT Summary family: purple (2026-11-17 user ruling)
 
     def test_column_widths(self):
         # xlsxwriter stores width + ~0.71 (max-digit-width compensation);

@@ -69,7 +69,11 @@ ROW_HEIGHT = 22
 MIRROR_HEADER_TEXT = "flags (do not edit)"
 GROUP_BORDER_HEX = "94A3B8"  # heavier side color on workflow boundaries
 FOOTER_TEXT = "&C&P of &N"  # centered page-number footer (upgrade 4): &C opens the center section, &P is the page-number TOKEN (bare "P" would print literally), &N the page count
-DUT_TAB_HEX = "1E40AF"  # migration upgrade 5 (theme tab tokens)
+# Tab tokens (migration upgrade 5, theme tab tokens; 2026-11-17 ruling:
+# the two DUT-block families get DIFFERENT tab colors — Test Summary keeps
+# the deep blue, the DUT Summary per-DUT sheets go purple)
+TEST_SUMMARY_TAB_HEX = "1E40AF"
+DUT_SUMMARY_TAB_HEX = "A855F7"
 
 # Fixed column geometry (2026-11-10): A=Test#, B=Test (wide, right-aligned),
 # C=Param (left-aligned). The DUT-sheet widths are pinned — no autofit.
@@ -782,7 +786,7 @@ def render_dut_summary_sheet(ws, spec: dict, theme) -> None:
     ws.freeze_panes(r0, c0)
     ws.hide_gridlines(2)
     ws.set_footer(FOOTER_TEXT)
-    ws.set_tab_color(f"#{DUT_TAB_HEX}")
+    ws.set_tab_color(f"#{DUT_SUMMARY_TAB_HEX}")
     ws.fit_to_pages(1, 0)
     # print titles rows 1..13: the whole attribute block + filter header
     ws.repeat_rows(0, filter_row - 1)
@@ -835,7 +839,7 @@ def render_matrix_sheet(ws, spec: dict, theme) -> None:
     ws.freeze_panes(r0, c0)
     ws.hide_gridlines(2)  # screen + printed, matching showGridLines=False
     ws.set_footer(FOOTER_TEXT)
-    ws.set_tab_color(f"#{DUT_TAB_HEX}")
+    ws.set_tab_color(f"#{TEST_SUMMARY_TAB_HEX}")
     # NO set_paper here: the wave-8 ruling gave A4 to the Bin sheet ONLY
     # (extended 2026-11-14: the wafer sheets print A4 landscape too —
     # _style_wafer_sheet); the Test Summary keeps fit-to-page with no
