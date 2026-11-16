@@ -73,6 +73,7 @@ from PyQt5 import QtCore
 from deps.exporter.charts import complete_chart_flags
 from deps.exporter.theme import ModernTheme
 from deps.exporter.worksheets.bin_chart import BinChartMixin
+from deps.exporter.worksheets.dut_status import DUTStatusMixin
 from deps.exporter.worksheets.dut_summary import DUTSummaryMixin, order_dut_block
 from deps.exporter.worksheets.file_info import FileInfoMixin
 from deps.exporter.worksheets.gdr_dtr import GdrDtrMixin
@@ -103,6 +104,7 @@ class ModernReportGenerator(
     FileInfoMixin,
     GdrDtrMixin,
     DUTSummaryMixin,
+    DUTStatusMixin,
     TestStatisticsMixin,
     BinChartMixin,
     WaferMapMixin,

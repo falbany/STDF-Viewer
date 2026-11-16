@@ -36,6 +36,7 @@ Pure spec construction (strings/dicts/numbers only) — the xlsxwriter
 renderer consumes the spec dicts produced here.
 """
 
+from deps.exporter.contract import ReportHost
 from deps.exporter.helpers import (
     cp_cached,
     cp_formula_col,
@@ -65,6 +66,7 @@ from deps.exporter.worksheets.dut_summary import (
     _metadata_cell,
     _resolve_test,
 )
+from deps.exporter.writer import render_dut_status_sheet
 
 # Layout, transposed from the matrix (rows computed from the block lengths,
 # never hard-coded): the attribute block (the transposed BASE_HEADERS) on
@@ -135,7 +137,7 @@ def _dut_cells_of_test(summaryTable, test, order):
     return die_cells, mirror_cells
 
 
-def _test_column(summaryTable, test, offset, order, last_data_row, flags_first, flags_last):
+def _test_column(summaryTable, test, offset, order, last_data_row, flag_col_offset):
     """One test column's spec pieces.
 
     Returns ``(die_cells, mirror_cells, static_cells, formula_cells,
@@ -160,7 +162,12 @@ def _test_column(summaryTable, test, offset, order, last_data_row, flags_first, 
     if test["is_ftr"] or test["has_limits"]:
         fails = fails_formula_limits_col(col, DATA_START, last_data_row, SPEC_MIN_ROW, SPEC_MAX_ROW)
     else:
-        fails = fails_formula_flags_col(flags_first, flags_last, DATA_START, last_data_row)
+        # the flags path counts THIS test's mirror column alone (the
+        # transpose pins the test by column: test k's flags live in
+        # test_col(flag_col_offset + k) — a chunk-wide range would count
+        # every test's flags)
+        mirror = test_col(flag_col_offset + offset)
+        fails = fails_formula_flags_col(mirror, mirror, DATA_START, last_data_row)
 
     static = [
         test["num"],
@@ -275,11 +282,6 @@ def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metad
     # the matrix's zero-die clamp: an empty DUT range pins the formulas'
     # bottom to DATA_START so every range stays well-formed
     last_data_row = DATA_START + dut_count - 1 if dut_count > 0 else DATA_START
-    # formula-building mirror anchors — the spec key stays None for a
-    # zero-test chunk (the loop below never runs there), the dummy keeps
-    # the flags formula well-formed exactly like the matrix's zero-die trick
-    flags_first = mirror_first_col if tests else first_test
-    flags_last = test_col(2 * test_count + 2) if tests else first_test
 
     attribute_block = [[tr(label)] for label in BASE_HEADERS]
     filter_header = [tr("DUT #")] + [meta["name"] for meta in METADATA_ROWS]
@@ -290,7 +292,7 @@ def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metad
 
     for offset, test in enumerate(tests):
         die_cells, mirror_cells, static, formulas, cache_entries, number_format = _test_column(
-            summaryTable, test, offset, order, last_data_row, flags_first, flags_last
+            summaryTable, test, offset, order, last_data_row, flag_col_offset
         )
         per_test_die.append(die_cells)
         per_test_mirror.append(mirror_cells)
@@ -314,16 +316,6 @@ def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metad
         ]
         for i in range(dut_count)
     ]
-
-    conditional_formatting = {
-        # Fails heat across the Fails attribute row: 0 -> green, 0.2 x N -> red
-        "fails_max": 0.2 * dut_count,
-        # status CF over the DUT Flag column's DUT cells; duplicate-value CF
-        # over the Part ID column's DUT cells (raw IDs only — the "DUT #n"
-        # fallback lives nowhere in the data cells)
-        "dut_flag_range": f"{_DUT_FLAG_COL}{DATA_START}:{_DUT_FLAG_COL}{last_data_row}",
-        "part_id_range": f"{_PART_ID_COL}{DATA_START}:{_PART_ID_COL}{last_data_row}",
-    }
 
     conditional_formatting = {
         # Fails heat across the Fails attribute row: 0 -> green, 0.2 x N -> red
@@ -402,3 +394,38 @@ def _dut_sparklines(per_test_die, first_test, last_test, dut_count):
                 {"row": row, "type": "line", "range": f"{first_test}{row}:{last_test}{row}"}
             )
     return sparklines
+
+
+class DUTStatusMixin(ReportHost):
+    """DUT Status worksheet writer: the transposed complement sheet."""
+
+    def writeDUT_Status(self, summaryTable, testTuples, order, dut_ids, file_temperatures):
+        """Every DUT Status chunk sheet: built from the context writeDUT_Summary
+        already holds (approach A — zero extra fetches; re-measure pruning and
+        supersede ranks are inherited by position), rendered, and joined to
+        `_dut_sheet_block` so the close-time reorder keeps the DUT block
+        adjacent.
+
+        `dut_ids` rides along for the future "DUT #n" naming wave — the
+        DUT # int column (1..N) names blank-ID DUTs today."""
+        del dut_ids
+        wb = self._wb
+        theme = self._theme
+        assert wb is not None and theme is not None
+        specs = build_dut_status_spec(
+            summaryTable,
+            testTuples,
+            order,
+            sheet_name=self.tr("DUT Status"),
+            tr=self.tr,
+            file_temperatures=file_temperatures,
+        )
+        for spec in specs:
+            ws = wb.add_worksheet(spec["name"])
+            render_dut_status_sheet(ws, spec, theme)
+            self._dut_sheet_block.append(ws)
+        # one tick per test tuple — the matrix cadence minus the info tick
+        # (no fetches happen here)
+        for _ in testTuples:
+            self.loopCount += 1
+            self.sendProgress()
