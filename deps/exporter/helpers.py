@@ -309,6 +309,82 @@ def fails_formula_flags(row: int, first: str, last: str) -> str:
     return f'=IFERROR(SUMPRODUCT(({mrng}<>"")*({mrng}=1)),"")'
 
 
+# --------------------------------------------------------------------------
+# Column twins of the five builders above (DUT Status wave): the DUT Status
+# sheet is the DUT Summary matrix transposed, so the attribute block's
+# Min/Max/Mean/Cp/Cpk/Fails cells run DOWN each test column over the DUT
+# rows, and the spec-min/max/mean cells are attribute-block cells in the
+# SAME column ({col}{spec_min_row} etc.) — the transpose of the matrix's
+# fixed E/F/I letters. The caller passes the BASE_HEADERS-derived rows
+# (dut_status.SPEC_MIN_ROW / SPEC_MAX_ROW / MEAN_ROW), so the attribute
+# layout stays the one source of truth.
+# --------------------------------------------------------------------------
+
+
+def stat_formula_col(name: str, col: str, first_row: int, last_row: int) -> str:
+    """Column twin of stat_formula (DUT Status attribute block):
+    ``=IFERROR(AVERAGE(P14:P1000),"")`` style — one IFERROR guard, the range
+    running down the test column."""
+    return f'=IFERROR({name}({col}{first_row}:{col}{last_row}),"")'
+
+
+def cp_formula_col(
+    col: str, first_row: int, last_row: int, spec_min_row: int, spec_max_row: int
+) -> str:
+    """Column twin of cp_formula (DUT Status attribute block): (USL-LSL)/(6σ)
+    with σ embedded as STDEV down the test column; the limits read the
+    attribute block's SpecMax/SpecMin cells ({col}{spec_max_row} /
+    {col}{spec_min_row}). IFERROR blanks σ=0 and missing limits."""
+    return (
+        f'=IFERROR(({col}{spec_max_row}-{col}{spec_min_row})'
+        f'/(6*STDEV({col}{first_row}:{col}{last_row})),"")'
+    )
+
+
+def cpk_formula_col(
+    col: str,
+    first_row: int,
+    last_row: int,
+    spec_min_row: int,
+    spec_max_row: int,
+    mean_row: int,
+) -> str:
+    """Column twin of cpk_formula (DUT Status attribute block): the smaller
+    of the two ratio arms over σ = STDEV down the test column; limits and
+    mean read the attribute block's cells ({col}{spec_max_row} /
+    {col}{mean_row} / {col}{spec_min_row}). IFERROR blanks σ=0 and
+    missing/one-sided limits."""
+    rng = f"STDEV({col}{first_row}:{col}{last_row})"
+    return (
+        f"=IFERROR(MIN(({col}{spec_max_row}-{col}{mean_row})/(3*{rng}),"
+        f'({col}{mean_row}-{col}{spec_min_row})/(3*{rng})),"")'
+    )
+
+
+def fails_formula_limits_col(
+    col: str, first_row: int, last_row: int, spec_min_row: int, spec_max_row: int
+) -> str:
+    """Column twin of fails_formula_limits (DUT Status attribute block):
+    FAILS count down one test column vs the attribute block's SpecMin/
+    SpecMax cells, ignoring blank DUT cells."""
+    rng = f"{col}{first_row}:{col}{last_row}"
+    return (
+        f'=IFERROR(SUMPRODUCT(({rng}<>"")'
+        f'*(({col}{spec_min_row}<>"")*({rng}<{col}{spec_min_row})'
+        f'+({col}{spec_max_row}<>"")*({rng}>{col}{spec_max_row})))'
+        ',"")'
+    )
+
+
+def fails_formula_flags_col(
+    mirror_first: str, mirror_last: str, first_row: int, last_row: int
+) -> str:
+    """Column twin of fails_formula_flags (DUT Status attribute block):
+    FAILS count of 0/1 flag cells down the hidden mirror range."""
+    mrng = f"{mirror_first}{first_row}:{mirror_last}{last_row}"
+    return f'=IFERROR(SUMPRODUCT(({mrng}<>"")*({mrng}=1)),"")'
+
+
 def metadata_stat_formulas(
     row: int, first: str, last: str, mean: bool = True, std: bool = False
 ) -> tuple[str, ...]:
