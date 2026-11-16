@@ -236,8 +236,10 @@ def flag_value(flag) -> int | None:
     return 0 if isPass(flag) else 1
 
 
-def split_dut_chunks(dut_ids: list[str], cap: int = DUT_CHUNK_CAP) -> tuple[tuple[str, ...], ...]:
-    """Split DUT IDs into consecutive chunks of at most ``cap`` per sheet.
+def split_dut_chunks(dut_ids: list, cap: int = DUT_CHUNK_CAP) -> tuple[tuple, ...]:
+    """Split a list into consecutive chunks of at most ``cap`` per sheet
+    (generic: named for the matrix's DUT axis, reused for the DUT Status
+    sheet's test axis).
 
     An empty list still yields one (empty) chunk so the caller renders one
     sheet; small lists yield a single chunk.
