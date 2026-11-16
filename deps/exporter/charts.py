@@ -1344,33 +1344,19 @@ WAFER_GRADIENT_MAX_HEX = "#CC0000"
 WAFER_STACKED_LEGEND = "Green: few fails → Red: many · 0: probed, passed · blank: never probed"
 
 
-def stacked_wafer_table_rows(payloads: list) -> tuple:
-    """Per-wafer rows for the stacked sheet's ID table (2026-11-14 user
-    ask): ``[(wafer_id, bin1_dies, yield | None)]`` per ``(wafer_id,
-    payload)`` pair. bin 1 = the wafer's DEDUP-grid dies at sbin 1 (the
-    same dedup its own sheet renders — table = map by construction);
-    yield = aggregate_kpi over the payload's info rows (DUT-level,
-    pass / (total - superseded)). Returns ``(rows, overall_yield,
-    total_duts)`` — overall = Σpass / Σ(total - superseded) across the
-    payloads (None when nothing is effective), total_duts = Σ of the
-    per-wafer DUT totals (the stacked sheet's 4th KPI card)."""
-    rows = []
-    sums = dict.fromkeys(KPI_KEYS, 0)
+def stacked_wafer_ids(payloads: list) -> "tuple[list[str], int]":
+    """Per-wafer IDs for the stacked sheet's roster (2026-11-16 ruling —
+    names only; the ID table's replacement): ``[wafer_id]`` per
+    ``(wafer_id, payload)`` pair, in tuple order (duplicates preserved —
+    a roster, not a set), plus the Σ of the per-wafer DUT totals (the
+    stacked sheet's "Total DUTs Tested" KPI card). No grid walk, no
+    yield — per-wafer detail lives on each wafer's own sheet."""
+    ids = []
+    total_duts = 0
     for wafer_id, payload in payloads:
-        _x, _y, grid, _n = build_wafer_grid(payload.get("map") or {})
-        kpi = aggregate_kpi(payload.get("rows") or [])
-        rows.append(
-            (
-                wafer_id,
-                sum(1 for v in grid.values() if v == 1),
-                kpi["yield"],
-            )
-        )
-        for key in KPI_KEYS:
-            sums[key] += kpi.get(key, 0)
-    effective = sums["total"] - sums["superseded"]
-    overall = (sums["pass"] / effective) if effective else None
-    return rows, overall, sums["total"]
+        ids.append(wafer_id)
+        total_duts += aggregate_kpi(payload.get("rows") or [])["total"]
+    return ids, total_duts
 
 
 WAFER_STACKED_TABLE_TITLE = "Stacked Wafers — per-wafer metrics"

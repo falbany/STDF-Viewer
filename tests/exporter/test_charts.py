@@ -57,7 +57,7 @@ from deps.exporter.charts import (
     write_bin_table,
     write_kpi_cards,
     write_merged_headline,
-    stacked_wafer_table_rows,
+    stacked_wafer_ids,
     write_stacked_wafer_block,
     write_wafer_map_block,
     wafer_info_rows,
@@ -1658,11 +1658,10 @@ class TestStackedWaferBlock:
         assert "A2:K2" in {str(r) for r in reloaded.merged_cells.ranges}
         assert nxt == 13
 
-    def test_stacked_wafer_table_rows_arithmetic(self):
-        # bin 1 = the wafer's DEDUP-grid dies at sbin 1 (the same dedup
-        # its own sheet renders — table = map by construction); yield =
-        # aggregate_kpi over the payload's info rows; overall = Σpass /
-        # Σ(total - superseded) across the payloads
+    def test_stacked_wafer_ids(self):
+        # 2026-11-16 roster ruling: names only — per-wafer IDs in tuple
+        # order (duplicates preserved) + the Σ of the per-wafer DUT
+        # totals (the "Total DUTs Tested" card); no grid walk, no yield
         payloads = [
             (
                 "W08",
@@ -1682,12 +1681,8 @@ class TestStackedWaferBlock:
                 },
             ),
         ]
-        rows, overall, total_duts = stacked_wafer_table_rows(payloads)
-        # MAP: sbin-1 dies in the dedup grid = 3 — (-1,0), (1,0), (0,1);
-        # the duplicate (0,0) last-write-wins to sbin 2
-        assert rows[0] == ("W08", 3, 0.6)
-        assert rows[1] == ("W09", 1, 0.5)
-        assert overall == 8 / 14  # Σpass 8 / Σ(total - superseded) 14
+        ids, total_duts = stacked_wafer_ids(payloads)
+        assert ids == ["W08", "W09"]  # tuple order, duplicates preserved
         assert total_duts == 14  # Σ of the per-wafer DUT totals
 
     def test_stacked_wafers_table(self, env):
