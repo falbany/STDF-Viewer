@@ -693,9 +693,10 @@ def write_bin_table(
     ``=COUNTIF(range, value-cell)`` formulas and the Total a
     ``=SUM(count cells)`` (cached results written alongside, per the
     xlsxwriter-migration convention), so the table recalculates when the
-    user edits die values. The Distribution data cells follow (issue #8):
-    ``=IFERROR(count/total)`` against the Total row's SUM cell; the
-    default None keeps the static Bin-sheet tables byte-identical. Default None keeps the static Bin-sheet
+    user edits die values. The Distribution column follows (issue #8):
+    data rows ``=IFERROR(count/total)`` against the Total row's SUM cell,
+    the Total row ``=SUM`` over the Distribution cells; the default None
+    keeps the static Bin-sheet tables byte-identical. Default None keeps the static Bin-sheet
     tables byte-identical.
 
     ``headers`` (2026-11-14): overrides the column headers — the stacked
@@ -777,11 +778,10 @@ def write_bin_table(
         else:
             ws.write(row0, first0 + 2, int(count), body_fmt)
         note_width(ws, first0 + 3, str(count))
-        # Distribution data cells (issue #8): live tables (count_map_range)
-        # write =IFERROR(Count/Total) against the Total row's SUM cell —
-        # recalculates on die edits (IFERROR guards a map blanked to 0
-        # count, where the static path showed 0.0); the static path keeps
-        # the plain-value fraction, byte-identical. Cached fraction rides.
+        # Distribution data cells (issue #8): live tables write
+        # =IFERROR(Count/Total) against the Total row's SUM cell —
+        # recalculates on die edits, guards a map blanked to 0 count;
+        # the static path keeps the plain-value fraction, byte-identical
         dist_cached = count / total if total else 0.0
         if count_map_range:
             total_row0 = first_data_row + len(bins)  # Total row, 1-based
@@ -829,12 +829,23 @@ def write_bin_table(
     else:
         ws.write(total_row - 1, first0 + 2, int(total), total_label_fmt)
     note_width(ws, first0 + 3, str(total))
-    ws.write(
-        total_row - 1,
-        last0,
-        1.0,
-        theme.cell_format(font="bold_body", align="center", border=True, num_fmt=BIN_PCT_FORMAT),
+    # Total Distribution (issue #8): live tables write =SUM over the
+    # Distribution cells (cached 1.0); the static path keeps plain 1.0 —
+    # identical format kwargs both branches, byte-identical static output
+    dist_letter = xlutil.xl_col_to_name(last0)
+    total_dist_fmt = theme.cell_format(
+        font="bold_body", align="center", border=True, num_fmt=BIN_PCT_FORMAT
     )
+    if count_map_range:
+        ws.write_formula(
+            total_row - 1,
+            last0,
+            f"=SUM({dist_letter}{first_data_row}:{dist_letter}{last_data_row})",
+            total_dist_fmt,
+            1.0,
+        )
+    else:
+        ws.write(total_row - 1, last0, 1.0, total_dist_fmt)
 
     return total_row + 1
 

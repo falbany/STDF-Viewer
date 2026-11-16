@@ -1744,6 +1744,19 @@ class TestStackedWaferBlock:
         assert data_only["C19"].value == 4  # Σ = probed coordinates
         assert nxt == 20
 
+    def test_fail_map_count_distribution_cells_are_live_formulas(self, env):
+        # issue #8: the Total row's Distribution joins the live path —
+        # =SUM over the data-row Distribution cells (cached 1.0), like the
+        # Total row's Count cell (live =SUM) above it
+        self.written(env, fail_table_name="SW_0_FailMapCount")
+        reloaded = env["reload"]()
+        data_only = env.reload_data_only()
+        assert reloaded["D19"].value == "=SUM(D17:D18)"
+        assert data_only["D17"].value == pytest.approx(0.75)
+        assert data_only["D18"].value == pytest.approx(0.25)
+        assert data_only["D19"].value == 1.0
+        assert reloaded["D19"].number_format == "0.00%"
+
     def test_fail_map_count_includes_probed_passed(self, env):
         # the count-0 bucket is its own row (0 = probed & passed dies) —
         # the distribution covers every written die cell
