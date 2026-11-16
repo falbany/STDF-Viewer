@@ -666,28 +666,21 @@ class TestStackedWaferSheet:
         assert stacked.sheet_properties.pageSetUpPr.fitToPage is True
         assert stacked.print_title_rows == "$1:$3"
 
-    def test_stacked_wafer_table(self, tmp_path, qapp, monkeypatch):
-        # per-wafer metrics table at the sbin SW-table slot (row 15): one
-        # row per fetched wafer — ID, bin-1 die count from ITS dedup grid,
-        # DUT yield parsed back from the info rows; live =SUM total
+    def test_stacked_wafer_roster(self, tmp_path, qapp, monkeypatch):
+        # 2026-11-16 ruling: names-only roster at the row-14 slot — label
+        # line then one merged A:D line per wafer, no numbers
         _, reportPath = build_wafer_report(
             tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
             hide_remeasured=False,
         )
         wb = load_workbook(reportPath)
         stacked = wb["Wafer Stacked Map (All Wafers)"]
-        assert stacked["A15"].value == "Stacked Wafers — per-wafer metrics"
-        assert [stacked.cell(row=16, column=c).value for c in range(1, 4)] == [
-            "Wafer ID", "Bin 1", "Yield",
-        ]
-        assert stacked["A17"].value == "W08"
-        assert stacked["B17"].value == 1  # the one dedup die at sbin 1
-        assert stacked["C17"].value == 0.6  # 3 pass / 5 total
-        data_only = load_workbook(reportPath, data_only=True)["Wafer Stacked Map (All Wafers)"]
-        assert data_only["B18"].value == 1  # live =SUM(B17:B17), cached
+        assert stacked["A14"].value == "Stacked Wafers"
+        assert stacked["A15"].value == "W08"
+        assert stacked["B15"].value is None
 
     def test_fail_map_count_table(self, tmp_path, qapp, monkeypatch):
-        # Fail Map Count below the ID table (row 20): live COUNTIF
+        # Fail Map Count below the roster (row 17): live COUNTIF
         # distribution of the fail-count values — the count-0 die (probed,
         # passed) is its own row, "Total" = probed coordinates
         _, reportPath = build_wafer_report(
@@ -696,19 +689,19 @@ class TestStackedWaferSheet:
         )
         wb = load_workbook(reportPath)
         stacked = wb["Wafer Stacked Map (All Wafers)"]
-        assert stacked["A20"].value == "Fail Map Count — All Wafers"
-        assert [stacked.cell(row=21, column=c).value for c in range(1, 5)] == [
+        assert stacked["A17"].value == "Fail Map Count — All Wafers"
+        assert [stacked.cell(row=18, column=c).value for c in range(1, 5)] == [
             "Fails per Die", "Value", "Count", "Distribution",
         ]
-        assert stacked["A22"].value == "0 fails"
-        assert stacked["B22"].value == 0
-        assert stacked["A23"].value == "1 fail"
-        assert stacked["A24"].value == "3 fails"
+        assert stacked["A19"].value == "0 fails"
+        assert stacked["B19"].value == 0
+        assert stacked["A20"].value == "1 fail"
+        assert stacked["A21"].value == "3 fails"
         data_only = load_workbook(reportPath, data_only=True)["Wafer Stacked Map (All Wafers)"]
-        assert data_only["C22"].value == 1  # one probed-passed die
-        assert data_only["C23"].value == 3  # three single-fail dies
-        assert data_only["C24"].value == 1  # one triple-fail die
-        assert data_only["C25"].value == 5  # Σ = probed coordinates
+        assert data_only["C19"].value == 1  # one probed-passed die
+        assert data_only["C20"].value == 3  # three single-fail dies
+        assert data_only["C21"].value == 1  # one triple-fail die
+        assert data_only["C22"].value == 5  # Σ = probed coordinates
 
     def test_orange_border_absent_on_stacked(self, tmp_path, qapp, monkeypatch):
         # issue #4's superseded border exists in this export (merged W08
@@ -776,7 +769,7 @@ class TestWaferSheetDonuts:
             charts = [n for n in zf.namelist() if n.startswith("xl/charts/chart")]
             joined = "".join(zf.read(n).decode() for n in charts)
         assert len(charts) == 2  # per-wafer sheet + stacked sheet
-        assert "$C$22:$C$23" in joined  # stacked donut reads the fail table BELOW its ID table
+        assert "$C$19:$C$20" in joined  # stacked donut reads the fail table BELOW its roster
 
 
 class TestPlainSheets:

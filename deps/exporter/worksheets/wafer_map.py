@@ -49,7 +49,7 @@ from deps.exporter.charts import (
     WAFER_LABEL_COL_WIDTH,
     WAFER_SPACER_PINNED_WIDTH,
     WAFER_VALUE_COL_WIDTH,
-    stacked_wafer_table_rows,
+    stacked_wafer_ids,
     wafer_sheet_name,
     wafer_table_name,
     write_stacked_wafer_block,
@@ -197,9 +197,10 @@ class WaferMapMixin(ReportHost):
             name = wafer_sheet_name(stacked_index, "Stacked Map (All Wafers)", taken)
             taken.add(name)
             StackedSheet = wb.add_worksheet(name)
-            # per-wafer ID table: every fetched payload is already in
-            # hand — no new fetch round-trip
-            wafer_rows, overall_yield, total_duts = stacked_wafer_table_rows(
+            # per-wafer roster: every fetched payload is already in
+            # hand — no new fetch round-trip, and a names-only roster
+            # needs no table name
+            wafer_ids, total_duts = stacked_wafer_ids(
                 [(w[2], p) for _i, w, p in fetched]
             )
             write_stacked_wafer_block(
@@ -209,10 +210,8 @@ class WaferMapMixin(ReportHost):
                 stacked_payload["map"],
                 1,
                 freeze_panes=True,  # same grid freeze as the sbin sheets
-                wafer_rows=wafer_rows,
-                overall_yield=overall_yield,
+                wafer_ids=wafer_ids,
                 total_duts=total_duts,
-                wafer_id_table_name=wafer_table_name(stacked_index, "StackedWafers"),
                 fail_table_name=wafer_table_name(stacked_index, "FailMapCount"),
                 wb=wb,  # issue #7: the Fail Map Count table gets its donut
             )
