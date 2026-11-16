@@ -75,7 +75,10 @@ disable = "C0103,C0301,R0801"
 [tool.pylint.DESIGN]
 # Documented raises over the template defaults to admit the existing shape of
 # the rendering functions (see deps/exporter/IDEAS.md for the refactor item).
-max-parents = 11 # ModernReportGenerator = 8 mixins + ReportHost + reportGenerator + QObject
+# 2026-11-16: DUTStatusMixin joined the composition (the transposed DUT
+# Status sheet) — ModernReportGenerator = 9 mixins + ReportHost +
+# reportGenerator + QObject
+max-parents = 12
 max-args = 12
 max-positional-arguments = 12
 max-attributes = 15

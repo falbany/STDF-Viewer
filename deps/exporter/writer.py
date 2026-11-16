@@ -575,6 +575,219 @@ def _set_column_widths(ws, spec):
 
 
 # --------------------------------------------------------------------------
+# DUT Status sheet sections (the DUT Summary matrix transposed — spec dicts
+# from worksheets/dut_status.py; this module cannot import that module
+# without a cycle, so every row/column the renderer needs travels in the
+# spec)
+# --------------------------------------------------------------------------
+
+# Fixed widths of the DUT Status sheet: A=8 (DUT #), the metadata zone B..
+# with Part ID (C) / Part TXT (D) wide, test columns and Trend like the matrix.
+DUT_STATUS_META_WIDTH = 9
+DUT_STATUS_TEXT_WIDTH = 18  # Part ID / Part TXT
+
+
+def _add_transposed_die_rules(ws, die_rules, theme):
+    """Five rules over the transposed test range, priority order, all
+    stopIfTrue — the transpose of _add_die_rules: the anchor runs DOWN a
+    test column, the SpecMin/SpecMax comparisons read the attribute block's
+    cells ({col}${spec_min_row} / {col}${spec_max_row} — relative column,
+    absolute row) and the flag mirror sits flag_col_offset columns right of
+    the anchor's own column (relative in both directions, so Excel shifts
+    anchor and mirror together across the range).
+
+    Remaining set: blank-neutral, fail-low, fail-high, flag-mirror
+    (no-limit parametric tests), pass."""
+    cell_range = die_rules["range"]
+    first0, row0 = _col0(die_rules["first_col"]), _range_first_row(cell_range)
+    die = f"{die_rules['first_col']}{row0 + 1}"
+    spec_min = f"{die_rules['first_col']}${die_rules['spec_min_row']}"
+    spec_max = f"{die_rules['first_col']}${die_rules['spec_max_row']}"
+    mirror = f"{xlutil.xl_col_to_name(first0 + die_rules['flag_col_offset'])}{row0 + 1}"
+    _add_rule(ws, cell_range, f'{die}=""', theme.cf_fill("FFF3CD"))
+    _add_rule(ws, cell_range, f'AND({die}<>"",{spec_min}<>"",{die}<{spec_min})', theme.cf_fill("FFCCCC"))
+    _add_rule(ws, cell_range, f'AND({die}<>"",{spec_max}<>"",{die}>{spec_max})', theme.cf_fill("FFCCCC"))
+    _add_rule(ws, cell_range, f'AND({mirror}=1,{spec_min}="",{spec_max}="")', theme.cf_fill("FFCCCC"))
+    _add_rule(ws, cell_range, f'{die}<>""', theme.cf_fill("CCFFCC"))
+
+
+def _hide_transposed_mirrors(ws, spec, theme):
+    """Hide the DUT Status sheet's flag mirror columns; grey marker header
+    outside the AutoFilter (row 13)."""
+    first = spec.get("mirror_first_col")
+    count = len(spec.get("test_columns") or [])
+    if first and count:
+        first0 = _col0(first)
+        ws.set_column(first0, first0 + count - 1, None, None, {"hidden": True})
+        filter_row = spec["filter_row"]
+        for offset in range(count):
+            _write_cell(
+                ws,
+                filter_row,
+                first0 + offset + 1,
+                MIRROR_HEADER_TEXT,
+                theme,
+                font="banner",
+                align="center",
+                border=False,
+                fill_hex=BANNER_FILL_HEX,
+            )
+
+
+def _render_dut_status_attribute_block(ws, spec, theme):
+    """Rows 1..12: the transposed BASE_HEADERS — banner-fill blanks over the
+    frozen metadata zone A..N, the row label in column O (the last frozen
+    column, adjacent to the test cells it describes — ruling 2026-11-16,
+    moved from A1:A12), per-test static/formula cells to the right
+    (SpecMin/SpecMax rows neutral yellow, formulas with their cached
+    results)."""
+    formula_values = spec.get("formula_values") or {}
+    neutral_rows = set(spec.get("attribute_neutral_rows") or [])
+    formats_by_row = spec.get("attribute_row_formats") or {}
+    meta_count = spec["metadata_column_count"]
+    for row, row_values in enumerate(spec["attribute_block"], start=1):
+        for column in range(1, 1 + meta_count):
+            _write_cell(
+                ws,
+                row,
+                column,
+                "",
+                theme,
+                font="banner",
+                align="center",
+                border=False,
+                fill_hex=BANNER_FILL_HEX,
+            )
+        _write_cell(ws, row, 1 + meta_count, row_values[0], theme, font="metadata", align="center", border=True)
+        for offset, value in enumerate(row_values[1:]):
+            column = 2 + meta_count + offset
+            _write_cell(
+                ws,
+                row,
+                column,
+                value,
+                theme,
+                font="body",
+                align="center",
+                border=True,
+                fill_hex=NEUTRAL_FILL_HEX if row in neutral_rows else None,
+                num_fmt=formats_by_row.get(row),
+                cached=formula_values.get((row, column)),
+            )
+
+
+def _set_dut_status_column_widths(ws, spec):
+    """Pin the DUT Status widths: A=8 (DUT #); metadata zone B.. with
+    Part ID (C) / Part TXT (D) wide; test columns 8; Trend 20.
+
+    Masked metadata columns carry width + hidden in the SAME set_column
+    call — xlsxwriter's second call for one column REPLACES the first, so
+    a separate hide pass would silently zero the width."""
+    ws.set_column(0, 0, BASE_COLUMN_WIDTH)
+    meta_count = spec["metadata_column_count"]
+    masked = set(spec.get("masked_columns") or [])
+    for i in range(meta_count):
+        width = DUT_STATUS_TEXT_WIDTH if i in (1, 2) else DUT_STATUS_META_WIDTH
+        options = {"hidden": True} if i in masked else None
+        ws.set_column(1 + i, 1 + i, width, None, options)
+    for letter in spec.get("test_columns") or []:
+        ws.set_column(_col0(letter), _col0(letter), DIE_COLUMN_WIDTH)
+
+
+def render_dut_status_sheet(ws, spec: dict, theme) -> None:
+    """Render one DUT Status spec dict onto ``ws`` (attribute block, filter
+    header, DUT rows, transposed conditional formatting, hidden mask and
+    mirror columns, pinned column widths, freeze / gridlines / print / tab /
+    footer polish)."""
+    _render_dut_status_attribute_block(ws, spec, theme)
+
+    filter_row = spec["filter_row"]
+    for column, value in enumerate(spec["filter_header"], start=1):
+        _write_cell(
+            ws, filter_row, column, value, theme, font="header", align="center", border=True, fill_hex=HEADER_FILL_HEX
+        )
+    ws.set_row(filter_row - 1, ROW_HEIGHT)
+
+    # DUT rows: body cells throughout — DUT # "0", integer metadata columns
+    # via the spec's formats, test columns per their FTR/parametric format.
+    # No group banding: DUT rows carry no workflow groups.
+    data_start = spec["data_start"]
+    meta_count = spec["metadata_column_count"]
+    metadata_formats = spec.get("metadata_formats") or {}
+    test_formats = spec.get("test_column_formats") or {}
+    for offset, row_values in enumerate(spec["dut_rows"]):
+        row = data_start + offset
+        for column, value in enumerate(row_values, start=1):
+            letter = xlutil.xl_col_to_name(column - 1)
+            if column == 1:
+                num_fmt = "0"
+            elif column <= 1 + meta_count:
+                num_fmt = metadata_formats.get(letter)
+            else:
+                num_fmt = test_formats.get(letter)
+            _write_cell(
+                ws, row, column, value, theme, font="body", align="center", border=True, num_fmt=num_fmt
+            )
+
+    # Total row (ruling 2026-11-16): banner footer below the AutoFilter ref;
+    # SUBTOTAL cells track the filter, masked columns hide their cell with
+    # the column (the Test Time mean rides the always-masked column)
+    total = spec.get("total_row")
+    if total:
+        for column, (value, cached, num_fmt) in enumerate(total["cells"], start=1):
+            _write_cell(
+                ws,
+                total["row"],
+                column,
+                value,
+                theme,
+                font="banner",
+                align="center",
+                border=True,
+                fill_hex=BANNER_FILL_HEX,
+                num_fmt=num_fmt,
+                cached=cached,
+            )
+
+    _set_dut_status_column_widths(ws, spec)
+
+    cf = spec["conditional_formatting"]
+    if cf.get("die_rules"):
+        _add_transposed_die_rules(ws, cf["die_rules"], theme)
+    if cf.get("cp_range"):
+        _add_cpk_rules(ws, cf["cp_range"], theme)
+    if cf.get("cpk_range"):
+        _add_cpk_rules(ws, cf["cpk_range"], theme)
+    if cf.get("fails_range"):
+        _add_fails_scale(ws, cf)
+    if cf.get("dut_flag_range"):
+        _add_dut_flag_status_rules(ws, cf["dut_flag_range"], theme)
+    if cf.get("part_id_range"):
+        _add_duplicate_part_id_rules(ws, cf["part_id_range"], theme)
+
+    # hidden mask columns ride their width (see _set_dut_status_column_widths
+    # — Review Focus: hidden columns keep their data, only the dropdown is
+    # gone); the mirrors hide separately (no width of their own)
+    _hide_transposed_mirrors(ws, spec, theme)
+
+    ref = (spec.get("auto_filter") or {}).get("ref")
+    if ref:
+        first0, last0 = ref.split(":")
+        r0, c0 = xlutil.xl_cell_to_rowcol(first0)
+        r1, c1 = xlutil.xl_cell_to_rowcol(last0)
+        ws.autofilter(r0, c0, r1, c1)
+
+    r0, c0 = xlutil.xl_cell_to_rowcol(spec["freeze_panes"])
+    ws.freeze_panes(r0, c0)
+    ws.hide_gridlines(2)
+    ws.set_footer(FOOTER_TEXT)
+    ws.set_tab_color(f"#{DUT_TAB_HEX}")
+    ws.fit_to_pages(1, 0)
+    # print titles rows 1..13: the whole attribute block + filter header
+    ws.repeat_rows(0, filter_row - 1)
+
+
+# --------------------------------------------------------------------------
 # public API
 # --------------------------------------------------------------------------
 

@@ -1090,6 +1090,14 @@ class DUTSummaryMixin(ReportHost):
                         render_matrix_sheet(ws, spec, theme)
                         self._dut_sheet_block.append(ws)
 
+        # DUT Status (2026-11-16): the transposed complement sheet — the
+        # context this method already built, zero extra fetches; re-measure
+        # pruning and supersede ranks are inherited by position. The future
+        # "Extended" UI check box (same fork-hook pattern as
+        # hide_remeasured / split_temperature) gates THIS call — one-line
+        # guard, later wave.
+        self.writeDUT_Status(summaryTable, self.testTuples, order, dut_ids, file_temperatures)
+
         # classic cadence: one tick after the DUT info part...
         self.loopCount += 1
         self.sendProgress()

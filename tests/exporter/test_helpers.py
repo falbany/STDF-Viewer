@@ -27,10 +27,14 @@ from deps.exporter.helpers import (
     col_range,
     compile_param_pattern,
     cp_formula,
+    cp_formula_col,
     cpk_formula,
+    cpk_formula_col,
     die_col,
     fails_formula_flags,
+    fails_formula_flags_col,
     fails_formula_limits,
+    fails_formula_limits_col,
     flag_value,
     metadata_stat_formulas,
     parse_bin,
@@ -41,6 +45,7 @@ from deps.exporter.helpers import (
     split_dut_chunks,
     split_test_name,
     stat_formula,
+    stat_formula_col,
     workflow_key,
 )
 
@@ -296,6 +301,35 @@ class TestFailsFormulas:
         import deps.exporter.helpers as helpers_module
 
         assert not hasattr(helpers_module, "fails_formula_ftr")
+
+
+class TestTransposedFormulas:
+    """DUT Status wave: the formula builders' column twins — ranges run DOWN
+    a test column; spec-min/max/mean are attribute-block cells {col}5 /
+    {col}6 / {col}9 (the transpose of the matrix's fixed E/F/I letters).
+    Filter-aware since the 2026-11-16 ruling: SUBTOTAL visible-cells codes,
+    the Fails counts carrying the OFFSET visible-mask idiom (the row twins
+    above stay plain — the matrix is untouched)."""
+
+    STAT_MIN_COL = '=IFERROR(SUBTOTAL(105,P14:P16),"")'
+    CP_COL = '=IFERROR((P6-P5)/(6*SUBTOTAL(107,P14:P16)),"")'
+    CPK_COL = '=IFERROR(MIN((P6-P9)/(3*SUBTOTAL(107,P14:P16)),(P9-P5)/(3*SUBTOTAL(107,P14:P16))),"")'
+    FAILS_LIMITS_COL = (
+        '=IFERROR(SUMPRODUCT((P14:P16<>"")'
+        '*((P5<>"")*(P14:P16<P5)+(P6<>"")*(P14:P16>P6))'
+        '*SUBTOTAL(103,OFFSET(P$14,ROW(P14:P16)-ROW(P$14),0))),"")'
+    )
+    FAILS_FLAGS_COL = (
+        '=IFERROR(SUMPRODUCT((U14:V16<>"")*(U14:V16=1)'
+        '*SUBTOTAL(103,OFFSET(U$14,ROW(U14:V16)-ROW(U$14),0))),"")'
+    )
+
+    def test_transposed_formula_builders(self):
+        assert stat_formula_col("MIN", "P", 14, 16) == self.STAT_MIN_COL
+        assert cp_formula_col("P", 14, 16, 5, 6) == self.CP_COL
+        assert cpk_formula_col("P", 14, 16, 5, 6, 9) == self.CPK_COL
+        assert fails_formula_limits_col("P", 14, 16, 5, 6) == self.FAILS_LIMITS_COL
+        assert fails_formula_flags_col("U", "V", 14, 16) == self.FAILS_FLAGS_COL
 
 
 class TestParseTestTime:

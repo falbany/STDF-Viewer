@@ -80,6 +80,9 @@ class ReportHost:  # pylint: disable=too-few-public-methods
     _fid_ranks: Callable[[], dict]
     # DUTSummaryMixin's re-measure drop-set resolver (§7.2)
     _resolve_remeasure_drops: Callable[[], Any]
+    # DUTStatusMixin's transposed complement sheet (approach A:
+    # writeDUT_Summary ends by calling it with its own context)
+    writeDUT_Status: Callable[..., None]
     # ModernReportGenerator's shared rendering helpers
     _autofit_columns: Callable[..., None]
     _write_body_row: Callable[..., None]
