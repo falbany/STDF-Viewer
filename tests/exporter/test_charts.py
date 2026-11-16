@@ -1671,7 +1671,9 @@ class TestStackedWaferBlock:
                 },
             ),
             (
-                "W09",
+                # same ID re-measured (filter off): the roster is a
+                # roster, not a set — the duplicate stays, in tuple order
+                "W08",
                 {
                     "map": {
                         "Bounds": (1, -1, 1, -1),
@@ -1682,7 +1684,7 @@ class TestStackedWaferBlock:
             ),
         ]
         ids, total_duts = stacked_wafer_ids(payloads)
-        assert ids == ["W08", "W09"]  # tuple order, duplicates preserved
+        assert ids == ["W08", "W08"]  # tuple order, duplicates preserved
         assert total_duts == 14  # Σ of the per-wafer DUT totals
 
     def test_stacked_wafer_roster(self, env):
