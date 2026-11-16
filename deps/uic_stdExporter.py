@@ -1225,7 +1225,8 @@ class stdfExporter(QtWidgets.QDialog):
                                             ReportSelection.Histo, 
                                             ReportSelection.DUT, 
                                             ReportSelection.Stat,
-                                            ReportSelection.PPQQ}) > 0:
+                                            ReportSelection.PPQQ,
+                                            ReportSelection.TestSummary}) > 0:  # fork(falbany): hook #6
                 # go to test page
                 self.previousPageIndex = 0
                 self.exportUI.previousBtn.setEnabled(True)

@@ -286,6 +286,7 @@ def build_generated(
     split_temperature=False,
     hide_remeasured=False,
     with_test_summary=True,
+    with_per_dut=True,
     with_dut=True,
     wafer_tuples=None,
     monkeypatch=None,
@@ -326,6 +327,11 @@ def build_generated(
         # 1 context tick + 2 per-DUT ticks (the matrix's 2 test ticks go)
         selection.remove(ReportSelection.TestSummary)
         totalLoopCnt -= 2
+    if not with_per_dut:
+        # TS-only: the per-DUT sheet never renders (its 2 test ticks go;
+        # the context still runs for the matrix — 1 + 2 block ticks)
+        selection.remove(ReportSelection.DUT)
+        totalLoopCnt -= 2
     if not with_dut:
         # stat-only selection: neither DUT-block sheet renders (no
         # context fetch, no block ticks) — the filter's stat-only
@@ -355,9 +361,18 @@ def build_generated(
     )
 
     # GUI side: classic-protocol summary table, chart PNGs, stat rows
-    gen.waitForDutSummary = lambda heads, sites, fids, testTuples: make_summary(
-        tagged=part_id_tagged, duplicate_sn=duplicate_sn, blank_ids=blank_ids, part_ids=part_ids
-    )
+    # fetch-once invariant (2026-11-16 rename design): the context hoist
+    # must fetch the heavy dutSummary handshake exactly once per export,
+    # regardless of how many DUT-block sheets are selected
+    gen._dut_summary_fetch_count = 0
+
+    def _counted_dut_summary(heads, sites, fids, testTuples):
+        gen._dut_summary_fetch_count += 1
+        return make_summary(
+            tagged=part_id_tagged, duplicate_sn=duplicate_sn, blank_ids=blank_ids, part_ids=part_ids
+        )
+
+    gen.waitForDutSummary = _counted_dut_summary
     # the supersede-rank fetch (2026-11-13 wafer merge) must never reach
     # the GUI in tests — an unstubbed waitFor* deadlocks the generator
     # thread; `file_dates` overrides the canned single-file dates
@@ -1107,6 +1122,7 @@ class TestProgressContract:
         # per-DUT), Trend 2 (2 tests x 1 head x 1 site), Bin 1, Wafer 1
         assert gen.totalLoopCnt == 9
         assert gen.loopCount == gen.totalLoopCnt
+        assert gen._dut_summary_fetch_count == 1  # fetch-once invariantt
 
     def test_close_signal_emitted_no_error(self, generated):
         _, _, _, closed, errors = generated
@@ -1969,6 +1985,7 @@ class TestDutBlockSelectionCombos:
         assert gen._ftr_tests
         assert gen._remeasure_drops is not None
         assert gen.loopCount == gen.totalLoopCnt
+        assert gen._dut_summary_fetch_count == 1  # fetch-once invariant
 
     def test_neither_dut_sheet_stat_only_unchanged(self, tmp_path, qapp, monkeypatch):
         """Review Focus 4: neither sheet + Stat + hide_remeasured — the
@@ -1987,4 +2004,23 @@ class TestDutBlockSelectionCombos:
         # stored back — None is the "context never ran" marker
         assert gen._remeasure_drops is None
         assert isinstance(gen._resolve_remeasure_drops(), set)
+        assert gen.loopCount == gen.totalLoopCnt
+        assert gen._dut_summary_fetch_count == 0  # no heavy fetch at all
+
+
+    def test_test_summary_only_export(self, tmp_path, qapp, monkeypatch):
+        """Review Focus coverage (review finding 9): the matrix alone —
+        tick cadence 1 context + 2 matrix (no per-DUT ticks), fetch-once
+        context, cache + drop-set stored. Hook #6 routes this selection
+        through the test page at the dialog level."""
+        gen, wb, reportPath, closed, errors = build_generated(
+            tmp_path, qapp, with_per_dut=False, with_stat=True, monkeypatch=monkeypatch,
+        )
+        assert closed == [True] and errors == []
+        names = wb.sheetnames
+        assert "Test Summary" in names
+        assert "DUT Summary" not in names
+        assert gen._ftr_tests
+        assert gen._remeasure_drops is not None
+        assert gen._dut_summary_fetch_count == 1
         assert gen.loopCount == gen.totalLoopCnt

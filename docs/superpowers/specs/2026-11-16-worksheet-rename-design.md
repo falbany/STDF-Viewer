@@ -249,6 +249,14 @@ fidelity priority (the pseudo-limit work was a dedicated feature wave).
    is `1 + 2N`. The fork already edits this exact block (generator-class
    selection, :1298), so the edit is precedented. Classic-only path
    stays byte-identical.
+6. **Wizard routing** (`uic_stdExporter.py` `gotoNextPage`, post-review
+   amendment 2026-11-17): the page-0 test-page set
+   `{Trend, Histo, DUT, Stat, PPQQ}` gains `TestSummary`, so a
+   Test-Summary-only selection routes through the test-selection page —
+   without it `exportTestItems` stays empty and the sheet renders
+   silently empty (review Critical 1). Required for the approved
+   TS-only capability; classic behavior unchanged (the member only
+   exists when the modern checkbox is checked).
 
 ## Commit strategy
 
