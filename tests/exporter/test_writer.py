@@ -1039,7 +1039,7 @@ class TestPlainTableConditionalFormatting:
 
 
 # --------------------------------------------------------------------------
-# Integration: render a spec built by the real matrix.py builder
+# Integration: render a spec built by the real test_summary.py builder
 # --------------------------------------------------------------------------
 
 

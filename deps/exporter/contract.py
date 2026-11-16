@@ -6,7 +6,7 @@ theme, progress plumbing and selection state they consume. Every mixin
 inherits ``ReportHost`` so type checkers (pyright) and pylint see the
 attributes and methods the host guarantees — without it, ``self._theme``
 and friends are unknown members on the mixin classes themselves, and the
-cross-mixin couplings (TestStatistics -> DUTSummary's
+cross-mixin couplings (TestStatistics -> TestSummary's
 ``_resolve_remeasure_drops``, both -> ``reportGenerator._fid_ranks``)
 exist only in convention.
 
@@ -87,7 +87,7 @@ class ReportHost:  # pylint: disable=too-few-public-methods
     # supersede rank map, one waitForFileDates round-trip per export
     # (reportGenerator._fid_ranks, cached through _fid_ranks_cache)
     _fid_ranks: Callable[[], dict]
-    # DUTSummaryMixin's re-measure drop-set resolver (§7.2)
+    # TestSummaryMixin's re-measure drop-set resolver (§7.2)
     _resolve_remeasure_drops: Callable[[], Any]
     # DUTSummaryMixin's per-DUT sheet writer (generator-invoked; reads the
     # context _prepare_dut_context stored)

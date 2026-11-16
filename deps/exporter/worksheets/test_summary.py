@@ -1,6 +1,6 @@
 """
 #
-# matrix.py - exporter package - STDF Viewer
+# test_summary.py - exporter package - STDF Viewer
 #
 # Author: falbany (fork)
 # Created Date: November 9th 2026
@@ -914,7 +914,8 @@ def group_order_by_temperature(
 
 def order_dut_block(worksheets: list, block: list) -> list:
     """Stable reorder placing the DUT-derived `block` contiguously directly
-    after its first member (the base DUT sheet) — §7.4's tab-order ruling.
+    after its first member (the Test Summary base when both DUT-block
+    sheets are selected) — §7.4's tab-order ruling.
 
     The base sheet is already in `worksheets` at its creation position;
     chunk-overflow / split sheets sit at the workbook end. Everything
@@ -935,11 +936,11 @@ class TestSummaryMixin(ReportHost):
     def _resolve_remeasure_drops(self) -> set:
         """The filter's drop-set, either direction of the sheet selection.
 
-        writeTest_Summary stores its drop-set before writeStatistic runs
-        (DUT sheet selected → reuse it; an empty set means "ran, nothing
-        to drop" — never refetch). None means the DUT sheet did not
-        render: the light dutInfo-only fetch answers, and an empty fetch
-        degrades gracefully to an empty drop-set."""
+        _prepare_dut_context stores the drop-set whenever either
+        DUT-block sheet renders (reuse it; an empty set means "ran,
+        nothing to drop" — never refetch). None means the context never
+        ran (stat-only export): the light dutInfo-only fetch answers,
+        and an empty fetch degrades gracefully to an empty drop-set."""
         if self._remeasure_drops is not None:
             return self._remeasure_drops
         partial = self.waitForDutInfo(self.selectedHeads, self.selectedSites, self.selectedFiles)
@@ -1056,8 +1057,8 @@ class TestSummaryMixin(ReportHost):
         """The Test Summary sheet: the die-part matrix (spec-built), the
         die-chunk overflow sheets and the temperature splits (§7.4) —
         fed by the context `_prepare_dut_context` stored."""
-        DutSheet = self.sheetDict.get(ReportSelection.TestSummary, None)
-        if DutSheet is None:
+        MatrixSheet = self.sheetDict.get(ReportSelection.TestSummary, None)
+        if MatrixSheet is None:
             return
         # report_core binds workbook and theme before any write* runs
         wb = self._wb
@@ -1088,7 +1089,7 @@ class TestSummaryMixin(ReportHost):
         # first, report_core appended it at creation) so the close-time
         # reorder keeps the DUT block adjacent to the base sheet.
         for chunk_index, spec in enumerate(specs):
-            ws = DutSheet if chunk_index == 0 else wb.add_worksheet(spec["name"])
+            ws = MatrixSheet if chunk_index == 0 else wb.add_worksheet(spec["name"])
             render_matrix_sheet(ws, spec, theme)
             if chunk_index > 0:
                 self._dut_sheet_block.append(ws)

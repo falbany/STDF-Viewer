@@ -58,8 +58,9 @@ mirroring the classic cursor gaps and progress cadence.
 
 Worksheets split (2026-11-12): the per-sheet writers moved verbatim to
 ``deps/exporter/worksheets/*.py`` as mixins (file_info, gdr_dtr,
-dut_summary, test_statistics, bin_chart, wafer_map, trend_chart,
-histogram); this module composes them into ``ModernReportGenerator`` and
+test_summary, dut_summary, test_statistics, bin_chart, wafer_map,
+trend_chart, histogram); this module composes them into
+``ModernReportGenerator`` and
 keeps only the assembly — ``__init__`` state, the shared
 ``_autofit_columns`` / ``_write_body_row`` helpers, and ``report_core``.
 """
@@ -176,9 +177,9 @@ class ModernReportGenerator(
         # selected and the English anchors resolve
         self._bin_banner = self.tr("Bin Chart")
         # FTR cache (fourth wave) initialized BEFORE any writer runs:
-        # writeDUT_Summary fills it when the DUT sheet is selected; a
-        # Stat-only selection leaves it empty (the Pattern-Name fallback
-        # covers detection there)
+        # _prepare_dut_context fills it when either DUT-block sheet is
+        # selected; a Stat-only selection leaves it empty (the
+        # Pattern-Name fallback covers detection there)
         self._ftr_tests: set = set()
         # re-measure filter hand-off (§7.2): None until
         # _prepare_dut_context stores its drop-set — None (vs an empty

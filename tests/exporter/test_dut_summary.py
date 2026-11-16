@@ -23,7 +23,7 @@ FILTER_ROW = 13
 SCIENTIFIC = "0.00E+00"
 
 # Exact formula strings (asserted literally, not via helpers — the
-# test_matrix.py convention). P/Q are the two fixture test columns;
+# test_test_summary.py convention). P/Q are the two fixture test columns;
 # S:T are their flag mirrors (R is the blank spacer). The attribute rows
 # are filter-aware (ruling 2026-11-16): SUBTOTAL visible-cells codes, the
 # Fails counts carrying the OFFSET visible-mask idiom.
@@ -66,7 +66,7 @@ class TestLayout:
         assert len(block) == 12
         assert block[0] == ["Test#", 10, 12]
         # the short test part keeps the numeric prefix (the matrix renders
-        # the same — test_matrix.py)
+        # the same — test_test_summary.py)
         assert block[1] == ["Test Name", "0_TXCC", "2_Func"]
         assert block[2] == ["Param", "VCCC_ASIC", "PAT_TOP"]  # FTR: VECT_NAM
         assert block[3] == ["Unit", "V", "P/F"]

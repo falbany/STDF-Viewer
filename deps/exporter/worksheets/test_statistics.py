@@ -303,7 +303,7 @@ def stat_row_is_ftr(transformed_row, header_info, ftr_tests) -> bool:
     """FTR detection for one transformed Test Statistics row (fourth wave).
 
     PRIMARY: ``(test_num, full test name)`` sits in the cache that
-    ``writeTest_Summary`` builds from the summaryTable's SUB_CODE — needs a
+    ``_prepare_dut_context`` builds from the summaryTable's SUB_CODE — needs a
     parsed VHeader (the row's leading int). FALLBACK (covers Stat-selected-
     without-DUT runs, where the cache stays empty): the transformed header
     carries a "Pattern Name" column (normalized match) and the row's cell
@@ -398,8 +398,9 @@ class TestStatisticsMixin(ReportHost):
         assert theme is not None
 
         # re-measure filter (§7.2): Test Statistics honors the same kept-DUT
-        # set as the Test Summary — the stored drop-set when the DUT sheet
-        # ran, a light dutInfo-only fetch otherwise (stat-only exports)
+        # set as the DUT-block context (_prepare_dut_context) — the stored
+        # drop-set when either sheet ran, a light dutInfo-only fetch
+        # otherwise (stat-only exports)
         kargs: dict = {"testTuples": testTuples}
         if getSetting().gen.hide_remeasured:
             drops = self._resolve_remeasure_drops()

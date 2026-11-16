@@ -41,7 +41,7 @@ registry — the generator decides which `write*` mixins run.
 | `generator.py` | Composition root. Owns the workbook, theme and progress plumbing and the selection state the mixins consume; subclasses the classic exporter and preserves its threading contract. |
 | `contract.py` | `ReportHost` typing-only host contract (PEP 526 annotations, `__slots__ = ()`). **Read first.** |
 | `worksheets/*.py` | One mixin per sheet type — `bin_chart`, `dut_summary`, `file_info`, `gdr_dtr`, `histogram`, `test_statistics`, `test_summary`, `trend_chart`, `wafer_map` — each exposing a `write*` entry point. Conventions: [worksheets/AGENTS.md](worksheets/AGENTS.md). |
-| `writer.py` | Pure xlsxwriter renderer: DUT Summary matrix sheets and plain tables, from spec dicts built by the mixins. Writes values (formulas verbatim with their cached results), styles (through the theme's workbook-scoped format factory), conditional formatting, native AutoFilter, hidden mirror columns, sparklines and print setup. Every data decision was made upstream of it. |
+| `writer.py` | Pure xlsxwriter renderer: Test Summary matrix sheets and plain tables, from spec dicts built by the mixins. Writes values (formulas verbatim with their cached results), styles (through the theme's workbook-scoped format factory), conditional formatting, native AutoFilter, hidden mirror columns, sparklines and print setup. Every data decision was made upstream of it. |
 | `sheets.py` | Plain-table spec builder (`plain_table_spec`: headers translated, cells sanitized, generator rows materialized — feeding `writer.render_plain_table`) and scaled image embedding (`insert_report_image`: Pillow probes the PNG size, scale reaches `insert_image`, returns the sheet rows it spans). **Not a sheet picker** — nothing picks sheets here. |
 | `charts.py` | Bin-distribution parsers, the native xlsxwriter donut-chart factory, the structured bin-table renderer and the dashboard KPI cards (headline bands, merged fills via one composed Format). |
 | `theme.py` | The theme / workbook-scoped format factory. Formats are immutable — per-cell styling composes at write time; don't mutate a `Format`. |
@@ -114,10 +114,13 @@ affected areas:
   guard (commit `2020ec3`); any new merge site needs the same guard.
 - **Cross-mixin couplings exist only by convention.**
   `test_statistics` calls `test_summary`'s `_resolve_remeasure_drops`
-  (its route to the shared supersede ranks); `test_summary` and
-  `wafer_map` call `reportGenerator._fid_ranks` directly. These are real
-  calls with no runtime base: they must be declared in `contract.py`
-  (annotation-only) or pyright and pylint cannot see them. Any new
+  (its route to the shared supersede ranks); `report_core` invokes
+  `test_summary`'s `_prepare_dut_context()` once per export (the shared
+  DUT-block context: `_dut_ctx_*`, `_ftr_tests`, `_remeasure_drops`);
+  `test_summary` and `wafer_map` call `reportGenerator._fid_ranks`
+  directly. These are real calls with no runtime base: they must be
+  declared in `contract.py` (annotation-only) or pyright and pylint
+  cannot see them. Any new
   coupling gets declared there too.
 
 ## Pointers

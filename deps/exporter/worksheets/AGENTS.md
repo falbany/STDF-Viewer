@@ -20,7 +20,7 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
 | `gdr_dtr.py` | `writeGDR_DTR()` |
 | `histogram.py` | `writeHistogram(testTuple, head, site)` |
 | `test_statistics.py` | `writeStatistic(testTuples, heads, sites)` |
-| `test_summary.py` | `writeTest_Summary()` |
+| `test_summary.py` | `writeTest_Summary()` + `_prepare_dut_context()` (generator-level, shared context) |
 | `trend_chart.py` | `writeTrendPlot(testTuple, head, site)` |
 | `wafer_map.py` | `writeWaferMap()` |
 
@@ -47,7 +47,7 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
   computed numbers carry Excel formulas referencing the table ranges
   (e.g. `=SUM`, `=COUNTIF`), so they recalculate when the user edits the
   workbook. Formulas are written in English syntax (see parent ruling).
-- **Specs before pixels.** The DUT Summary sheet is built as a spec dict
+- **Specs before pixels.** The Test Summary sheet is built as a spec dict
   (`test_summary.build_test_summary_spec`) rendered by
   `writer.render_matrix_sheet`; plain tables go through
   `sheets.plain_table_spec` → `writer.render_plain_table`. Follow that
@@ -69,6 +69,11 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
   supersede ranks); `test_summary` and `wafer_map` call
   `reportGenerator._fid_ranks` directly. They work only because both
   sides inherit `ReportHost`, where those members are declared.
+- **The DUT-block context is generator-level.** `test_summary`'s
+  `_prepare_dut_context()` is invoked by `report_core` (once, when either
+  DUT-block sheet is selected) and fills the shared context
+  (`_dut_ctx_*`, `_ftr_tests`, `_remeasure_drops`) that both writers and
+  Test Statistics consume — the writers never fetch.
 
 ## Adding a sheet type
 

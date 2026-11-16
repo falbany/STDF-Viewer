@@ -3,7 +3,7 @@
 Task 8 integration: selectedContents={TestSummary, DUT, Trend, Bin, Wafer} (Histogram
 deliberately NOT selected), two test items (one parametric with limits, one
 FTR), three DUTs in one file. waitForDutSummary returns a classic-protocol
-summaryTable (fixture style of test_matrix.py::make_summary), waitForImage a
+summaryTable (fixture style of test_test_summary.py::make_summary), waitForImage a
 small real PNG, waitForDataList simple stat rows. report_core() runs against
 tmp_path; cell/style assertions run on the reloaded workbook, image
 assertions on the in-memory one (openpyxl does not reload images from saved
@@ -552,7 +552,7 @@ class TestSheetInventory:
 # --------------------------------------------------------------------------
 
 
-class TestDutSummarySheet:
+class TestTestSummarySheet:
     def test_banner_row_one(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["Test Summary"]
