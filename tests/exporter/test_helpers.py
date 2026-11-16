@@ -304,7 +304,7 @@ class TestFailsFormulas:
 
 
 class TestTransposedFormulas:
-    """DUT Status wave: the formula builders' column twins — ranges run DOWN
+    """DUT Summary wave: the formula builders' column twins — ranges run DOWN
     a test column; spec-min/max/mean are attribute-block cells {col}5 /
     {col}6 / {col}9 (the transpose of the matrix's fixed E/F/I letters).
     Filter-aware since the 2026-11-16 ruling: SUBTOTAL visible-cells codes,

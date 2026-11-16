@@ -73,7 +73,7 @@ from PyQt5 import QtCore
 from deps.exporter.charts import complete_chart_flags
 from deps.exporter.theme import ModernTheme
 from deps.exporter.worksheets.bin_chart import BinChartMixin
-from deps.exporter.worksheets.dut_status import DUTStatusMixin
+from deps.exporter.worksheets.dut_summary import DUTSummaryMixin
 from deps.exporter.worksheets.file_info import FileInfoMixin
 from deps.exporter.worksheets.gdr_dtr import GdrDtrMixin
 from deps.exporter.worksheets.histogram import HistogramMixin
@@ -104,7 +104,7 @@ class ModernReportGenerator(
     FileInfoMixin,
     GdrDtrMixin,
     TestSummaryMixin,
-    DUTStatusMixin,
+    DUTSummaryMixin,
     TestStatisticsMixin,
     BinChartMixin,
     WaferMapMixin,
@@ -180,17 +180,23 @@ class ModernReportGenerator(
         # Stat-only selection leaves it empty (the Pattern-Name fallback
         # covers detection there)
         self._ftr_tests: set = set()
-        # re-measure filter hand-off (§7.2): None until writeDUT_Summary
-        # stores its drop-set — None (vs an empty set) is the stat-only
-        # signal that triggers the light dutInfo-only fetch
+        # re-measure filter hand-off (§7.2): None until
+        # _prepare_dut_context stores its drop-set — None (vs an empty
+        # set) is the stat-only signal that triggers the light
+        # dutInfo-only fetch
         self._remeasure_drops: set | None = None
         # supersede rank map (2026-11-13 wafer merge): None until the
         # first _fid_ranks() call — ONE waitForFileDates round-trip per
         # export, shared by the Test Summary dedup and the wafer merge
         self._fid_ranks_cache: dict | None = None
-        # the DUT-derived sheet block (base + chunk overflow + temperature
-        # splits, base first) for the close-time tab-order reorder (§7.4)
+        # the DUT-derived sheet block (Test Summary base + chunk overflow +
+        # temperature splits + the DUT Summary per-DUT sheets, base first)
+        # for the close-time tab-order reorder (§7.4)
         self._dut_sheet_block: list = []
+        # the DUT-block shared context (_dut_ctx_summary/_order/_dut_ids/
+        # _temps) binds in _prepare_dut_context, like the other per-run
+        # state — it runs whenever either DUT-block sheet is selected, and
+        # the writers gate on sheetDict before reading it
 
         # the try/finally mirrors the classic `with Workbook(...)` block:
         # the (partial) workbook is saved on forceQuit early-returns and on
@@ -200,6 +206,7 @@ class ModernReportGenerator(
             #    classic order; 2./3./4. below write them in classic order
             for cont in [
                 ReportSelection.FileInfo,
+                ReportSelection.TestSummary,
                 ReportSelection.DUT,
                 ReportSelection.GDR_DTR,
                 ReportSelection.Stat,
@@ -213,11 +220,13 @@ class ModernReportGenerator(
                 # sheet order in the xlsx is fixed
                 if cont == ReportSelection.FileInfo:
                     sheetName = self.tr("File Info")
-                elif cont == ReportSelection.DUT:
-                    # fork(falbany): commit-1 transient — ReportSelection.DUT still
-                    # selects this sheet; the next commit adds
-                    # ReportSelection.TestSummary and repurposes DUT.
+                elif cont == ReportSelection.TestSummary:
                     sheetName = self.tr("Test Summary")
+                elif cont == ReportSelection.DUT:
+                    # Modern mode: the per-DUT sheet (DUTs on rows). Classic
+                    # never sees this loop — its own writer keeps its
+                    # upstream "DUT Summary" tab for the matrix.
+                    sheetName = self.tr("DUT Summary")
                 elif cont == ReportSelection.GDR_DTR:
                     sheetName = self.tr("GDR & DTR Summary")
                 elif cont == ReportSelection.Stat:
@@ -236,8 +245,13 @@ class ModernReportGenerator(
                     sheetName = self.tr("Correlation")
                 if cont in self.selectedContents:
                     self.sheetDict[cont] = self._wb.add_worksheet(sheetName)
-                    if cont == ReportSelection.DUT:
-                        # block[0] = the base DUT sheet (§7.4 reorder)
+                    if cont == ReportSelection.TestSummary:
+                        # block[0] = the Test Summary base sheet (§7.4
+                        # reorder). The DUT Summary base joins the block at
+                        # write time so the block stays in write order —
+                        # the Test Summary family contiguous, then the
+                        # per-DUT family (temperature splits must not be
+                        # separated from their base sheet by the DUT base).
                         self._dut_sheet_block.append(self.sheetDict[cont])
 
             # ** write contents independent of test numbers
@@ -249,8 +263,22 @@ class ModernReportGenerator(
             self.writeGDR_DTR()
             if self.forceQuit:
                 return
-            # test summary
+            # DUT block: one shared context (heavy fetch, FTR cache,
+            # drop-set, prune, order/ids, temperatures) when either sheet
+            # is selected — fetch-once; both-selected costs exactly one
+            # round-trip per fetch. The writers run in tab order.
+            if (
+                ReportSelection.TestSummary in self.selectedContents
+                or ReportSelection.DUT in self.selectedContents
+            ):
+                self._prepare_dut_context()
+                if self.forceQuit:
+                    return
             self.writeTest_Summary()
+            if self.forceQuit:
+                return
+            # dut summary (per-DUT sheet)
+            self.writeDUT_Summary()
             if self.forceQuit:
                 return
 

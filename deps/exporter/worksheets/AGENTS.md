@@ -15,7 +15,7 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
 | module | entry point |
 |---|---|
 | `bin_chart.py` | `writeBinChart()` |
-| `dut_status.py` | `writeDUT_Status(summaryTable, testTuples, order, dut_ids, file_temperatures)` |
+| `dut_summary.py` | `writeDUT_Summary()` |
 | `file_info.py` | `writeFileInfo()` |
 | `gdr_dtr.py` | `writeGDR_DTR()` |
 | `histogram.py` | `writeHistogram(testTuple, head, site)` |

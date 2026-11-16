@@ -238,7 +238,7 @@ def flag_value(flag) -> int | None:
 
 def split_dut_chunks(dut_ids: list, cap: int = DUT_CHUNK_CAP) -> tuple[tuple, ...]:
     """Split a list into consecutive chunks of at most ``cap`` per sheet
-    (generic: named for the matrix's DUT axis, reused for the DUT Status
+    (generic: named for the matrix's DUT axis, reused for the DUT Summary
     sheet's test axis).
 
     An empty list still yields one (empty) chunk so the caller renders one
@@ -312,13 +312,13 @@ def fails_formula_flags(row: int, first: str, last: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# Column twins of the five builders above (DUT Status wave): the DUT Status
+# Column twins of the five builders above (DUT Summary wave): the DUT Summary
 # sheet is the Test Summary matrix transposed, so the attribute block's
 # Min/Max/Mean/Cp/Cpk/Fails cells run DOWN each test column over the DUT
 # rows, and the spec-min/max/mean cells are attribute-block cells in the
 # SAME column ({col}{spec_min_row} etc.) — the transpose of the matrix's
 # fixed E/F/I letters. The caller passes the BASE_HEADERS-derived rows
-# (dut_status.SPEC_MIN_ROW / SPEC_MAX_ROW / MEAN_ROW), so the attribute
+# (dut_summary.SPEC_MIN_ROW / SPEC_MAX_ROW / MEAN_ROW), so the attribute
 # layout stays the one source of truth.
 # --------------------------------------------------------------------------
 
@@ -332,7 +332,7 @@ _STAT_CODES = {"MIN": 105, "MAX": 104, "AVERAGE": 101}
 
 
 def stat_formula_col(name: str, col: str, first_row: int, last_row: int) -> str:
-    """Column twin of stat_formula (DUT Status attribute block), filter-aware:
+    """Column twin of stat_formula (DUT Summary attribute block), filter-aware:
     ``=IFERROR(SUBTOTAL(101,P14:P1000),"")`` style — SUBTOTAL codes ignore
     AutoFilter-hidden rows, one IFERROR guard, the range running down the
     test column."""
@@ -342,7 +342,7 @@ def stat_formula_col(name: str, col: str, first_row: int, last_row: int) -> str:
 def cp_formula_col(
     col: str, first_row: int, last_row: int, spec_min_row: int, spec_max_row: int
 ) -> str:
-    """Column twin of cp_formula (DUT Status attribute block), filter-aware:
+    """Column twin of cp_formula (DUT Summary attribute block), filter-aware:
     (USL-LSL)/(6σ) with σ embedded as SUBTOTAL(107, ...) (sample STDEV over
     the visible cells) down the test column; the limits read the attribute
     block's SpecMax/SpecMin cells ({col}{spec_max_row} / {col}{spec_min_row}).
@@ -361,7 +361,7 @@ def cpk_formula_col(
     spec_max_row: int,
     mean_row: int,
 ) -> str:
-    """Column twin of cpk_formula (DUT Status attribute block), filter-aware:
+    """Column twin of cpk_formula (DUT Summary attribute block), filter-aware:
     the smaller of the two ratio arms over σ = SUBTOTAL(107, ...) (visible
     cells); limits and mean read the attribute block's cells
     ({col}{spec_max_row} / {col}{mean_row} / {col}{spec_min_row}). IFERROR
@@ -376,7 +376,7 @@ def cpk_formula_col(
 def fails_formula_limits_col(
     col: str, first_row: int, last_row: int, spec_min_row: int, spec_max_row: int
 ) -> str:
-    """Column twin of fails_formula_limits (DUT Status attribute block),
+    """Column twin of fails_formula_limits (DUT Summary attribute block),
     filter-aware: FAILS count down one test column vs the attribute block's
     SpecMin/SpecMax cells, ignoring blank DUT cells and rows hidden by the
     AutoFilter (SUBTOTAL(103, OFFSET(...)) visible-mask idiom — volatile,
@@ -396,7 +396,7 @@ def fails_formula_limits_col(
 def fails_formula_flags_col(
     mirror_first: str, mirror_last: str, first_row: int, last_row: int
 ) -> str:
-    """Column twin of fails_formula_flags (DUT Status attribute block),
+    """Column twin of fails_formula_flags (DUT Summary attribute block),
     filter-aware: FAILS count of 0/1 flag cells down the hidden mirror
     range, restricted to rows visible under the AutoFilter (SUBTOTAL(103,
     OFFSET(...)) visible-mask idiom — volatile, accepted 2026-11-16)."""

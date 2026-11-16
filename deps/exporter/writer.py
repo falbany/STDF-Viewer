@@ -575,16 +575,16 @@ def _set_column_widths(ws, spec):
 
 
 # --------------------------------------------------------------------------
-# DUT Status sheet sections (the Test Summary matrix transposed — spec dicts
-# from worksheets/dut_status.py; this module cannot import that module
+# DUT Summary sheet sections (the Test Summary matrix transposed — spec dicts
+# from worksheets/dut_summary.py; this module cannot import that module
 # without a cycle, so every row/column the renderer needs travels in the
 # spec)
 # --------------------------------------------------------------------------
 
-# Fixed widths of the DUT Status sheet: A=8 (DUT #), the metadata zone B..
+# Fixed widths of the DUT Summary sheet: A=8 (DUT #), the metadata zone B..
 # with Part ID (C) / Part TXT (D) wide, test columns and Trend like the matrix.
-DUT_STATUS_META_WIDTH = 9
-DUT_STATUS_TEXT_WIDTH = 18  # Part ID / Part TXT
+DUT_SUMMARY_META_WIDTH = 9
+DUT_SUMMARY_TEXT_WIDTH = 18  # Part ID / Part TXT
 
 
 def _add_transposed_die_rules(ws, die_rules, theme):
@@ -612,7 +612,7 @@ def _add_transposed_die_rules(ws, die_rules, theme):
 
 
 def _hide_transposed_mirrors(ws, spec, theme):
-    """Hide the DUT Status sheet's flag mirror columns; grey marker header
+    """Hide the DUT Summary sheet's flag mirror columns; grey marker header
     outside the AutoFilter (row 13)."""
     first = spec.get("mirror_first_col")
     count = len(spec.get("test_columns") or [])
@@ -634,7 +634,7 @@ def _hide_transposed_mirrors(ws, spec, theme):
             )
 
 
-def _render_dut_status_attribute_block(ws, spec, theme):
+def _render_dut_summary_attribute_block(ws, spec, theme):
     """Rows 1..12: the transposed BASE_HEADERS — banner-fill blanks over the
     frozen metadata zone A..N, the row label in column O (the last frozen
     column, adjacent to the test cells it describes — ruling 2026-11-16,
@@ -676,9 +676,10 @@ def _render_dut_status_attribute_block(ws, spec, theme):
             )
 
 
-def _set_dut_status_column_widths(ws, spec):
-    """Pin the DUT Status widths: A=8 (DUT #); metadata zone B.. with
-    Part ID (C) / Part TXT (D) wide; test columns 8; Trend 20.
+def _set_dut_summary_column_widths(ws, spec):
+    """Pin the DUT Summary widths: A=8 (DUT #); metadata zone B.. with
+    Part ID (C) / Part TXT (D) wide; test columns 8 (no Trend column —
+    dropped in the transposed wave).
 
     Masked metadata columns carry width + hidden in the SAME set_column
     call — xlsxwriter's second call for one column REPLACES the first, so
@@ -687,19 +688,19 @@ def _set_dut_status_column_widths(ws, spec):
     meta_count = spec["metadata_column_count"]
     masked = set(spec.get("masked_columns") or [])
     for i in range(meta_count):
-        width = DUT_STATUS_TEXT_WIDTH if i in (1, 2) else DUT_STATUS_META_WIDTH
+        width = DUT_SUMMARY_TEXT_WIDTH if i in (1, 2) else DUT_SUMMARY_META_WIDTH
         options = {"hidden": True} if i in masked else None
         ws.set_column(1 + i, 1 + i, width, None, options)
     for letter in spec.get("test_columns") or []:
         ws.set_column(_col0(letter), _col0(letter), DIE_COLUMN_WIDTH)
 
 
-def render_dut_status_sheet(ws, spec: dict, theme) -> None:
-    """Render one DUT Status spec dict onto ``ws`` (attribute block, filter
+def render_dut_summary_sheet(ws, spec: dict, theme) -> None:
+    """Render one DUT Summary spec dict onto ``ws`` (attribute block, filter
     header, DUT rows, transposed conditional formatting, hidden mask and
     mirror columns, pinned column widths, freeze / gridlines / print / tab /
     footer polish)."""
-    _render_dut_status_attribute_block(ws, spec, theme)
+    _render_dut_summary_attribute_block(ws, spec, theme)
 
     filter_row = spec["filter_row"]
     for column, value in enumerate(spec["filter_header"], start=1):
@@ -749,7 +750,7 @@ def render_dut_status_sheet(ws, spec: dict, theme) -> None:
                 cached=cached,
             )
 
-    _set_dut_status_column_widths(ws, spec)
+    _set_dut_summary_column_widths(ws, spec)
 
     cf = spec["conditional_formatting"]
     if cf.get("die_rules"):
@@ -765,7 +766,7 @@ def render_dut_status_sheet(ws, spec: dict, theme) -> None:
     if cf.get("part_id_range"):
         _add_duplicate_part_id_rules(ws, cf["part_id_range"], theme)
 
-    # hidden mask columns ride their width (see _set_dut_status_column_widths
+    # hidden mask columns ride their width (see _set_dut_summary_column_widths
     # — Review Focus: hidden columns keep their data, only the dropdown is
     # gone); the mirrors hide separately (no width of their own)
     _hide_transposed_mirrors(ws, spec, theme)

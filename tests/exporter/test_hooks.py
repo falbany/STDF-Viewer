@@ -67,6 +67,35 @@ def test_split_temperature_round_trips():
     assert params.gen.split_temperature is True
 
 
+def test_test_summary_default_true():
+    assert SettingParams().gen.test_summary is True
+
+
+def test_test_summary_alias_in_dump():
+    dumped = SettingParams().model_dump(by_alias=True)
+    assert dumped["General"]["Test Summary"] is True
+
+
+def test_test_summary_round_trips():
+    params = SettingParams()
+    params.gen.test_summary = False
+    dumped = params.model_dump(by_alias=True)
+    assert dumped["General"]["Test Summary"] is False
+    assert params.gen.test_summary is False
+
+
+def test_dut_block_loop_count_progress_denominator():
+    # hook #5: 1 context tick + one tick per test tuple per selected sheet;
+    # 0 when neither DUT-block sheet is selected (classic keeps its own
+    # upstream 1 + N branch, untouched)
+    from deps.exporter.progress import dut_block_loop_count
+
+    assert dut_block_loop_count(test_count=0, test_summary_selected=False, dut_selected=False) == 0
+    assert dut_block_loop_count(test_count=3, test_summary_selected=False, dut_selected=True) == 4
+    assert dut_block_loop_count(test_count=3, test_summary_selected=True, dut_selected=False) == 4
+    assert dut_block_loop_count(test_count=3, test_summary_selected=True, dut_selected=True) == 7
+
+
 def ptr_dict():
     """A classic getTestDataFromHeadSite PTR result: three DUT indices
     with matching data/flag lists."""

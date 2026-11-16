@@ -972,18 +972,23 @@ class TestSummaryMixin(ReportHost):
             dut_ids.append(part_id if part_id else f"DUT #{i + 1}")
         return order, dut_ids
 
-    def writeTest_Summary(self):
-        """The Test Summary sheet: the die-part matrix (spec-built), plus
-        the FTR cache fill, the re-measure drop-set hand-off (§7.2), the
-        die-chunk overflow sheets and the temperature splits (§7.4)."""
-        DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
-        if DutSheet is None:
-            return
-        # report_core binds workbook and theme before any write* runs
-        wb = self._wb
-        theme = self._theme
-        assert wb is not None and theme is not None
+    def _prepare_dut_context(self):
+        """The DUT-block shared context, fetched ONCE for both sheets.
 
+        Runs at generator level when either the Test Summary or the DUT
+        Summary sheet is selected (never for a Stat-only export — that
+        keeps the light `waitForDutInfo` fallback in
+        `_resolve_remeasure_drops`). Both-selected costs exactly one
+        round-trip per fetch; each writer consumes the stored context
+        instead of producing it.
+
+        Sets `_dut_ctx_summary` (the PRUNED summaryTable),
+        `_dut_ctx_order`, `_dut_ctx_dut_ids`, `_dut_ctx_temps`; also
+        fills `_ftr_tests` (FTR pseudo-limit signal, consumed by
+        writeStatistic) and stores `_remeasure_drops` (the §7.2 hand-off
+        — an empty set means "ran, nothing to drop"; None means this
+        method never ran, the stat-only fallback signal). Emits the
+        context tick (the "DUT info part" of the classic cadence)."""
         # a complex dict structure from the GUI thread
         # key: Data, value:     testTuple -> {fid, testDataDict}
         # key: TestInfo, value: testTuple -> testInfoDict
@@ -995,10 +1000,17 @@ class TestSummaryMixin(ReportHost):
         if self.forceQuit:
             return
 
+        # classic cadence: one tick after the DUT info part (the heavy
+        # fetch — emitted here, not by the writers)
+        self.loopCount += 1
+        self.sendProgress()
+
         # FTR cache (fourth wave): (test_num, full test name) of every test
         # tuple whose record SUB_CODE is FTR (any fid) — the PRIMARY FTR
-        # detection signal for writeStatistic's pseudo-limits. Runs before
-        # the sheet rendering; a Stat-only selection never reaches here and
+        # detection signal for writeStatistic's pseudo-limits. Filled
+        # whenever the heavy fetch ran, regardless of which sheets are
+        # selected, so a DUT-Summary-only + Stat export keeps full
+        # pseudo-limits; a Stat-only selection never reaches here and
         # keeps the report_core-initialized empty set (fallback signal).
         self._ftr_tests = set()
         for test_tuple in self.testTuples:
@@ -1008,10 +1020,9 @@ class TestSummaryMixin(ReportHost):
 
         # re-measure filter (DUT Summary enhancements §7.2): the drop-set
         # is computed BEFORE rendering and stored for writeStatistic's
-        # stats hook (Task 6) — the DUT sheet runs first in the report
-        # sequence, so a DUT-selected export never refetches here. An
-        # empty set means "ran, nothing to drop"; None (never stored)
-        # means the DUT sheet did not render (stat-only fallback fetch).
+        # stats hook. An empty set means "ran, nothing to drop"; None
+        # (never stored) means this method did not run (stat-only
+        # fallback fetch).
         if getSetting().gen.hide_remeasured:
             drops = compute_remeasure_drops(
                 summaryTable["dutInfo"],
@@ -1035,6 +1046,27 @@ class TestSummaryMixin(ReportHost):
         if self.forceQuit:
             return
         file_temperatures = file_temperatures_from_file_info(file_info_rows, self.selectedFiles)
+
+        self._dut_ctx_summary = summaryTable
+        self._dut_ctx_order = order
+        self._dut_ctx_dut_ids = dut_ids
+        self._dut_ctx_temps = file_temperatures
+
+    def writeTest_Summary(self):
+        """The Test Summary sheet: the die-part matrix (spec-built), the
+        die-chunk overflow sheets and the temperature splits (§7.4) —
+        fed by the context `_prepare_dut_context` stored."""
+        DutSheet = self.sheetDict.get(ReportSelection.TestSummary, None)
+        if DutSheet is None:
+            return
+        # report_core binds workbook and theme before any write* runs
+        wb = self._wb
+        theme = self._theme
+        assert wb is not None and theme is not None
+        summaryTable = self._dut_ctx_summary
+        order = self._dut_ctx_order
+        dut_ids = self._dut_ctx_dut_ids
+        file_temperatures = self._dut_ctx_temps
 
         specs = build_test_summary_spec(
             summaryTable,
@@ -1090,18 +1122,8 @@ class TestSummaryMixin(ReportHost):
                         render_matrix_sheet(ws, spec, theme)
                         self._dut_sheet_block.append(ws)
 
-        # DUT Status (2026-11-16): the transposed complement sheet — the
-        # context this method already built, zero extra fetches; re-measure
-        # pruning and supersede ranks are inherited by position. The future
-        # "Extended" UI check box (same fork-hook pattern as
-        # hide_remeasured / split_temperature) gates THIS call — one-line
-        # guard, later wave.
-        self.writeDUT_Status(summaryTable, self.testTuples, order, dut_ids, file_temperatures)
-
-        # classic cadence: one tick after the DUT info part...
-        self.loopCount += 1
-        self.sendProgress()
-        # ...and one per test column (rows span every chunk)
+        # one tick per test column (rows span every chunk); the context
+        # tick belongs to _prepare_dut_context
         for _ in self.testTuples:
             self.loopCount += 1
             self.sendProgress()

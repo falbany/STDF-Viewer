@@ -44,10 +44,19 @@ class ReportHost:  # pylint: disable=too-few-public-methods
 
     # -- per-run state (report_core re-binds each run) --
     _bin_banner: str  # Bin-sheet banner; File Info overwrites it
-    _ftr_tests: set  # (test_num, test_name) tuples filled by writeTest_Summary
+    _ftr_tests: set  # (test_num, test_name) tuples filled by _prepare_dut_context
     _remeasure_drops: set | None  # None = stat-only signal (§7.2)
     _fid_ranks_cache: dict | None  # None until the first _fid_ranks() call
     _dut_sheet_block: list  # DUT-derived sheets, base first (§7.4 reorder)
+
+    # -- DUT-block shared context (_prepare_dut_context, generator level:
+    #    fetched ONCE when either DUT-block sheet is selected; both
+    #    writeTest_Summary and writeDUT_Summary consume it) --
+    _dut_ctx_summary: dict  # the PRUNED summaryTable
+    _dut_ctx_order: list  # classic (fid, dutIndex) display order
+    _dut_ctx_dut_ids: list  # per-column part IDs, "DUT #n" fallback
+    _dut_ctx_temps: dict  # per-file MIR temperatures (File Info fetch)
+    _prepare_dut_context: Callable[[], None]
 
     # -- progress/threading plumbing (reportGenerator.__init__) --
     # loopCount carries its default so pylint/astroid can type the
@@ -80,9 +89,9 @@ class ReportHost:  # pylint: disable=too-few-public-methods
     _fid_ranks: Callable[[], dict]
     # DUTSummaryMixin's re-measure drop-set resolver (§7.2)
     _resolve_remeasure_drops: Callable[[], Any]
-    # DUTStatusMixin's transposed complement sheet (approach A:
-    # writeDUT_Summary ends by calling it with its own context)
-    writeDUT_Status: Callable[..., None]
+    # DUTSummaryMixin's per-DUT sheet writer (generator-invoked; reads the
+    # context _prepare_dut_context stored)
+    writeDUT_Summary: Callable[..., None]
     # ModernReportGenerator's shared rendering helpers
     _autofit_columns: Callable[..., None]
     _write_body_row: Callable[..., None]

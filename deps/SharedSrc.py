@@ -112,7 +112,8 @@ class GeneralConfig(BaseModel):
     vert_bar: bool = Field(False, alias="Vertical BarGraph")
     modern_export: bool = Field(True, alias="Modern Export")  # fork(falbany): modern exporter toggle
     hide_remeasured: bool = Field(False, alias="Hide Remeasured")  # fork(falbany): hide re-measured DUTs toggle
-    split_temperature: bool = Field(False, alias="Split Temperature")  # fork(falbany): split DUT Summary by temperature
+    split_temperature: bool = Field(False, alias="Split Temperature")  # fork(falbany): split Test Summary by temperature
+    test_summary: bool = Field(True, alias="Test Summary")  # fork(falbany): Test Summary matrix sheet toggle
     file_symbols: dict[int, str] = Field(
         default_factory=lambda: {0: "o"},
         alias="File Symbols (Scatter Points)"

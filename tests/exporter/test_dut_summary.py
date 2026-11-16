@@ -1,16 +1,16 @@
-"""Tests for deps/exporter/worksheets/dut_status.py: the DUT Status spec
-builder (the DUT Summary matrix transposed) and its renderer."""
+"""Tests for deps/exporter/worksheets/dut_summary.py: the DUT Summary spec
+builder (the Test Summary matrix transposed) and its renderer."""
 
 import pytest
 
 from deps.exporter.helpers import cp_cached, cpk_cached
 from deps.exporter.theme import ModernTheme
-from deps.exporter.worksheets.dut_status import (
+from deps.exporter.worksheets.dut_summary import (
     TEST_CHUNK_CAP,
-    build_dut_status_spec,
+    build_dut_summary_spec,
 )
 from deps.exporter.worksheets.test_summary import FTR_SPEC_MAX, FTR_SPEC_MIN
-from deps.exporter.writer import render_dut_status_sheet
+from deps.exporter.writer import render_dut_summary_sheet
 from tests.exporter.conftest import load_workbook_bytes, read_xml, render_workbook
 from tests.exporter.test_generator_dut import make_summary
 from tests.exporter.test_writer import cf_block, col_dim, dxf_fill_hex
@@ -45,11 +45,11 @@ ORDER = [(1, 0), (1, 1), (1, 2)]  # (fid, dutIndex) — file 1, DUTs 0..2
 def built(make_kwargs=None, file_temperatures=None):
     """One default spec (2 tests x 3 DUTs, tagged part IDs)."""
     spec_kwargs = {"file_temperatures": file_temperatures} if file_temperatures else {}
-    return build_dut_status_spec(
+    return build_dut_summary_spec(
         make_summary(**(make_kwargs or {})),
         TEST_TUPLES,
         ORDER,
-        sheet_name="DUT Status",
+        sheet_name="DUT Summary",
         **spec_kwargs,
     )
 
@@ -131,7 +131,7 @@ class TestLayout:
         assert spec["mirror_first_col"] == "S"  # spacer R / mirrors S:T (Trend dropped 2026-11-16)
         assert spec["flag_col_offset"] == 3
         assert spec["freeze_panes"] == "P14"
-        assert spec["name"] == "DUT Status"
+        assert spec["name"] == "DUT Summary"
         assert spec["dut_count"] == 3
         assert spec["filter_row"] == FILTER_ROW
         assert spec["data_start"] == DATA_START
@@ -181,8 +181,8 @@ class TestFormulas:
         # its mirror is V alone (T/U belong to tests P/Q)
         summary = make_summary()
         summary["TestInfo"][(15, 0, "3_nolimit/x")] = ["3_nolimit/x", 15, float("nan"), float("nan"), ""]
-        spec = build_dut_status_spec(
-            summary, TEST_TUPLES + [(15, 0, "3_nolimit/x")], ORDER, sheet_name="DUT Status"
+        spec = build_dut_summary_spec(
+            summary, TEST_TUPLES + [(15, 0, "3_nolimit/x")], ORDER, sheet_name="DUT Summary"
         )[0]
         block = spec["attribute_block"]
         formula = block[11][3]
@@ -239,9 +239,9 @@ class TestChunkingAndDegenerates:
     def test_chunk_cap_and_overflow(self):
         assert TEST_CHUNK_CAP == 8184
         many = [(i, 0, f"T{i}") for i in range(TEST_CHUNK_CAP + 1)]
-        specs = build_dut_status_spec(make_summary(), many, ORDER, sheet_name="DUT Status")
+        specs = build_dut_summary_spec(make_summary(), many, ORDER, sheet_name="DUT Summary")
         assert len(specs) == 2
-        assert specs[1]["name"] == "DUT Status (2)"
+        assert specs[1]["name"] == "DUT Summary (2)"
         # identical FROZEN ZONE (columns A..O: DUT # + 14 metadata) on every
         # chunk — the data-less tests resolve blank; the full rows differ by
         # the chunk's test count
@@ -250,7 +250,7 @@ class TestChunkingAndDegenerates:
         assert len(specs[0]["test_columns"]) == TEST_CHUNK_CAP
 
     def test_zero_tests_degenerate(self):
-        spec = build_dut_status_spec(make_summary(), [], ORDER, sheet_name="DUT Status")[0]
+        spec = build_dut_summary_spec(make_summary(), [], ORDER, sheet_name="DUT Summary")[0]
         assert spec["test_columns"] == []
         assert spec["mirror_first_col"] is None
         assert spec["flag_col_offset"] == 0
@@ -278,7 +278,7 @@ class TestChunkingAndDegenerates:
         assert spec["auto_filter"] == {"ref": "A13:O16"}
 
     def test_zero_duts_degenerate(self):
-        spec = build_dut_status_spec(make_summary(), TEST_TUPLES, [], sheet_name="DUT Status")[0]
+        spec = build_dut_summary_spec(make_summary(), TEST_TUPLES, [], sheet_name="DUT Summary")[0]
         assert spec["dut_count"] == 0
         assert spec["dut_rows"] == []
         # the matrix's zero-die clamp: last data row pins to DATA_START
@@ -297,23 +297,23 @@ class TestChunkingAndDegenerates:
         assert spec["dut_rows"][0][0] == 1  # the DUT # int names the DUT
 
     def test_untagged_temperature_fallback(self):
-        spec = build_dut_status_spec(
+        spec = build_dut_summary_spec(
             make_summary(tagged=False),
             TEST_TUPLES,
             ORDER,
-            sheet_name="DUT Status",
+            sheet_name="DUT Summary",
             file_temperatures={1: 42.0},
         )[0]
         assert 3 in spec["masked_columns"]  # [42.0, 42.0, 42.0] -> constant
         assert spec["dut_rows"][0][4] == 42.0
-        no_fallback = build_dut_status_spec(
-            make_summary(tagged=False), TEST_TUPLES, ORDER, sheet_name="DUT Status"
+        no_fallback = build_dut_summary_spec(
+            make_summary(tagged=False), TEST_TUPLES, ORDER, sheet_name="DUT Summary"
         )[0]
         assert no_fallback["dut_rows"][0][4] == ""  # unresolvable -> blank
         assert 3 in no_fallback["masked_columns"]  # all-blank folds as constant
 
     def test_single_dut_degenerate_caches(self):
-        spec = build_dut_status_spec(make_summary(), TEST_TUPLES, [(1, 0)], sheet_name="DUT Status")[0]
+        spec = build_dut_summary_spec(make_summary(), TEST_TUPLES, [(1, 0)], sheet_name="DUT Summary")[0]
         values = spec["formula_values"]
         assert values[(10, 16)] == ""  # STDEV over one value -> IFERROR blank
         assert values[(11, 16)] == ""
@@ -355,20 +355,20 @@ class TestTotalRow:
             assert cells[blank] == ["", None, None]
 
     def test_total_row_degenerates_and_chunks(self):
-        zero = build_dut_status_spec(make_summary(), TEST_TUPLES, [], sheet_name="DUT Status")[0]
+        zero = build_dut_summary_spec(make_summary(), TEST_TUPLES, [], sheet_name="DUT Summary")[0]
         assert "total_row" not in zero  # zero DUTs: no Total row
-        no_tests = build_dut_status_spec(make_summary(), [], ORDER, sheet_name="DUT Status")[0]
+        no_tests = build_dut_summary_spec(make_summary(), [], ORDER, sheet_name="DUT Summary")[0]
         assert no_tests["total_row"]["row"] == 17  # tests don't gate it
-        chunks = build_dut_status_spec(
+        chunks = build_dut_summary_spec(
             make_summary(),
             [(i, 0, f"T{i}") for i in range(TEST_CHUNK_CAP + 1)],
             ORDER,
-            sheet_name="DUT Status",
+            sheet_name="DUT Summary",
         )
         assert chunks[0]["total_row"] == chunks[1]["total_row"]  # identical on every chunk
 
     def test_total_row_render(self):
-        ws = load_workbook_bytes(rendered())["DUT Status"]
+        ws = load_workbook_bytes(rendered())["DUT Summary"]
         assert ws["A17"].value == '="Total ("&SUBTOTAL(102,A14:A16)&" DUTs)"'
         assert ws["A17"].fill.start_color.rgb.endswith("CBD5E1")  # banner fill
         assert ws["M17"].value == '=IFERROR(SUBTOTAL(109,M14:M16),"")'
@@ -390,14 +390,14 @@ def rendered(spec=None):
         spec = built()[0]
 
     def build(wb, ws_by_name):
-        render_dut_status_sheet(ws_by_name["DUT Status"], spec, ModernTheme(wb))
+        render_dut_summary_sheet(ws_by_name["DUT Summary"], spec, ModernTheme(wb))
 
-    return render_workbook(["DUT Status"], build)
+    return render_workbook(["DUT Summary"], build)
 
 
 class TestRenderer:
     def test_render_layout_and_styles(self):
-        ws = load_workbook_bytes(rendered())["DUT Status"]
+        ws = load_workbook_bytes(rendered())["DUT Summary"]
         # attribute labels live in column O — the last frozen column,
         # adjacent to the test cells they describe (ruling 2026-11-16)
         assert ws["O1"].value == "Test#"
@@ -417,7 +417,7 @@ class TestRenderer:
     def test_hidden_columns_keep_values(self):
         # Review Focus: hidden columns keep their written values — only the
         # dropdown is gone; a user who unhides can still read/filter them
-        ws = load_workbook_bytes(rendered())["DUT Status"]
+        ws = load_workbook_bytes(rendered())["DUT Summary"]
         for letter in ("B", "H", "K", "L", "N"):
             assert col_dim(ws, letter).hidden is True, letter
         assert ws["B14"].value == 1
@@ -426,7 +426,7 @@ class TestRenderer:
         assert ws["S13"].value == "flags (do not edit)"
 
     def test_transposed_cf_rules(self):
-        ws = load_workbook_bytes(rendered())["DUT Status"]
+        ws = load_workbook_bytes(rendered())["DUT Summary"]
         rules = cf_block(ws, "P14:Q16")
         assert [r.formula[0] for r in rules] == [
             'P14=""',
@@ -457,7 +457,7 @@ class TestRenderer:
         book = rendered()
         xml = read_xml(book, "xl/worksheets/sheet1.xml")
         assert 'autoFilter ref="A13:Q16"' in xml
-        ws = load_workbook_bytes(book)["DUT Status"]
+        ws = load_workbook_bytes(book)["DUT Summary"]
         assert ws.freeze_panes == "P14"
         assert ws.print_title_rows == "$1:$13"
         assert ws.sheet_properties.tabColor.rgb.endswith("1E40AF")
@@ -465,7 +465,7 @@ class TestRenderer:
     def test_column_widths(self):
         # xlsxwriter stores width + ~0.71 (max-digit-width compensation);
         # assert within that tolerance
-        ws = load_workbook_bytes(rendered())["DUT Status"]
+        ws = load_workbook_bytes(rendered())["DUT Summary"]
         assert col_dim(ws, "A").width == pytest.approx(8, abs=0.75)
         assert col_dim(ws, "B").width == pytest.approx(9, abs=0.75)
         assert col_dim(ws, "C").width == pytest.approx(18, abs=0.75)
@@ -473,9 +473,9 @@ class TestRenderer:
         assert col_dim(ws, "P").width == pytest.approx(8, abs=0.75)
 
     def test_render_zero_tests_smoke(self):
-        spec = build_dut_status_spec(make_summary(), [], ORDER, sheet_name="DUT Status")[0]
+        spec = build_dut_summary_spec(make_summary(), [], ORDER, sheet_name="DUT Summary")[0]
         book = rendered(spec)
-        ws = load_workbook_bytes(book)["DUT Status"]
+        ws = load_workbook_bytes(book)["DUT Summary"]
         assert ws["A13"].value == "DUT #"
         assert ws["O13"].value == "DUT Flag"
         xml = read_xml(book, "xl/worksheets/sheet1.xml")

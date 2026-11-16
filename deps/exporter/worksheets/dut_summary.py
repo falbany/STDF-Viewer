@@ -1,6 +1,6 @@
 """
 #
-# dut_status.py - exporter package - STDF Viewer
+# dut_summary.py - exporter package - STDF Viewer
 #
 # Author: falbany (fork)
 # Created Date: November 16th 2026
@@ -23,12 +23,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-DUT Status spec builder: the DUT Summary matrix transposed.
+DUT Summary spec builder: one row per DUT — the Test Summary matrix
+transposed.
 
 One row per DUT (the global DUT # down column A restores display order
 after a sort/filter), the 14 metadata fields as frozen leftmost columns
 (B..O), the tests appended right (P..), AutoFilter on the frozen columns.
-Complement, not replacement: the DUT Summary matrix and all its waves stay
+Complement, not replacement: the Test Summary matrix and all its waves stay
 untouched — the per-field helpers are imported one-way from test_summary.py
 (values, mask policy and fail logic are shared, never re-implemented).
 
@@ -65,7 +66,8 @@ from deps.exporter.worksheets.test_summary import (
     _metadata_cell,
     _resolve_test,
 )
-from deps.exporter.writer import render_dut_status_sheet
+from deps.exporter.writer import render_dut_summary_sheet
+from deps.uic_stdExporter import ReportSelection
 
 # Layout, transposed from the matrix (rows computed from the block lengths,
 # never hard-coded): the attribute block (the transposed BASE_HEADERS) on
@@ -213,7 +215,7 @@ def _test_column(summaryTable, test, offset, order, last_data_row, flag_col_offs
     return die_cells, mirror_cells, static, formulas, cache_entries, ("0" if test["is_ftr"] else SCIENTIFIC_FORMAT)
 
 
-def build_dut_status_spec(
+def build_dut_summary_spec(
     summaryTable,
     testTuples,
     order,
@@ -221,7 +223,7 @@ def build_dut_status_spec(
     tr=lambda s: s,
     file_temperatures=None,
 ):
-    """Build one spec dict per test chunk of the DUT Status sheet.
+    """Build one spec dict per test chunk of the DUT Summary sheet.
 
     `summaryTable` is the classic protocol dict (Data/TestInfo/dut2ind/dutInfo)
     from `waitForDutSummary`; `order` is the `(fid, dutIndex)` display order;
@@ -426,36 +428,43 @@ def _total_row_cells(meta_columns, dut_count, last_data_row, tr):
     return cells
 
 
-class DUTStatusMixin(ReportHost):
-    """DUT Status worksheet writer: the transposed complement sheet."""
+class DUTSummaryMixin(ReportHost):
+    """DUT Summary worksheet writer: the transposed complement sheet."""
 
-    def writeDUT_Status(self, summaryTable, testTuples, order, dut_ids, file_temperatures):
-        """Every DUT Status chunk sheet: built from the context writeDUT_Summary
-        already holds (approach A — zero extra fetches; re-measure pruning and
-        supersede ranks are inherited by position), rendered, and joined to
-        `_dut_sheet_block` so the close-time reorder keeps the DUT block
-        adjacent.
+    def writeDUT_Summary(self):
+        """Every DUT Summary chunk sheet: built from the context
+        `_prepare_dut_context` stored (fetch-once at generator level; re-measure
+        pruning and supersede ranks are inherited through the shared pruned
+        summaryTable), rendered, and joined to `_dut_sheet_block` so the
+        close-time reorder keeps the DUT block adjacent.
 
-        `dut_ids` rides along for the future "DUT #n" naming wave — the
-        DUT # int column (1..N) names blank-ID DUTs today."""
-        del dut_ids
+        Chunk 0 renders on the sheet the creation loop already made (the
+        matrix pattern); chunks 1+ get their own sheets. The DUT # int
+        column (1..N) names blank-ID DUTs today — a future "DUT #n" naming
+        wave would consume `_dut_ctx_dut_ids`."""
+        DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
+        if DutSheet is None:
+            return
         wb = self._wb
         theme = self._theme
         assert wb is not None and theme is not None
-        specs = build_dut_status_spec(
-            summaryTable,
-            testTuples,
-            order,
-            sheet_name=self.tr("DUT Status"),
+        specs = build_dut_summary_spec(
+            self._dut_ctx_summary,
+            self.testTuples,
+            self._dut_ctx_order,
+            sheet_name=self.tr("DUT Summary"),
             tr=self.tr,
-            file_temperatures=file_temperatures,
+            file_temperatures=self._dut_ctx_temps,
         )
-        for spec in specs:
-            ws = wb.add_worksheet(spec["name"])
-            render_dut_status_sheet(ws, spec, theme)
+        for chunk_index, spec in enumerate(specs):
+            ws = DutSheet if chunk_index == 0 else wb.add_worksheet(spec["name"])
+            render_dut_summary_sheet(ws, spec, theme)
+            # every sheet joins the block here (base included) so the
+            # block order is write order: Test Summary family first, then
+            # this one — temperature splits keep their adjacency
             self._dut_sheet_block.append(ws)
         # one tick per test tuple — the matrix cadence minus the info tick
-        # (no fetches happen here)
-        for _ in testTuples:
+        # (the context fetch's tick is emitted by _prepare_dut_context)
+        for _ in self.testTuples:
             self.loopCount += 1
             self.sendProgress()
