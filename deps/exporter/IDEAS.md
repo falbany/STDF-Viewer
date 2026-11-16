@@ -119,3 +119,41 @@ passes the strict limits.
 `ModernReportGenerator`. Do it AFTER the live-export gates in item 5 —
 regression risk on rendering geometry, covered by the 767-test suite
 plus a visual check.
+
+## 7. Redesign (or drop) the Stacked Wafers ID table — *small, deferred 2026-11-16*
+
+**What.** The stacked sheet's "Stacked Wafers — per-wafer metrics" table
+(`write_stacked_wafer_table`, charts.py) gets rethought. The maintainer's
+ruling: the stacked map's job is to show WHICH wafers are stacked —
+anyone needing per-wafer detail opens that wafer's own sheet. The table
+as it stands (Wafer ID / Bin 1 / Yield with Python-computed static
+values, deferred from the live-Distribution work) carries detail the
+sheet doesn't need and semantics (DUT-level yield) the wafer sheets
+don't agree with.
+
+**Brainstorm seed — what earns a place next to each wafer name.**
+Candidates to weigh, all derivable from data already in hand (each
+fetched payload's grid/info rows — no new fetch round-trip):
+
+- Total failed DUTs of the wafer (Σ of its own dedup grid — the stacked
+  heatmap's per-wafer contribution; matches the sheet's fail-count
+  semantics, unlike DUT-level yield)
+- Fail coordinates (dies failing ≥1 time in that wafer)
+- Probed dies (its grid size — how much of the stack that wafer covers)
+- Files contributing / measurement date (which run stacked it)
+- Drop entirely and let the sheet name the wafers only.
+
+**Open.** Whether the table stays a table at all vs. a compact per-wafer
+legend block; interaction with idea 2 (per-wafer yield chart — moot if
+Yield leaves the table); if a per-wafer number survives, whether it
+goes live-formula (cross-sheet refs to each wafer sheet, approach A of
+the 2026-11-16 Distribution spec) or static.
+
+## 8. Live Distribution formulas in the wafer tables — *small* (→ issue, 2026-11-16)
+
+The Soft Bins tables (per-wafer + merged sheets) and the Fail Map Count
+table (stacked sheet) get Excel-formula Distribution columns
+(`=Count/Total`, Total row `=SUM`), matching the live-COUNTIF Count
+columns they sit beside. Spec'd as
+`docs/superpowers/specs/2026-11-16-wafer-table-distribution-formulas-design.md`;
+the Stacked Wafers table's Yield column is deferred to item 7.
