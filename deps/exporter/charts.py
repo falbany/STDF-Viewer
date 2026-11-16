@@ -693,7 +693,9 @@ def write_bin_table(
     ``=COUNTIF(range, value-cell)`` formulas and the Total a
     ``=SUM(count cells)`` (cached results written alongside, per the
     xlsxwriter-migration convention), so the table recalculates when the
-    user edits die values. Default None keeps the static Bin-sheet
+    user edits die values. The Distribution data cells follow (issue #8):
+    ``=IFERROR(count/total)`` against the Total row's SUM cell; the
+    default None keeps the static Bin-sheet tables byte-identical. Default None keeps the static Bin-sheet
     tables byte-identical.
 
     ``headers`` (2026-11-14): overrides the column headers — the stacked
@@ -760,6 +762,7 @@ def write_bin_table(
             ws.write(row0, first0 + 1, int(bin_num), value_fmt)
         else:
             ws.write(row0, first0 + 1, int(bin_num), body_fmt)
+        count_letter = xlutil.xl_col_to_name(first0 + 2)
         if count_map_range:
             # live count: COUNTIF over the die map, keyed on this row's
             # own Value cell (first0+1) — recalculates on die edits
@@ -774,8 +777,24 @@ def write_bin_table(
         else:
             ws.write(row0, first0 + 2, int(count), body_fmt)
         note_width(ws, first0 + 3, str(count))
-        ws.write(row0, last0, count / total if total else 0.0, pct_fmt)
-        note_width(ws, last_col, f"{count / total if total else 0.0:.2%}")
+        # Distribution data cells (issue #8): live tables (count_map_range)
+        # write =IFERROR(Count/Total) against the Total row's SUM cell —
+        # recalculates on die edits (IFERROR guards a map blanked to 0
+        # count, where the static path showed 0.0); the static path keeps
+        # the plain-value fraction, byte-identical. Cached fraction rides.
+        dist_cached = count / total if total else 0.0
+        if count_map_range:
+            total_row0 = first_data_row + len(bins)  # Total row, 1-based
+            ws.write_formula(
+                row0,
+                last0,
+                f"=IFERROR({count_letter}{row0 + 1}/${count_letter}${total_row0},0)",
+                pct_fmt,
+                dist_cached,
+            )
+        else:
+            ws.write(row0, last0, dist_cached, pct_fmt)
+        note_width(ws, last_col, f"{dist_cached:.2%}")
 
     # solid blue data bar with border in the Distribution cells — data rows
     # only (Total outside)

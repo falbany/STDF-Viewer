@@ -1320,6 +1320,19 @@ class TestWriteWaferMapBlock:
         assert data_only["C17"].value == 1
         assert data_only["C18"].value == 1
 
+    def test_sw_table_distribution_cells_are_live_formulas(self, env):
+        # issue #8: Distribution data cells = =IFERROR(Count/Total) against
+        # the Total row's SUM cell — recalculates on die edits, the cached
+        # fraction rides the formula; the data-bar CF format is untouched
+        self.written(env)
+        reloaded = env["reload"]()
+        data_only = env.reload_data_only()
+        assert reloaded["D17"].value == "=IFERROR(C17/$C$19,0)"
+        assert reloaded["D18"].value == "=IFERROR(C18/$C$19,0)"
+        assert data_only["D17"].value == pytest.approx(0.6)
+        assert data_only["D18"].value == pytest.approx(0.4)
+        assert reloaded["D17"].number_format == "0.00%"
+
     def test_kpi_cards_carry_grid_values_matching_the_sw_table(self, env):
         # 2026-11-12 user ruling: the cards and the SW table share ONE
         # source (the deduplicated grid) — MAP's duplicate (0,0) counts
