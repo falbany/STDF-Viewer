@@ -114,7 +114,9 @@ or data change of any kind.**
   "DUT Status attribute block" → "DUT Summary attribute block"; the
   "DUT Summary's …" references describing the matrix → "Test Summary's".
 - `generator.py`, `dedup.py`, `writer.py`, `file_info.py`,
-  `test_statistics.py` docstrings/comments: same rule.
+  `test_statistics.py`, `contract.py` docstrings/comments: same rule
+  (contract.py's `writeDUT_Status` / context-method annotations follow
+  the renames and the generator-level context hoist).
 - Both `AGENTS.md` files: module tables (`worksheets/AGENTS.md:18-19`),
   prose references (exporter/AGENTS.md:43-55, 65, 116-117), and the
   writeDUT_Status entry signature.
@@ -181,6 +183,24 @@ or data change of any kind.**
   case has no "base" concept — builder verifies the reorder is a no-op
   or sane there (my call on the exact mechanism).
 
+### Generator-level context: fetch once, share (builder check → my call)
+
+Today the matrix writer performs the heavy fetches the per-DUT sheet
+rides on: the `waitForDutSummary` handshake (the heaviest GUI-thread
+round-trip in the export), `_order_and_ids`, and the
+`waitForTableData(isFileInfo=True)` temperature fetch. Removing the
+ride-along must not duplicate those fetches.
+
+- **Hoist to generator level, fetch-once semantics**: the context
+  (summaryTable via `waitForDutSummary`, order/ids, temperatures) is
+  resolved once, before either writer runs, when at least one of the two
+  sheets is selected. Both-selected costs exactly one round-trip per
+  fetch — same as today. Each writer receives the shared context
+  instead of producing it. This generalizes the drop-set hoist below
+  into a single "DUT-block context" preparation step.
+- The `contract.py` annotations for the context methods follow this
+  restructuring (builder-flagged; mechanical).
+
 ### Re-measure drop-set decoupling
 
 Today the remeasure drop-set is resolved inside the matrix writer and
@@ -188,12 +208,25 @@ Test Statistics consumes the stored result ("honors the same kept-DUT
 set as the DUT Summary", test_statistics.py:400-401). With the two
 sheets independently selectable:
 
-- Drop-set resolution hoists to generator level: computed once when at
-  least one consumer needs it (Test Summary sheet, DUT Summary sheet, or
-  Test Statistics with hide_remeasured on), instead of as a side effect
-  of writing the matrix.
+- Drop-set resolution joins the generator-level context step: computed
+  once when at least one consumer needs it (Test Summary sheet, DUT
+  Summary sheet, or Test Statistics with hide_remeasured on), instead
+  of as a side effect of writing the matrix.
 - Visible behavior unchanged for every combination that exists today;
   the only new capability is either sheet without the other.
+
+### FTR cache in new combos (builder check → my call)
+
+`_ftr_tests` (filled only by the matrix writer today, contract.py:47)
+feeds Test Statistics' FTR pseudo-limits
+(`apply_ftr_pseudo_limits`, with a Pattern-Name fallback when empty).
+Ruling: **the fill joins the generator-level context step** — whenever
+Test Statistics is selected, the cache is populated from the already-
+fetched summaryTable (a trivial in-memory scan), regardless of which of
+the two sheets is checked. Existing combos are unchanged; the new
+per-DUT-only + Stat combo keeps full pseudo-limits instead of silently
+degrading to name-based detection. This matches the project's data-
+fidelity priority (the pseudo-limit work was a dedicated feature wave).
 
 ## Upstream hooks (complete list — nothing else upstream may change)
 
@@ -204,6 +237,18 @@ sheets independently selectable:
    the HideRemeasured/SplitTemperature pattern + the selectedContents
    append (additive lines only).
 4. `deps/SharedSrc.py`: one settings field with alias (fork-precedented).
+5. **Progress denominator** (`uic_stdExporter.py:1286`, user ruling):
+   the `totalLoopCnt` DUT branch becomes wrong for 3 of the 4 new
+   selection combos (Test-Summary-only undercounts, DUT-Summary-only
+   stalls short of 100%, both overshoot). Fix: a modern-conditional
+   branch next to the existing DUT line — guarded by Modern Report ON
+   **and** `TestSummary_cb` checked, so a disabled-but-checked checkbox
+   during a classic export can't inflate the count. Tick cadence: the
+   standalone per-DUT writer emits its own `1 + N` ticks (info tick +
+   one per test), matching the matrix cadence; the both-selected total
+   is `1 + 2N`. The fork already edits this exact block (generator-class
+   selection, :1298), so the edit is precedented. Classic-only path
+   stays byte-identical.
 
 ## Commit strategy
 
@@ -221,8 +266,15 @@ full suite + lint gates:
 
 Rationale: renaming out first, then in, keeps git rename detection and
 `git log --follow` sane across the swap; the GUI lands with the commit
-that redefines `ReportSelection.DUT`'s modern meaning, so no commit has
-a checkbox pointing at the wrong sheet.
+that redefines `ReportSelection.DUT`'s modern meaning.
+
+**Commit-1 transient (builder check → my call):** the anti-goal
+"label and tab always agree" applies to the final pushed state, not to
+each intermediate commit. At commit 1 the matrix writes "Test Summary"
+tabs while the GUI still says "DUT Summary" — a deliberate mid-swap
+tree, green on tests/gates but not shippable. Moving the tab literals
+or the GUI to commit 1 would produce a worse transient (a checkbox with
+no sheet at all behind its new meaning), so the two-commit order stands.
 
 ## What's left to the builder
 
