@@ -1,4 +1,4 @@
-"""Tests for deps/exporter/worksheets/dut_summary.py: DUT Summary spec builder."""
+"""Tests for deps/exporter/worksheets/test_summary.py: Test Summary spec builder."""
 
 import pytest
 
@@ -14,11 +14,11 @@ from deps.exporter.helpers import (
     resolve_dut_temperature,
     sanitize_cell,
 )
-from deps.exporter.worksheets.dut_summary import (
+from deps.exporter.worksheets.test_summary import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
     METADATA_ROWS,
-    build_dut_summary_spec,
+    build_test_summary_spec,
     group_order_by_temperature,
 )
 
@@ -201,7 +201,7 @@ def base_tests():
 def build(
     tests,
     duts,
-    sheet_name="DUT Summary",
+    sheet_name="Test Summary",
     die_cap=DUT_CHUNK_CAP,
     tr=None,
     file_temperatures=None,
@@ -209,7 +209,7 @@ def build(
     summary = make_summary(tests, duts)
     test_tuples = [(t["num"], 0, t["name"]) for t in tests]
     if tr is None:
-        return build_dut_summary_spec(
+        return build_test_summary_spec(
             summary,
             test_tuples,
             make_order(duts),
@@ -218,7 +218,7 @@ def build(
             die_cap,
             file_temperatures=file_temperatures,
         )
-    return build_dut_summary_spec(
+    return build_test_summary_spec(
         summary,
         test_tuples,
         make_order(duts),
@@ -793,7 +793,7 @@ class TestStructure:
     def test_name_and_banner_labels(self):
         # banner row 1: base labels + plain numeric DUT indices (fix wave 2)
         spec = self.spec()
-        assert spec["name"] == "DUT Summary"
+        assert spec["name"] == "Test Summary"
         assert spec["headers"] == BASE_HEADERS + [1, 2, 3, "", "Trend"]
         assert all(isinstance(v, int) for v in spec["headers"][12:15])
 
@@ -981,7 +981,7 @@ class TestColumnCapBoundaries:
     def build_ids_spec(dut_ids, test_tuples=()):
         """Minimal spec build: empty summaryTable + N synthetic DUT IDs."""
         summary = {"Data": {}, "TestInfo": {}, "dut2ind": {}, "dutInfo": {}}
-        return build_dut_summary_spec(summary, test_tuples, [], dut_ids, "DUT Summary")
+        return build_test_summary_spec(summary, test_tuples, [], dut_ids, "Test Summary")
 
     def test_spec_at_true_cap_fits_excel_columns(self):
         # 8184 dies with the default die_cap: exactly one chunk whose last
@@ -1009,7 +1009,7 @@ class TestColumnCapBoundaries:
             DUT_CHUNK_CAP,
             16301 - DUT_CHUNK_CAP,
         ]
-        assert [s["name"] for s in specs] == ["DUT Summary", "DUT Summary (2)"]
+        assert [s["name"] for s in specs] == ["Test Summary", "Test Summary (2)"]
         for spec in specs:
             die_count = len(spec["die_columns"])
             mirror_last = (
@@ -1250,7 +1250,7 @@ class TestParamPrecedence:
             0,
             "",
         ]  # value, blank die, spacer, Trend, spacer, mirror flags
-        assert spec_names(build(tests, duts)) == ["DUT Summary"]
+        assert spec_names(build(tests, duts)) == ["Test Summary"]
 
 
 def spec_names(specs):
@@ -1451,14 +1451,14 @@ class TestTrendChunking:
             tests, [(1, i, make_dut_info(fid=1, part_id=f"D{i}")) for i in range(12)]
         )
         test_tuples = [(10, 0, "0_T/v")]
-        return build_dut_summary_spec(
+        return build_test_summary_spec(
             summary,
             test_tuples,
             make_order(
                 [(1, i, make_dut_info(fid=1, part_id=f"D{i}")) for i in range(12)]
             ),
             [f"D{i}" for i in range(12)],
-            "DUT Summary",
+            "Test Summary",
             die_cap=5,
         )
 

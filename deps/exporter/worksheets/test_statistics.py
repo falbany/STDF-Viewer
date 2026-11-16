@@ -48,7 +48,7 @@ from deps.exporter.helpers import (
 )
 from deps.exporter.sheets import plain_table_spec
 from deps.exporter.theme import TAB_COLOR_HEXES
-from deps.exporter.worksheets.dut_summary import FTR_SPEC_MAX, FTR_SPEC_MIN
+from deps.exporter.worksheets.test_summary import FTR_SPEC_MAX, FTR_SPEC_MIN
 from deps.exporter.writer import render_plain_table, write_plain_row
 from deps.SharedSrc import getSetting, tab
 from deps.uic_stdExporter import ReportSelection
@@ -72,12 +72,12 @@ VHEADER_RE = re.compile(
 )
 
 # SpecMin/SpecMax stylization on the Test Statistics sheet (B4), mirroring
-# the DUT Summary E/F columns.
+# the Test Summary E/F columns.
 STAT_SPEC_FORMAT = "0.00E+00"
 STAT_SPEC_FILL_HEX = "FFF3CD"
 
 # Live Cpk display format (fifth wave 2026-11-10, controller ruling): the
-# formula results render with 2 decimals like the DUT Summary's Cpk column.
+# formula results render with 2 decimals like the Test Summary's Cpk column.
 STAT_CPK_FORMAT = "0.00"
 
 # Fixed width for the Test Statistics value columns G..Q (sixth wave
@@ -303,7 +303,7 @@ def stat_row_is_ftr(transformed_row, header_info, ftr_tests) -> bool:
     """FTR detection for one transformed Test Statistics row (fourth wave).
 
     PRIMARY: ``(test_num, full test name)`` sits in the cache that
-    ``writeDUT_Summary`` builds from the summaryTable's SUB_CODE — needs a
+    ``writeTest_Summary`` builds from the summaryTable's SUB_CODE — needs a
     parsed VHeader (the row's leading int). FALLBACK (covers Stat-selected-
     without-DUT runs, where the cache stays empty): the transformed header
     carries a "Pattern Name" column (normalized match) and the row's cell
@@ -331,7 +331,7 @@ def stat_row_is_ftr(transformed_row, header_info, ftr_tests) -> bool:
 
 
 def apply_ftr_pseudo_limits(stat_row, header_info) -> None:
-    """Overwrite the row's SpecMin/SpecMax cells in place with the DUT
+    """Overwrite the row's SpecMin/SpecMax cells in place with the Test
     Summary's synthetic FTR floats (-0.999999 / 0.999999, matrix.FTR_SPEC_MIN/
     FTR_SPEC_MAX). No-op when the limit anchors are missing (translated UI)
     or a degraded row is shorter than the spec columns."""
@@ -398,7 +398,7 @@ class TestStatisticsMixin(ReportHost):
         assert theme is not None
 
         # re-measure filter (§7.2): Test Statistics honors the same kept-DUT
-        # set as the DUT Summary — the stored drop-set when the DUT sheet
+        # set as the Test Summary — the stored drop-set when the DUT sheet
         # ran, a light dutInfo-only fetch otherwise (stat-only exports)
         kargs: dict = {"testTuples": testTuples}
         if getSetting().gen.hide_remeasured:
@@ -470,7 +470,7 @@ class TestStatisticsMixin(ReportHost):
                 apply_ftr_pseudo_limits(stat_row, header_info)
             # live Cpk formula (fifth wave): AFTER the pseudo-limits, so FTR
             # rows compute from the ±0.999999 synthetic limits exactly like
-            # the DUT Summary; row_number = 2 + data_row_index (header row 1).
+            # the Test Summary; row_number = 2 + data_row_index (header row 1).
             # Ninth wave: the Cp formula lands on the placeholder cell the
             # row transform inserted, reading σ from the numeric St. Dev.
             # column (same limits feed both ratios).

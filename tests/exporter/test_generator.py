@@ -1457,7 +1457,7 @@ class TestStatRowIsFtr:
 
 
 class TestApplyFtrPseudoLimits:
-    def test_replaces_spec_cells_with_dut_summary_floats(self):
+    def test_replaces_spec_cells_with_test_summary_floats(self):
         info = transform_stat_header([""] + STAT_HHEADER)
         row = transform_stat_row(
             ["12 / Head1 / All Sites", "2_F/scan", "P/F", "N/A", "N/A", "0", "∞"], info
@@ -1574,7 +1574,7 @@ class TestStatisticsSheet:
         # sibling numeric columns keep General
         assert ws["P2"].number_format == "General"
 
-    def test_spec_columns_stylized_like_dut_summary(self, generated):
+    def test_spec_columns_stylized_like_test_summary(self, generated):
         _, wb, _, _, _ = generated
         ws = wb["Test Statistics"]
         # scientific format + static neutral yellow on the two renamed

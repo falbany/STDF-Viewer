@@ -23,13 +23,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-DUT Summary spec builder: metadata block, live formulas, hybrid fail logic.
+Test Summary spec builder: metadata block, live formulas, hybrid fail logic.
 
 Pure spec construction (strings/dicts/numbers only) — the xlsxwriter renderer
 consumes the spec dicts produced here.
 
-Worksheets split (2026-11-12): this file also hosts the DUTSummaryMixin
-writer (writeDUT_Summary + its order/drop helpers), moved verbatim from
+Worksheets split (2026-11-12): this file also hosts the TestSummaryMixin
+writer (writeTest_Summary + its order/drop helpers), moved verbatim from
 generator.py.
 """
 
@@ -76,7 +76,7 @@ from deps.uic_stdExporter import ReportSelection
 BANNER_ROW = 1
 METADATA_START = 2
 
-# Fixed A..L columns of the DUT Summary sheet (2026-11-10: Test# permuted
+# Fixed A..L columns of the Test Summary sheet (2026-11-10: Test# permuted
 # from C to A; only A/B/C move, so every formula's column letters stay put.
 # Third wave renames: "Test" -> "Test Name" (consistency with the Test
 # Statistics sheet), "STD" -> "St. Dev.", "FAILS" -> "Fails". Ninth wave:
@@ -306,7 +306,7 @@ _XY_INT_RE = re.compile(r"-?\d+")
 _HEAD_SITE_RE = re.compile(r"Head\s+(-?\d+)\s+-\s+Site\s+(-?\d+)")
 
 
-def build_dut_summary_spec(
+def build_test_summary_spec(
     summaryTable,
     testTuples,
     order,
@@ -316,7 +316,7 @@ def build_dut_summary_spec(
     tr=lambda s: s,
     file_temperatures=None,
 ):
-    """Build one spec dict per die chunk of the DUT Summary sheet.
+    """Build one spec dict per die chunk of the Test Summary sheet.
 
     `summaryTable` is the classic protocol dict (Data/TestInfo/dut2ind/dutInfo)
     from `waitForDutSummary`; `order` is the `(fid, dutIndex)` display order;
@@ -929,13 +929,13 @@ def order_dut_block(worksheets: list, block: list) -> list:
     return without_derived[: base_at + 1] + derived + without_derived[base_at + 1 :]
 
 
-class DUTSummaryMixin(ReportHost):
-    """DUT Summary worksheet writer (moved verbatim from generator.py)."""
+class TestSummaryMixin(ReportHost):
+    """Test Summary worksheet writer (moved verbatim from generator.py)."""
 
     def _resolve_remeasure_drops(self) -> set:
         """The filter's drop-set, either direction of the sheet selection.
 
-        writeDUT_Summary stores its drop-set before writeStatistic runs
+        writeTest_Summary stores its drop-set before writeStatistic runs
         (DUT sheet selected → reuse it; an empty set means "ran, nothing
         to drop" — never refetch). None means the DUT sheet did not
         render: the light dutInfo-only fetch answers, and an empty fetch
@@ -951,7 +951,7 @@ class DUTSummaryMixin(ReportHost):
 
     def _order_and_ids(self, summaryTable, order_filter=None):
         """The classic `(fid, dutIndex)` display order and its per-column
-        part IDs (moved verbatim out of writeDUT_Summary).
+        part IDs (moved verbatim out of writeTest_Summary).
 
         `order_filter` (temperature split §7.4) keeps only the listed
         pairs — None keeps everything. The "DUT #n" fallback numbers
@@ -972,8 +972,8 @@ class DUTSummaryMixin(ReportHost):
             dut_ids.append(part_id if part_id else f"DUT #{i + 1}")
         return order, dut_ids
 
-    def writeDUT_Summary(self):
-        """The DUT Summary sheet: the die-part matrix (spec-built), plus
+    def writeTest_Summary(self):
+        """The Test Summary sheet: the die-part matrix (spec-built), plus
         the FTR cache fill, the re-measure drop-set hand-off (§7.2), the
         die-chunk overflow sheets and the temperature splits (§7.4)."""
         DutSheet = self.sheetDict.get(ReportSelection.DUT, None)
@@ -1036,19 +1036,19 @@ class DUTSummaryMixin(ReportHost):
             return
         file_temperatures = file_temperatures_from_file_info(file_info_rows, self.selectedFiles)
 
-        specs = build_dut_summary_spec(
+        specs = build_test_summary_spec(
             summaryTable,
             self.testTuples,
             order,
             dut_ids,
-            sheet_name=self.tr("DUT Summary"),
+            sheet_name=self.tr("Test Summary"),
             # numeric cell formats are hardcoded scientific in the spec
             # builder (2026-11-10) — no settings-derived float format anymore
             tr=self.tr,
             file_temperatures=file_temperatures,
         )
 
-        # chunk 0 renders on the existing DUT Summary sheet; chunks 1+
+        # chunk 0 renders on the existing Test Summary sheet; chunks 1+
         # (die overflow beyond the Excel column cap) get their own sheets —
         # spec names already carry the " (n)" suffixes. Column widths are
         # pinned inside render_matrix_sheet (A=8, B=30, C..L=8, dies=8).
@@ -1076,12 +1076,12 @@ class DUTSummaryMixin(ReportHost):
                     pairs = set(groups[temp])
                     subset = prune_summary_view(summaryTable, set(order) - pairs)
                     sub_order, sub_ids = self._order_and_ids(subset, order_filter=pairs)
-                    split_specs = build_dut_summary_spec(
+                    split_specs = build_test_summary_spec(
                         subset,
                         self.testTuples,
                         sub_order,
                         sub_ids,
-                        sheet_name=f"{self.tr('DUT Summary')} - T{format_temperature_label(temp)}°C",
+                        sheet_name=f"{self.tr('Test Summary')} - T{format_temperature_label(temp)}°C",
                         tr=self.tr,
                         file_temperatures=file_temperatures,
                     )

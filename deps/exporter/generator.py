@@ -25,7 +25,7 @@
 # Adapted from uic_stdExporter.py by noonchen (Copyright (c) 2020 noonchen)
 #
 
-Modern xlsxwriter report generator: plain, DUT Summary and chart sheets.
+Modern xlsxwriter report generator: plain, Test Summary and chart sheets.
 
 ``ModernReportGenerator`` subclasses the classic ``reportGenerator`` from
 ``deps.uic_stdExporter`` and keeps its threading contract verbatim — the
@@ -50,7 +50,7 @@ is one 250 pt row with 8.5 cm donuts cell-anchored A{row} / D{row}.
 
 Instance state (``self._wb``, ``self._theme``, ``self._row``) replaces the
 classic module-level ``sv`` statics, so several generators can coexist.
-The DUT Summary matrix is rendered through the Task 4/5 spec builder and
+The Test Summary matrix is rendered through the Task 4/5 spec builder and
 matrix renderer (die chunks beyond the Excel column cap get their own
 "(n)" sheets); the chart sheets (bin, wafer, trend, histogram) embed the
 GUI-provided PNGs and write their stat rows with the themed body style,
@@ -74,11 +74,11 @@ from deps.exporter.charts import complete_chart_flags
 from deps.exporter.theme import ModernTheme
 from deps.exporter.worksheets.bin_chart import BinChartMixin
 from deps.exporter.worksheets.dut_status import DUTStatusMixin
-from deps.exporter.worksheets.dut_summary import DUTSummaryMixin, order_dut_block
 from deps.exporter.worksheets.file_info import FileInfoMixin
 from deps.exporter.worksheets.gdr_dtr import GdrDtrMixin
 from deps.exporter.worksheets.histogram import HistogramMixin
 from deps.exporter.worksheets.test_statistics import TestStatisticsMixin
+from deps.exporter.worksheets.test_summary import TestSummaryMixin, order_dut_block
 from deps.exporter.worksheets.trend_chart import TrendChartMixin
 from deps.exporter.worksheets.wafer_map import WaferMapMixin
 from deps.exporter.writer import (
@@ -95,7 +95,7 @@ from deps.uic_stdExporter import (
 
 # auto-fit column width = max content length * 1.1, capped (classic uses the
 # same *1.1 factor via xlsxwriter set_column; the cap is the modern bound).
-# Plain sheets only — the DUT Summary widths are pinned by the renderer.
+# Plain sheets only — the Test Summary widths are pinned by the renderer.
 AUTOFIT_FACTOR = 1.1
 AUTOFIT_CAP = 60
 
@@ -103,7 +103,7 @@ AUTOFIT_CAP = 60
 class ModernReportGenerator(
     FileInfoMixin,
     GdrDtrMixin,
-    DUTSummaryMixin,
+    TestSummaryMixin,
     DUTStatusMixin,
     TestStatisticsMixin,
     BinChartMixin,
@@ -186,7 +186,7 @@ class ModernReportGenerator(
         self._remeasure_drops: set | None = None
         # supersede rank map (2026-11-13 wafer merge): None until the
         # first _fid_ranks() call — ONE waitForFileDates round-trip per
-        # export, shared by the DUT Summary dedup and the wafer merge
+        # export, shared by the Test Summary dedup and the wafer merge
         self._fid_ranks_cache: dict | None = None
         # the DUT-derived sheet block (base + chunk overflow + temperature
         # splits, base first) for the close-time tab-order reorder (§7.4)
@@ -214,7 +214,10 @@ class ModernReportGenerator(
                 if cont == ReportSelection.FileInfo:
                     sheetName = self.tr("File Info")
                 elif cont == ReportSelection.DUT:
-                    sheetName = self.tr("DUT Summary")
+                    # fork(falbany): commit-1 transient — ReportSelection.DUT still
+                    # selects this sheet; the next commit adds
+                    # ReportSelection.TestSummary and repurposes DUT.
+                    sheetName = self.tr("Test Summary")
                 elif cont == ReportSelection.GDR_DTR:
                     sheetName = self.tr("GDR & DTR Summary")
                 elif cont == ReportSelection.Stat:
@@ -246,8 +249,8 @@ class ModernReportGenerator(
             self.writeGDR_DTR()
             if self.forceQuit:
                 return
-            # dut summary
-            self.writeDUT_Summary()
+            # test summary
+            self.writeTest_Summary()
             if self.forceQuit:
                 return
 

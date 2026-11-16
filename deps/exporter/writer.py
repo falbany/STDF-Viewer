@@ -23,9 +23,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-xlsxwriter renderer: DUT Summary matrix sheets and plain tables.
+xlsxwriter renderer: Test Summary matrix sheets and plain tables.
 
-Pure rendering of the spec dicts built by matrix.py — every data decision
+Pure rendering of the spec dicts built by test_summary.py — every data decision
 was made upstream. This module writes values (formulas verbatim with their
 cached results, everything else through ``sanitize_cell``), styles (through
 the theme's workbook-scoped format factory — formats are immutable, so
@@ -45,7 +45,7 @@ from deps.exporter.theme import (
     NEUTRAL_FILL_HEX,
 )
 
-# Sheet layout, mirroring matrix.py: banner 1, metadata 2.. (block length
+# Sheet layout, mirroring test_summary.py: banner 1, metadata 2.. (block length
 # comes from the spec — the Head-Site split grew it to 14 rows, header 16,
 # data 17+), so the two helpers below derive the rows per spec and can
 # never drift from the spec builder.
@@ -575,7 +575,7 @@ def _set_column_widths(ws, spec):
 
 
 # --------------------------------------------------------------------------
-# DUT Status sheet sections (the DUT Summary matrix transposed — spec dicts
+# DUT Status sheet sections (the Test Summary matrix transposed — spec dicts
 # from worksheets/dut_status.py; this module cannot import that module
 # without a cycle, so every row/column the renderer needs travels in the
 # spec)
@@ -793,7 +793,7 @@ def render_dut_status_sheet(ws, spec: dict, theme) -> None:
 
 
 def render_matrix_sheet(ws, spec: dict, theme) -> None:
-    """Render one DUT Summary spec dict onto ``ws`` (banner, metadata block,
+    """Render one Test Summary spec dict onto ``ws`` (banner, metadata block,
     repeated header, data rows, live conditional formatting, native
     AutoFilter, hidden flag mirrors, Trend sparklines with cached formula
     values, pinned column widths, freeze / gridlines / print / tab / footer
@@ -837,7 +837,7 @@ def render_matrix_sheet(ws, spec: dict, theme) -> None:
     ws.set_tab_color(f"#{DUT_TAB_HEX}")
     # NO set_paper here: the wave-8 ruling gave A4 to the Bin sheet ONLY
     # (extended 2026-11-14: the wafer sheets print A4 landscape too —
-    # _style_wafer_sheet); the DUT Summary keeps fit-to-page with no
+    # _style_wafer_sheet); the Test Summary keeps fit-to-page with no
     # explicit paper size
     ws.fit_to_pages(1, 0)
     header_row0 = _header_row(spec) - 1

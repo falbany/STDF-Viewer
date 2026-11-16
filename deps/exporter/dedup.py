@@ -1,4 +1,4 @@
-"""Re-measure dedup for the Modern exporter's DUT Summary (pure functions).
+"""Re-measure dedup for the Modern exporter's Test Summary (pure functions).
 
 The optional "Hide re-measured DUTs" filter keeps only the latest
 measurement per serial number. All logic lives here — the generator
@@ -87,7 +87,7 @@ def compute_remeasure_drops(
 ) -> set[tuple[int, int]]:
     """`(fid, dutIndex)` pairs the filter drops, over the export selection.
 
-    `dutInfo` is the classic DUT Summary fetch `{fid: {dutIndex: info}}`
+    `dutInfo` is the classic Test Summary fetch `{fid: {dutIndex: info}}`
     (superseded DUTs included). Rules, in (rank(fid), DUTIndex) order:
     (a) any row whose DUT Flag text starts with "Superseded" drops;
     (b) any row with a non-empty Part ID drops when another row with the

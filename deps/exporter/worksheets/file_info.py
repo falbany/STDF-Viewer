@@ -24,7 +24,7 @@
 #
 
 File Info worksheet: numeric metadata rows and the File-Info-table parsers
-feeding the Bin-sheet banner and the DUT Summary temperature fallback.
+feeding the Bin-sheet banner and the Test Summary temperature fallback.
 
 Pure module-level code moved verbatim from generator.py (worksheets split,
 2026-11-12); the FileInfoMixin writer joins this file in the extraction wave.
@@ -59,7 +59,7 @@ YIELD_FORMAT = "0.00%"
 _BANNER_PRODUCT_LABEL = "Product ID"
 _BANNER_SUBLOT_LABEL = "Sublot ID"
 
-# English-only File Info anchor feeding the DUT Summary temperature
+# English-only File Info anchor feeding the Test Summary temperature
 # fallback: the MIR TST_TEMP values ("Test Temperature: " row, one cell
 # per selected file column).
 _FILE_INFO_TEMPERATURE_LABEL = "Test Temperature"
@@ -103,7 +103,7 @@ def file_temperatures_from_file_info(rows: list, fids: list) -> dict:
     per-file value order — the same contract as the "File #n" header).
     Labels match whitespace-normalized with a trailing ":" stripped,
     English-only like the banner anchors — a translated UI (or a missing
-    row) yields all ``None`` so the DUT Summary keeps its blank cells.
+    row) yields all ``None`` so the Test Summary keeps its blank cells.
     Composite multi-subfile cells parse to the first subfile's value.
     """
     values: list = []

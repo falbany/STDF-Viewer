@@ -9,7 +9,7 @@ from deps.exporter.worksheets.dut_status import (
     TEST_CHUNK_CAP,
     build_dut_status_spec,
 )
-from deps.exporter.worksheets.dut_summary import FTR_SPEC_MAX, FTR_SPEC_MIN
+from deps.exporter.worksheets.test_summary import FTR_SPEC_MAX, FTR_SPEC_MIN
 from deps.exporter.writer import render_dut_status_sheet
 from tests.exporter.conftest import load_workbook_bytes, read_xml, render_workbook
 from tests.exporter.test_generator_dut import make_summary

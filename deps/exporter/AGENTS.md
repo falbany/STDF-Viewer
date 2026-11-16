@@ -40,7 +40,7 @@ registry — the generator decides which `write*` mixins run.
 |---|---|
 | `generator.py` | Composition root. Owns the workbook, theme and progress plumbing and the selection state the mixins consume; subclasses the classic exporter and preserves its threading contract. |
 | `contract.py` | `ReportHost` typing-only host contract (PEP 526 annotations, `__slots__ = ()`). **Read first.** |
-| `worksheets/*.py` | One mixin per sheet type — `bin_chart`, `dut_summary`, `file_info`, `gdr_dtr`, `histogram`, `test_statistics`, `trend_chart`, `wafer_map` — each exposing a `write*` entry point. Conventions: [worksheets/AGENTS.md](worksheets/AGENTS.md). |
+| `worksheets/*.py` | One mixin per sheet type — `bin_chart`, `dut_status`, `file_info`, `gdr_dtr`, `histogram`, `test_statistics`, `test_summary`, `trend_chart`, `wafer_map` — each exposing a `write*` entry point. Conventions: [worksheets/AGENTS.md](worksheets/AGENTS.md). |
 | `writer.py` | Pure xlsxwriter renderer: DUT Summary matrix sheets and plain tables, from spec dicts built by the mixins. Writes values (formulas verbatim with their cached results), styles (through the theme's workbook-scoped format factory), conditional formatting, native AutoFilter, hidden mirror columns, sparklines and print setup. Every data decision was made upstream of it. |
 | `sheets.py` | Plain-table spec builder (`plain_table_spec`: headers translated, cells sanitized, generator rows materialized — feeding `writer.render_plain_table`) and scaled image embedding (`insert_report_image`: Pillow probes the PNG size, scale reaches `insert_image`, returns the sheet rows it spans). **Not a sheet picker** — nothing picks sheets here. |
 | `charts.py` | Bin-distribution parsers, the native xlsxwriter donut-chart factory, the structured bin-table renderer and the dashboard KPI cards (headline bands, merged fills via one composed Format). |
@@ -49,10 +49,10 @@ registry — the generator decides which `write*` mixins run.
 | `dedup.py` | The optional "Hide re-measured DUTs" filter: keeps only the latest measurement per serial number, returns a drop-set of `(fid, dutIndex)` pairs. Touches no Rust core and no GUI. |
 | `wafer_merge.py` | With re-measure-hide on, a real WAFER_ID measured in 2+ loaded files gets one extra **merged** worksheet: per-file payloads fused die-by-die, the latest file's result superseding the older ones. |
 
-Rename note: `writer.py`'s docstring says its spec dicts are "built by
-matrix.py" — that is the pre-rename name of `worksheets/dut_summary.py`.
-No `matrix.py` exists; `dut_summary.py` builds them
-(`build_dut_summary_spec` → `writer.render_matrix_sheet`).
+Rename note: the Test Summary module's first name was `matrix.py`
+(records of it survive in writer.py comments and the git history); it is
+now `worksheets/test_summary.py`, which builds the spec dicts
+(`build_test_summary_spec` → `writer.render_matrix_sheet`).
 
 ## First hour
 
@@ -61,8 +61,8 @@ No `matrix.py` exists; `dut_summary.py` builds them
    the bases list *is* the sheet inventory.
 3. Run the tests: they live in `tests/exporter/`, one test file per area
    plus `conftest.py` — the sheet mixins are covered by the
-   `test_generator*.py` integration files and `test_matrix.py`
-   (dut_summary's pre-rename name), not by per-mixin files:
+   `test_generator*.py` integration files and `test_test_summary.py`
+   (the Test Summary module's first name was `matrix.py`), not by per-mixin files:
 
    ```bash
    uv run pytest tests/exporter        # 774 tests collected as of 2026-11-16
@@ -113,8 +113,8 @@ affected areas:
   single cells go through `write()`. The KPI-card merge sites carry a
   guard (commit `2020ec3`); any new merge site needs the same guard.
 - **Cross-mixin couplings exist only by convention.**
-  `test_statistics` calls `dut_summary`'s `_resolve_remeasure_drops`
-  (its route to the shared supersede ranks); `dut_summary` and
+  `test_statistics` calls `test_summary`'s `_resolve_remeasure_drops`
+  (its route to the shared supersede ranks); `test_summary` and
   `wafer_map` call `reportGenerator._fid_ranks` directly. These are real
   calls with no runtime base: they must be declared in `contract.py`
   (annotation-only) or pyright and pylint cannot see them. Any new

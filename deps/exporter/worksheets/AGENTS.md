@@ -16,11 +16,11 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
 |---|---|
 | `bin_chart.py` | `writeBinChart()` |
 | `dut_status.py` | `writeDUT_Status(summaryTable, testTuples, order, dut_ids, file_temperatures)` |
-| `dut_summary.py` | `writeDUT_Summary()` |
 | `file_info.py` | `writeFileInfo()` |
 | `gdr_dtr.py` | `writeGDR_DTR()` |
 | `histogram.py` | `writeHistogram(testTuple, head, site)` |
 | `test_statistics.py` | `writeStatistic(testTuples, heads, sites)` |
+| `test_summary.py` | `writeTest_Summary()` |
 | `trend_chart.py` | `writeTrendPlot(testTuple, head, site)` |
 | `wafer_map.py` | `writeWaferMap()` |
 
@@ -48,7 +48,7 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
   (e.g. `=SUM`, `=COUNTIF`), so they recalculate when the user edits the
   workbook. Formulas are written in English syntax (see parent ruling).
 - **Specs before pixels.** The DUT Summary sheet is built as a spec dict
-  (`dut_summary.build_dut_summary_spec`) rendered by
+  (`test_summary.build_test_summary_spec`) rendered by
   `writer.render_matrix_sheet`; plain tables go through
   `sheets.plain_table_spec` → `writer.render_plain_table`. Follow that
   split: mixins decide data, `writer.py` renders.
@@ -65,8 +65,8 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
   `write()`. The KPI-card sites in `charts.py` carry the guard (commit
   `2020ec3`); new merge sites need one too.
 - **Cross-mixin calls exist only by convention.** `test_statistics` calls
-  `dut_summary`'s `_resolve_remeasure_drops` (its route to the shared
-  supersede ranks); `dut_summary` and `wafer_map` call
+  `test_summary`'s `_resolve_remeasure_drops` (its route to the shared
+  supersede ranks); `test_summary` and `wafer_map` call
   `reportGenerator._fid_ranks` directly. They work only because both
   sides inherit `ReportHost`, where those members are declared.
 

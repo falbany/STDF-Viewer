@@ -29,7 +29,7 @@ One row per DUT (the global DUT # down column A restores display order
 after a sort/filter), the 14 metadata fields as frozen leftmost columns
 (B..O), the tests appended right (P..), AutoFilter on the frozen columns.
 Complement, not replacement: the DUT Summary matrix and all its waves stay
-untouched — the per-field helpers are imported one-way from dut_summary.py
+untouched — the per-field helpers are imported one-way from test_summary.py
 (values, mask policy and fail logic are shared, never re-implemented).
 
 Pure spec construction (strings/dicts/numbers only) — the xlsxwriter
@@ -51,7 +51,7 @@ from deps.exporter.helpers import (
     stat_cached,
     stat_formula_col,
 )
-from deps.exporter.worksheets.dut_summary import (
+from deps.exporter.worksheets.test_summary import (
     BASE_HEADERS,
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
@@ -121,7 +121,7 @@ def _dut_cells_of_test(summaryTable, test, order):
     """(die cells, mirror cells) of ONE test across every DUT of ``order`` —
     the column the attribute block's formulas run over.
 
-    Same branch logic as dut_summary._test_rows: FTR rows put the flag cell
+    Same branch logic as test_summary._test_rows: FTR rows put the flag cell
     in the die column; parametric rows put the real value (blank for NaN);
     the mirror always carries the flag; a missing result blanks both."""
     die_cells, mirror_cells = [], []
@@ -144,13 +144,13 @@ def _test_column(summaryTable, test, offset, order, last_data_row, flag_col_offs
     cache_entries, number_format)`` — the attribute block's 12 cells (6
     static + 6 live formulas), the per-DUT cell columns for the DUT rows
     and sparklines, and the ``(attribute_row, cached_result)`` pairs with
-    dut_summary._test_rows' cache gating (None caches "" except MIN/MAX's
+    test_summary._test_rows' cache gating (None caches "" except MIN/MAX's
     faithful 0)."""
     col = test_col(offset)
     col1 = FIRST_TEST_COL_INDEX + offset  # 1-based
     die_cells, mirror_cells = _dut_cells_of_test(summaryTable, test, order)
 
-    # third wave branch logic (dut_summary._test_rows): FTR rows always
+    # third wave branch logic (test_summary._test_rows): FTR rows always
     # take the limits path with the synthetic ±0.999999 window
     if test["is_ftr"]:
         spec_min, spec_max = FTR_SPEC_MIN, FTR_SPEC_MAX
@@ -187,7 +187,7 @@ def _test_column(summaryTable, test, offset, order, last_data_row, flag_col_offs
     ]
 
     # cached formula results keyed (1-based row, 1-based col) — the same
-    # gating as dut_summary._test_rows: None caches "" so previews never
+    # gating as test_summary._test_rows: None caches "" so previews never
     # show a stray 0, except MIN/MAX cache the faithful 0 (their guarded
     # formulas compute 0 on an empty range, never the error branch)
     lo = spec_min if spec_min != "" else None

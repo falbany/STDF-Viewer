@@ -59,7 +59,7 @@ _FIRST_FLOAT_RE = re.compile(r"-?\d+(?:\.\d+)?")
 # Default test/param split: "workflow/rest/of/name/param" -> test + last segment.
 DEFAULT_PARAM_PATTERN = re.compile(r"^(?P<test>.+)/(?P<param>[^/]+)$")
 
-# Excel hard limit is 16384 columns per sheet. A DUT Summary chunk sheet is
+# Excel hard limit is 16384 columns per sheet. A Test Summary chunk sheet is
 # 13 fixed columns (A..L base block) + n visible die columns + 1 spacer +
 # 1 Trend sparkline column + 1 spacer + n hidden flag mirrors, so a chunk
 # fits only while 13 + n + 3 + n <= 16384, i.e.
@@ -270,7 +270,7 @@ def stat_formula(name: str, row: int, first: str, last: str) -> str:
 
 
 def cp_formula(row: int, first_die: str, last_die: str) -> str:
-    """Cp of one DUT Summary data row: (USL-LSL)/(6σ) with σ embedded as
+    """Cp of one Test Summary data row: (USL-LSL)/(6σ) with σ embedded as
     STDEV over the row's die range — F=SpecMax, E=SpecMin (fixed letters).
 
     Ninth user-feedback wave (2026-11-10): the J column stopped being
@@ -282,7 +282,7 @@ def cp_formula(row: int, first_die: str, last_die: str) -> str:
 
 
 def cpk_formula(row: int, first_die: str, last_die: str) -> str:
-    """Cpk of one DUT Summary data row (F=SpecMax, E=SpecMin, I=Mean), σ
+    """Cpk of one Test Summary data row (F=SpecMax, E=SpecMin, I=Mean), σ
     embedded as STDEV over the row's die range.
 
     Ninth user-feedback wave: the signature gains the die range — the old
@@ -296,7 +296,7 @@ def cpk_formula(row: int, first_die: str, last_die: str) -> str:
 
 def fails_formula_limits(row: int, first: str, last: str) -> str:
     """FAILS count vs low/high limits (E/F), ignoring blank DUT cells —
-    IFERROR-guarded (2026-11-11) like every DUT Summary formula."""
+    IFERROR-guarded (2026-11-11) like every Test Summary formula."""
     rng = col_range(first, last, row)
     return (
         f'=IFERROR(SUMPRODUCT(({rng}<>"")'
@@ -306,14 +306,14 @@ def fails_formula_limits(row: int, first: str, last: str) -> str:
 
 def fails_formula_flags(row: int, first: str, last: str) -> str:
     """FAILS count of 0/1 flag cells over the hidden mirror range —
-    IFERROR-guarded (2026-11-11) like every DUT Summary formula."""
+    IFERROR-guarded (2026-11-11) like every Test Summary formula."""
     mrng = col_range(first, last, row)
     return f'=IFERROR(SUMPRODUCT(({mrng}<>"")*({mrng}=1)),"")'
 
 
 # --------------------------------------------------------------------------
 # Column twins of the five builders above (DUT Status wave): the DUT Status
-# sheet is the DUT Summary matrix transposed, so the attribute block's
+# sheet is the Test Summary matrix transposed, so the attribute block's
 # Min/Max/Mean/Cp/Cpk/Fails cells run DOWN each test column over the DUT
 # rows, and the spec-min/max/mean cells are attribute-block cells in the
 # SAME column ({col}{spec_min_row} etc.) — the transpose of the matrix's
@@ -440,7 +440,7 @@ def build_stat_cpk_formula(
     """Live Cpk formula for one Test Statistics row, DUT-Summary shaped.
 
     ``=IFERROR(MIN((<max>-<avg>)/(3*<std>),(<avg>-<min>)/(3*<std>)),"")``
-    with the column letters substituted: substituting the DUT Summary's
+    with the column letters substituted: substituting the Test Summary's
     fixed E/F/I/J letters reproduces :func:`cpk_formula` verbatim (one
     formula shape, two sheets). ``row_number`` is the 1-based Excel row.
     The IFERROR blank covers σ=0 and missing/one-sided limits, so the
@@ -493,7 +493,7 @@ def build_stat_cp_formula(spec_min_l: str, spec_max_l: str, std_l: str, row_numb
     """Live Cp formula for one Test Statistics row: (USL-LSL)/(6σ).
 
     ``=IFERROR(({max}{r}-{min}{r})/(6*{std}{r}),"")`` with the column
-    letters substituted. Unlike the DUT Summary's :func:`cp_formula` —
+    letters substituted. Unlike the Test Summary's :func:`cp_formula` —
     which embeds STDEV over the die range because its J column is now Cp
     itself — the Test Statistics σ comes from the numeric "St. Dev."
     column (upstream values are numeric since the third wave).

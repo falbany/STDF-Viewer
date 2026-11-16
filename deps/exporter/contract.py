@@ -44,7 +44,7 @@ class ReportHost:  # pylint: disable=too-few-public-methods
 
     # -- per-run state (report_core re-binds each run) --
     _bin_banner: str  # Bin-sheet banner; File Info overwrites it
-    _ftr_tests: set  # (test_num, test_name) tuples filled by writeDUT_Summary
+    _ftr_tests: set  # (test_num, test_name) tuples filled by writeTest_Summary
     _remeasure_drops: set | None  # None = stat-only signal (§7.2)
     _fid_ranks_cache: dict | None  # None until the first _fid_ranks() call
     _dut_sheet_block: list  # DUT-derived sheets, base first (§7.4 reorder)
