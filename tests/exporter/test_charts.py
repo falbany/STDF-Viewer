@@ -1562,9 +1562,9 @@ class TestStackedWaferBlock:
             assert xml.count(hex8) == 2  # same three colors on both rules
         # 3 anchors × 2 gradient rules, + the data bar's own 2 cfvos
         assert xml.count('<cfvo type="num"') == 8
-        # the legend range covers the Value column data rows (B17:B18 —
+        # the legend range covers the Value column data rows (B16:B17 —
         # the fail table's two distinct values), not the Total row
-        assert 'sqref="B17:B18"' in xml
+        assert 'sqref="B16:B17"' in xml
 
     def test_empty_stacked_degrades(self, env):
         nxt = self.written(
@@ -1685,59 +1685,60 @@ class TestStackedWaferBlock:
         assert ids == ["W08", "W09"]  # tuple order, duplicates preserved
         assert total_duts == 14  # Σ of the per-wafer DUT totals
 
-    def test_stacked_wafers_table(self, env):
-        # per-wafer metrics table (2026-11-14 user ask) in the SW-bin-table
-        # look at the sbin table slot: band A15:C15, blue-header Excel
-        # table (Wafer ID / Bin 1 / Yield) 16, data 17-18, bold Total 19
-        # (live =SUM over the Bin-1 column, cached; cross-wafer yield)
-        nxt = self.written(
-            env,
-            wafer_rows=[("W08", 2, 0.6), ("W09", 1, None)],
-            overall_yield=0.5,
-            wafer_id_table_name="SW_0_StackedWafers",
-        )
+    def test_stacked_wafer_roster(self, env):
+        # 2026-11-16 ruling: names only, metadata-box look — label line at
+        # row 14, one merged A:D italic-gray line per wafer inside a light
+        # gray EXTERNAL border (top edge on the first line, bottom on the
+        # last, no internal separators), one blank row then the next block
+        nxt = self.written(env, wafer_ids=["W08", "W09"])
         reloaded = env["reload"]()
-        assert reloaded["A15"].value == "Stacked Wafers — per-wafer metrics"
-        assert [reloaded.cell(row=16, column=c).value for c in range(1, 4)] == [
-            "Wafer ID", "Bin 1", "Yield",
-        ]
-        assert reloaded["A17"].value == "W08"
-        assert reloaded["B17"].value == 2
-        assert reloaded["C17"].value == 0.6
-        assert reloaded["C18"].value in ("", None)  # missing yield → blank
-        assert reloaded["A19"].value == "Total"
-        assert reloaded["B19"].value == "=SUM(B17:B18)"
-        # the Total yield displays as a percent like the data rows'
-        # (2026-11-14 user catch: it wrote with the plain bold format)
-        assert reloaded["C17"].number_format == "0.00%"
-        assert reloaded["C19"].number_format == "0.00%"
-        assert "SW_0_StackedWafers" in reloaded.tables
-        assert nxt == 20
+        assert reloaded["A14"].value == "Stacked Wafers"
+        merges = {str(r) for r in reloaded.merged_cells.ranges}
+        assert "A14:D14" in merges and "A15:D15" in merges and "A16:D16" in merges
+        assert reloaded["A15"].value == "W08" and reloaded["A16"].value == "W09"
+        assert reloaded["B15"].value is None  # names only — one merged cell
+        assert reloaded.tables == {}  # a roster, not an Excel table
+        for coord in ("A15", "A16"):
+            cell = reloaded[coord]
+            assert cell.font.italic and cell.font.color.rgb.endswith("808080")
+            assert cell.border.left.style == "thin"
+            assert cell.border.right.style == "thin"
+            assert cell.border.top.style == ("thin" if coord == "A15" else None)
+            assert cell.border.bottom.style == ("thin" if coord == "A16" else None)
+        assert nxt == 17  # blank row after the last roster line
+
+    def test_stacked_wafer_roster_single_wafer(self, env):
+        # one wafer → its single line carries ALL four border sides
+        self.written(env, wafer_ids=["W08"])
+        reloaded = env["reload"]()
+        cell = reloaded["A15"]
+        assert all(getattr(cell.border, s).style == "thin" for s in ("top", "left", "right", "bottom"))
 
     def test_fail_map_count_table(self, env):
         # Fail Map Count (2026-11-14 user ask): the SW-bin-table mimicry —
         # one row per DISTINCT count value in the grid (ascending), the
         # Count cells LIVE =COUNTIF over the die map keyed on the row's
         # own Value cell, Distribution fractions + data bar, bold Total
-        # (live =SUM, cached). At the 15 slot when no wafer table precedes.
+        # (live =SUM, cached). At the 14 slot (one blank row after the
+        # cards) when no roster precedes.
         nxt = self.written(env, fail_table_name="SW_0_FailMapCount")
         reloaded = env["reload"]()
-        assert reloaded["A15"].value == "Fail Map Count — All Wafers"
-        assert [reloaded.cell(row=16, column=c).value for c in range(1, 5)] == [
+        assert reloaded["A14"].value == "Fail Map Count — All Wafers"
+        assert [reloaded.cell(row=15, column=c).value for c in range(1, 5)] == [
             "Fails per Die", "Value", "Count", "Distribution",
         ]
-        assert reloaded["A17"].value == "1 fail"
-        assert reloaded["B17"].value == 1
-        assert reloaded["C17"].value == "=COUNTIF($G$4:$K$4,B17)"
-        assert reloaded["A18"].value == "3 fails"
-        assert reloaded["B18"].value == 3
-        assert reloaded["A19"].value == "Total"
+        assert reloaded["A16"].value == "1 fail"
+        assert reloaded["B16"].value == 1
+        assert reloaded["C16"].value == "=COUNTIF($G$4:$K$4,B16)"
+        assert reloaded["A17"].value == "3 fails"
+        assert reloaded["B17"].value == 3
+        assert reloaded["A18"].value == "Total"
         data_only = env.reload_data_only()
-        assert data_only["C17"].value == 3  # three dies with 1 fail
-        assert data_only["C18"].value == 1  # one die with 3 fails
-        assert data_only["D17"].value == 0.75  # 3/4 probed coordinates
-        assert data_only["C19"].value == 4  # Σ = probed coordinates
-        assert nxt == 20
+        assert data_only["C16"].value == 3  # three dies with 1 fail
+        assert data_only["C17"].value == 1  # one die with 3 fails
+        assert data_only["D16"].value == 0.75  # 3/4 probed coordinates
+        assert data_only["C18"].value == 4  # Σ = probed coordinates
+        assert nxt == 19
 
     def test_fail_map_count_distribution_cells_are_live_formulas(self, env):
         # issue #8: the Total row's Distribution joins the live path —
@@ -1746,11 +1747,11 @@ class TestStackedWaferBlock:
         self.written(env, fail_table_name="SW_0_FailMapCount")
         reloaded = env["reload"]()
         data_only = env.reload_data_only()
-        assert reloaded["D19"].value == "=SUM(D17:D18)"
-        assert data_only["D17"].value == pytest.approx(0.75)
-        assert data_only["D18"].value == pytest.approx(0.25)
-        assert data_only["D19"].value == 1.0
-        assert reloaded["D19"].number_format == "0.00%"
+        assert reloaded["D18"].value == "=SUM(D16:D17)"
+        assert data_only["D16"].value == pytest.approx(0.75)
+        assert data_only["D17"].value == pytest.approx(0.25)
+        assert data_only["D18"].value == 1.0
+        assert reloaded["D18"].number_format == "0.00%"
 
     def test_fail_map_count_includes_probed_passed(self, env):
         # the count-0 bucket is its own row (0 = probed & passed dies) —
@@ -1758,34 +1759,32 @@ class TestStackedWaferBlock:
         m = dict(STACKED_MAP, Data={0: {"x": [5], "y": [1]}, 1: {"x": [1, 2, 3], "y": [1, 1, 1]}})
         self.written(env, map_data=m, fail_table_name="SW_0_FailMapCount")
         reloaded = env["reload"]()
-        assert reloaded["A17"].value == "0 fails"
-        assert reloaded["B17"].value == 0
+        assert reloaded["A16"].value == "0 fails"
+        assert reloaded["B16"].value == 0
         data_only = env.reload_data_only()
-        assert data_only["C17"].value == 1
-        assert data_only["C18"].value == 3
-        assert data_only["C19"].value == 4
+        assert data_only["C16"].value == 1
+        assert data_only["C17"].value == 3
+        assert data_only["C18"].value == 4
 
-    def test_fail_map_count_below_wafer_table(self, env):
-        # the Fail Map Count table sits BELOW the stacked-wafers ID table
-        # (2026-11-14 user ruling), one blank row after its Total
+    def test_fail_map_count_below_roster(self, env):
+        # the Fail Map Count table sits BELOW the wafer roster
+        # (2026-11-16 ruling), ONE blank row after its last line
         nxt = self.written(
             env,
-            wafer_rows=[("W08", 1, 0.6)],
-            overall_yield=0.6,
-            wafer_id_table_name="SW_0_StackedWafers",
+            wafer_ids=["W08"],
             fail_table_name="SW_0_FailMapCount",
         )
         reloaded = env["reload"]()
-        assert reloaded["A15"].value == "Stacked Wafers — per-wafer metrics"
-        assert reloaded["A20"].value == "Fail Map Count — All Wafers"
+        assert reloaded["A14"].value == "Stacked Wafers"
+        assert reloaded["A15"].value == "W08"
+        assert reloaded["A17"].value == "Fail Map Count — All Wafers"
         data_only = env.reload_data_only()
-        assert data_only["B18"].value == 1  # ID table Total (1 wafer row)
-        assert data_only["C22"].value == 3  # fail table: 1 fail × 3 dies
-        assert nxt == 25
+        assert data_only["C19"].value == 3  # fail table: 1 fail × 3 dies
+        assert nxt == 22
 
     def test_donut_anchored_below_the_fail_table(self, env):
-        # issue #7: ONE blank row below the fail table's Total (no ID
-        # table here: band 15 / data 17-18 / Total 19 → anchor A21)
+        # issue #7: ONE blank row below the fail table's Total (no roster
+        # here: band 14 / data 16-17 / Total 18 → anchor A20)
         self.written(env, wb=env["wb"], fail_table_name="SW_0_FailMapCount")
         env["reload"]()
         import re
@@ -1794,7 +1793,7 @@ class TestStackedWaferBlock:
         frm = re.search(
             r"<xdr:from><xdr:col>(\d+)</xdr:col>.*?<xdr:row>(\d+)</xdr:row>", drawing, re.S
         )
-        assert frm and frm.group(1) == "0" and frm.group(2) == "20"
+        assert frm and frm.group(1) == "0" and frm.group(2) == "19"
 
     def test_donut_slices_use_the_standard_palette(self, env):
         # fail-count buckets have no user color (2026-11-15 ruling):

@@ -1048,15 +1048,17 @@ WAFER_SPACER_PINNED_WIDTH = 3.5  # column E (2026-11-13: was the 2.71 square)
 _PROP_GRAY = "#808080"
 
 
-def _wafer_prop_fmt(theme, sides: str) -> "object":
+def _wafer_prop_fmt(theme, sides: str, align: str = "left") -> "object":
     """Explanatory-Text format with the border sides of one cell of the
     properties box (``sides`` = subset of "tlrb" — top/left/right/bottom;
-    the box hugs rows 11-13 × A:D)."""
+    the box hugs rows 11-13 × A:D). ``align`` serves the stacked sheet's
+    roster lines (2026-11-16: centered wafer names)."""
     extra = {
         "font_name": "Calibri",
         "font_size": 11,
         "italic": True,
         "font_color": _PROP_GRAY,
+        "align": align,
     }
     for side, code in (("top", "t"), ("left", "l"), ("right", "r"), ("bottom", "b")):
         if code in sides:
@@ -1359,102 +1361,49 @@ def stacked_wafer_ids(payloads: list) -> "tuple[list[str], int]":
     return ids, total_duts
 
 
-WAFER_STACKED_TABLE_TITLE = "Stacked Wafers — per-wafer metrics"
-WAFER_STACKED_TABLE_HEADERS = ("Wafer ID", "Bin 1", "Yield")
-
-# Fail Map Count (2026-11-14 user ask): the fail-count distribution
-# table below the ID table — write_bin_table with live COUNTIF counts
-# over the die map, one row per DISTINCT count value in the grid
-WAFER_FAIL_TABLE_TITLE = "Fail Map Count — All Wafers"
-WAFER_FAIL_TABLE_HEADERS = ("Fails per Die", "Value", "Count", "Distribution")
+WAFER_STACKED_ROSTER_LABEL = "Stacked Wafers"
 
 
-def write_stacked_wafer_table(
+def write_stacked_wafer_roster(
     ws,
     start_row: int,
-    wafer_rows: list,
-    overall_yield: "float | None",
+    wafer_ids: list,
     theme,
-    table_name: str,
 ) -> int:
-    """The stacked sheet's per-wafer ID table (2026-11-14 user ask) in
-    the SW-bin-table look: Headline-2 band across A:C, the themed
-    blue-header Excel table (style None, filter arrows), one bordered
-    row per wafer (ID, bin-1 die count, DUT yield in the "0.00%" format
-    — blank when unparseable), then a bold Total row OUTSIDE the table:
-    live =SUM over the Bin-1 column (cached) and the cross-wafer yield.
-    ``wafer_rows`` empty → no-op (returns ``start_row``)."""
-    if not wafer_rows:
-        return start_row
-    last0 = len(WAFER_STACKED_TABLE_HEADERS) - 1  # A:C
-
+    """The stacked sheet's wafer roster (2026-11-16 ruling — the ID
+    table's replacement): a small italic-gray label line, then ONE
+    merged A:D line per wafer ID in tuple order, in the per-wafer
+    sheets' metadata-box look — Explanatory-Text format, light-gray
+    external border only (first line: top edge, last: bottom, every
+    line: left/right; no internal separators). Pinned columns — never
+    note_width. Returns the blank row after the last line."""
     ws.merge_range(
         start_row - 1,
         0,
         start_row - 1,
-        last0,
-        WAFER_STACKED_TABLE_TITLE,
-        theme.lookalike(BIN_SECTION_STYLE),
+        3,
+        WAFER_STACKED_ROSTER_LABEL,
+        _wafer_prop_fmt(theme, ""),
     )
-    note_width(ws, 1, WAFER_STACKED_TABLE_TITLE)
+    last = len(wafer_ids) - 1
+    for offset, wafer_id in enumerate(wafer_ids):
+        sides = ("t" if offset == 0 else "") + "lr" + ("b" if offset == last else "")
+        ws.merge_range(
+            start_row + offset,
+            0,
+            start_row + offset,
+            3,
+            sanitize_cell(str(wafer_id)),
+            _wafer_prop_fmt(theme, sides, align="center"),
+        )
+    return start_row + len(wafer_ids) + 1
 
-    header_row = start_row + 1
-    first_data = header_row + 1
-    last_data = first_data + len(wafer_rows) - 1
-    header_fmt = theme.cell_format(font="header", align="center", border=True, fill_hex="1E40AF")
-    ws.add_table(
-        header_row - 1,
-        0,
-        last_data - 1,
-        last0,
-        {
-            "name": table_name,
-            "style": None,  # keep the hand-tuned theme (no gallery stripes)
-            "autofilter": True,
-            "columns": [
-                {"header": header, "header_format": header_fmt}
-                for header in WAFER_STACKED_TABLE_HEADERS
-            ],
-        },
-    )
 
-    body_fmt = theme.cell_format(font="body", align="center", border=True)
-    pct_fmt = theme.cell_format(font="body", align="center", border=True, num_fmt=BIN_PCT_FORMAT)
-    bin1_total = 0
-    for offset, (wafer_id, bin1, yld) in enumerate(wafer_rows):
-        row0 = first_data - 1 + offset
-        ws.write(row0, 0, sanitize_cell(str(wafer_id)), body_fmt)
-        note_width(ws, 1, str(wafer_id))
-        ws.write(row0, 1, int(bin1), body_fmt)
-        note_width(ws, 2, str(bin1))
-        if yld is not None:
-            ws.write(row0, 2, float(yld), pct_fmt)
-        else:
-            ws.write(row0, 2, "", body_fmt)
-        bin1_total += int(bin1)
-
-    total_row = last_data + 1
-    total_fmt = theme.cell_format(font="bold_body", align="center", border=True)
-    # the Total yield displays as a percent like the data rows (the
-    # write_bin_table Total-row convention)
-    total_pct_fmt = theme.cell_format(
-        font="bold_body", align="center", border=True, num_fmt=BIN_PCT_FORMAT
-    )
-    ws.write(total_row - 1, 0, BIN_TOTAL_LABEL, total_fmt)
-    bin_letter = xlutil.xl_col_to_name(1)
-    ws.write_formula(
-        total_row - 1,
-        1,
-        f"=SUM({bin_letter}{first_data}:{bin_letter}{last_data})",
-        total_fmt,
-        bin1_total,
-    )
-    if overall_yield is not None:
-        ws.write(total_row - 1, 2, float(overall_yield), total_pct_fmt)
-    else:
-        ws.write(total_row - 1, 2, "", total_fmt)
-
-    return total_row + 1
+# Fail Map Count (2026-11-14 user ask): the fail-count distribution
+# table below the roster — write_bin_table with live COUNTIF counts
+# over the die map, one row per DISTINCT count value in the grid
+WAFER_FAIL_TABLE_TITLE = "Fail Map Count — All Wafers"
+WAFER_FAIL_TABLE_HEADERS = ("Fails per Die", "Value", "Count", "Distribution")
 
 
 def write_stacked_wafer_block(  # pylint: disable=too-many-locals
@@ -1464,10 +1413,8 @@ def write_stacked_wafer_block(  # pylint: disable=too-many-locals
     map_data: dict,
     start_row: int,
     freeze_panes: bool = False,
-    wafer_rows: "list | None" = None,
-    overall_yield: "float | None" = None,
+    wafer_ids: "list | None" = None,
     total_duts: int = 0,
-    wafer_id_table_name: "str | None" = None,
     fail_table_name: "str | None" = None,
     wb=None,
 ) -> int:
@@ -1488,10 +1435,11 @@ def write_stacked_wafer_block(  # pylint: disable=too-many-locals
     count-0 bucket (getStackedWaferData seeds every probed coordinate):
     probed-but-passing dies render as 0 at the green end of the gradient,
     wafer-outline style; only never-probed gap coordinates stay unwritten
-    (CF ignores blanks). ``wafer_rows`` + ``wafer_id_table_name`` render the
-    per-wafer ID table (write_stacked_wafer_table) at the sbin SW-table
-    slot (row 15); ``fail_table_name`` renders the Fail Map Count below
-    it (one blank row after the ID table's Total) — write_bin_table with
+    (CF ignores blanks). ``wafer_ids`` renders the per-wafer roster
+    (write_stacked_wafer_roster — 2026-11-16 ruling, the ID table's
+    replacement) at the row-14 slot (ONE blank row after the cards);
+    ``fail_table_name`` renders the Fail Map Count below it (one blank
+    row after the roster's last line) — write_bin_table with
     live COUNTIF counts over the die map, one row per DISTINCT count
     value in the grid ("0 fails" = probed & passed dies, Distribution =
     share of the probed coordinates, Total = Σ = probed coordinates).
@@ -1658,18 +1606,11 @@ def write_stacked_wafer_block(  # pylint: disable=too-many-locals
     )
 
     next_free = max(start_row + 12, xh_row + len(y_axis) + 1)
-    table_row = start_row + 14  # the sbin SW-table slot (row 15, A:D zone)
-    if wafer_rows and wafer_id_table_name:
-        wafers_end = write_stacked_wafer_table(
-            ws,
-            table_row,
-            wafer_rows,
-            overall_yield,
-            theme,
-            wafer_id_table_name,
-        )
-        next_free = max(next_free, wafers_end)
-        table_row = wafers_end + 1  # Fail Map Count sits below, one blank row
+    table_row = start_row + 13  # 1-based row 14: ONE blank row after the cards
+    if wafer_ids:
+        roster_end = write_stacked_wafer_roster(ws, table_row, wafer_ids, theme)
+        next_free = max(next_free, roster_end)
+        table_row = roster_end + 1  # Fail Map Count sits below, one blank row
     if fail_table_name:
         # one row per DISTINCT count value in the grid (ascending; the
         # count-0 bucket = probed & passed dies) — counts cached against
