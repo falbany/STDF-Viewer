@@ -322,6 +322,63 @@ class TestChunkingAndDegenerates:
 
 
 # --------------------------------------------------------------------------
+# Total row (ruling 2026-11-16: one banner footer below the AutoFilter,
+# filter-tracking SUBTOTAL cells under the frozen columns; cells hide with
+# their column — the Test Time mean lives under the always-masked column)
+# --------------------------------------------------------------------------
+
+
+class TestTotalRow:
+    def test_total_row_spec_mapping(self):
+        spec = built()[0]
+        total = spec["total_row"]
+        assert total["row"] == 17  # DATA_START + dut_count, below the filter ref (ends 16)
+        cells = total["cells"]  # 15 entries, A..O
+        assert len(cells) == 15
+        assert cells[0] == ['="Total ("&SUBTOTAL(102,A14:A16)&" DUTs)"', "Total (3 DUTs)", None]
+        assert cells[4][0] == '=IFERROR(SUBTOTAL(105,E14:E16)&"–"&SUBTOTAL(104,E14:E16),"")'
+        assert cells[4][1] == "25.0–85.0"  # Temperature min–max
+        assert cells[5][1] == "1–1"  # HW Bin
+        assert cells[6][1] == "2–3"  # SW Bin
+        assert cells[8][1] == "3–4"  # X
+        assert cells[9][1] == "-6–-5"  # Y
+        assert cells[12][0] == '=IFERROR(SUBTOTAL(109,M14:M16),"")'
+        assert cells[12][1] == 126 and cells[12][2] == "0"  # Tests Executed sum
+        assert cells[13][0] == '=IFERROR(SUBTOTAL(101,N14:N16),"")'
+        assert cells[13][1] == 123  # mean Test Time (hidden column)
+        assert cells[14][0] == (
+            '=IFERROR(SUMPRODUCT(ISNUMBER(SEARCH("Fail",O14:O16))'
+            '*SUBTOTAL(103,OFFSET(O$14,ROW(O14:O16)-ROW(O$14),0))),"")'
+        )
+        assert cells[14][1] == 1 and cells[14][2] == "0"  # one Failed among visible
+        for blank in (1, 2, 3, 7):  # File ID, Part ID, Part TXT, Wafer
+            assert cells[blank] == ["", None, None]
+
+    def test_total_row_degenerates_and_chunks(self):
+        zero = build_dut_status_spec(make_summary(), TEST_TUPLES, [], sheet_name="DUT Status")[0]
+        assert "total_row" not in zero  # zero DUTs: no Total row
+        no_tests = build_dut_status_spec(make_summary(), [], ORDER, sheet_name="DUT Status")[0]
+        assert no_tests["total_row"]["row"] == 17  # tests don't gate it
+        chunks = build_dut_status_spec(
+            make_summary(),
+            [(i, 0, f"T{i}") for i in range(TEST_CHUNK_CAP + 1)],
+            ORDER,
+            sheet_name="DUT Status",
+        )
+        assert chunks[0]["total_row"] == chunks[1]["total_row"]  # identical on every chunk
+
+    def test_total_row_render(self):
+        ws = load_workbook_bytes(rendered())["DUT Status"]
+        assert ws["A17"].value == '="Total ("&SUBTOTAL(102,A14:A16)&" DUTs)"'
+        assert ws["A17"].fill.start_color.rgb.endswith("CBD5E1")  # banner fill
+        assert ws["M17"].value == '=IFERROR(SUBTOTAL(109,M14:M16),"")'
+        assert ws["N17"].value == '=IFERROR(SUBTOTAL(101,N14:N16),"")'
+        assert col_dim(ws, "N").hidden is True  # mean hides with its column
+        xml = read_xml(rendered(), "xl/worksheets/sheet1.xml")
+        assert 'autoFilter ref="A13:Q16"' in xml  # Total row outside the filter
+
+
+# --------------------------------------------------------------------------
 # renderer
 # --------------------------------------------------------------------------
 

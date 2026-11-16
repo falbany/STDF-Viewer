@@ -727,6 +727,26 @@ def render_dut_status_sheet(ws, spec: dict, theme) -> None:
                 ws, row, column, value, theme, font="body", align="center", border=True, num_fmt=num_fmt
             )
 
+    # Total row (ruling 2026-11-16): banner footer below the AutoFilter ref;
+    # SUBTOTAL cells track the filter, masked columns hide their cell with
+    # the column (the Test Time mean rides the always-masked column)
+    total = spec.get("total_row")
+    if total:
+        for column, (value, cached, num_fmt) in enumerate(total["cells"], start=1):
+            _write_cell(
+                ws,
+                total["row"],
+                column,
+                value,
+                theme,
+                font="banner",
+                align="center",
+                border=True,
+                fill_hex=BANNER_FILL_HEX,
+                num_fmt=num_fmt,
+                cached=cached,
+            )
+
     _set_dut_status_column_widths(ws, spec)
 
     cf = spec["conditional_formatting"]

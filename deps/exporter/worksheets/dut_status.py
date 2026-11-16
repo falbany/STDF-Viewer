@@ -373,7 +373,57 @@ def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metad
         spec["auto_filter"] = {
             "ref": f"A{FILTER_ROW}:{get_column_letter(len(filter_header))}{FILTER_ROW + dut_count}"
         }
+        # Total row (ruling 2026-11-16): one banner footer below the
+        # AutoFilter ref — filtering and sorting never hide, move or sort it
+        spec["total_row"] = {
+            "row": DATA_START + dut_count,
+            "cells": _total_row_cells(meta_columns, dut_count, last_data_row, tr),
+        }
     return spec
+
+
+# Metadata fields the Total row carries a Min–Max pair for (the numeric
+# per-DUT fields); File ID / Part ID / Part TXT / Wafer stay blank.
+_TOTAL_MINMAX_NAMES = ("Temperature", "HW Bin", "SW Bin", "X", "Y", "Head", "Site")
+
+
+def _total_row_cells(meta_columns, dut_count, last_data_row, tr):
+    """The Total row's 15 cells (A..O), one ``[value, cached, num_fmt]`` per
+    frozen column (ruling 2026-11-16). Every formula rides the SUBTOTAL
+    family so the row tracks the AutoFilter like the attribute rows; the
+    cached results are the unfiltered numbers, and masked columns simply
+    hide their cell (the Test Time mean lives under the always-masked
+    column — visible only if the user unhides it)."""
+    label, unit = tr("Total"), tr("DUTs")
+    cells = [[
+        f'="{label} ("&SUBTOTAL(102,A{DATA_START}:A{last_data_row})&" {unit})"',
+        f"{label} ({dut_count} {unit})",
+        None,
+    ]]
+    for i, meta in enumerate(METADATA_ROWS):
+        name = meta["name"]
+        col = _metadata_col(i)
+        rng = f"{col}{DATA_START}:{col}{last_data_row}"
+        numeric = [v for v in meta_columns[i] if isinstance(v, (int, float))]
+        if name == "DUT Flag":
+            anchor = f"{col}${DATA_START}"
+            visible = f"SUBTOTAL(103,OFFSET({anchor},ROW({rng})-ROW({anchor}),0))"
+            cells.append([
+                f'=IFERROR(SUMPRODUCT(ISNUMBER(SEARCH("Fail",{rng}))*{visible}),"")',
+                sum(1 for v in meta_columns[i] if isinstance(v, str) and "fail" in v.lower()),
+                "0",
+            ])
+        elif name == "Tests Executed":
+            cells.append([f'=IFERROR(SUBTOTAL(109,{rng}),"")', sum(numeric), "0"])
+        elif name == "Test Time":
+            cached = stat_cached("AVERAGE", meta_columns[i])
+            cells.append([f'=IFERROR(SUBTOTAL(101,{rng}),"")', "" if cached is None else cached, None])
+        elif name in _TOTAL_MINMAX_NAMES:
+            lo, hi = (min(numeric), max(numeric)) if numeric else (0, 0)
+            cells.append([f'=IFERROR(SUBTOTAL(105,{rng})&"–"&SUBTOTAL(104,{rng}),"")', f"{lo}–{hi}", None])
+        else:  # File ID, Part ID, Part TXT, Wafer — non-numeric identity fields
+            cells.append(["", None, None])
+    return cells
 
 
 class DUTStatusMixin(ReportHost):
