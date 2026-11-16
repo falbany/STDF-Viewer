@@ -635,17 +635,18 @@ def _hide_transposed_mirrors(ws, spec, theme):
 
 
 def _render_dut_status_attribute_block(ws, spec, theme):
-    """Rows 1..12: the transposed BASE_HEADERS — labels in column A,
-    banner-fill blanks over the frozen metadata zone, per-test static/formula
-    cells to the right (SpecMin/SpecMax rows neutral yellow, formulas with
-    their cached results)."""
+    """Rows 1..12: the transposed BASE_HEADERS — banner-fill blanks over the
+    frozen metadata zone A..N, the row label in column O (the last frozen
+    column, adjacent to the test cells it describes — ruling 2026-11-16,
+    moved from A1:A12), per-test static/formula cells to the right
+    (SpecMin/SpecMax rows neutral yellow, formulas with their cached
+    results)."""
     formula_values = spec.get("formula_values") or {}
     neutral_rows = set(spec.get("attribute_neutral_rows") or [])
     formats_by_row = spec.get("attribute_row_formats") or {}
     meta_count = spec["metadata_column_count"]
     for row, row_values in enumerate(spec["attribute_block"], start=1):
-        _write_cell(ws, row, 1, row_values[0], theme, font="metadata", align="center", border=True)
-        for column in range(2, 2 + meta_count):
+        for column in range(1, 1 + meta_count):
             _write_cell(
                 ws,
                 row,
@@ -657,6 +658,7 @@ def _render_dut_status_attribute_block(ws, spec, theme):
                 border=False,
                 fill_hex=BANNER_FILL_HEX,
             )
+        _write_cell(ws, row, 1 + meta_count, row_values[0], theme, font="metadata", align="center", border=True)
         for offset, value in enumerate(row_values[1:]):
             column = 2 + meta_count + offset
             _write_cell(

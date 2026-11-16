@@ -398,9 +398,14 @@ def rendered(spec=None):
 class TestRenderer:
     def test_render_layout_and_styles(self):
         ws = load_workbook_bytes(rendered())["DUT Status"]
-        assert ws["A1"].value == "Test#"
-        assert ws["A7"].value == "Min"
+        # attribute labels live in column O — the last frozen column,
+        # adjacent to the test cells they describe (ruling 2026-11-16)
+        assert ws["O1"].value == "Test#"
+        assert ws["O7"].value == "Min"
+        assert ws["O12"].value == "Fails"
         assert ws["A13"].value == "DUT #"
+        assert ws["A1"].value in (None, "")  # A joined the banner-blank zone
+        assert ws["A1"].fill.start_color.rgb.endswith("CBD5E1")  # banner
         assert ws["B1"].fill.start_color.rgb.endswith("CBD5E1")  # banner
         assert ws["A13"].fill.start_color.rgb.endswith("1E40AF")  # header
         assert ws["P5"].fill.start_color.rgb.endswith("FFF3CD")  # neutral

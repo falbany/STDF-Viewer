@@ -35,7 +35,7 @@ Rows, computed from `len(BASE_HEADERS)` (never hard-coded):
 
 | rows | content |
 |---|---|
-| 1..12 | **attribute block** — the transposed `BASE_HEADERS`, one row each: Test#, Test Name, Param, Unit, SpecMin, SpecMax (static; FTR rows carry the synthetic ±0.999999 window, neutral yellow like E/F), then Min, Max, Mean, Cp, Cpk, Fails as **live formulas down each test column** over the DUT range — **filter-aware**, see *Filter-aware statistics* below — with cached results riding along (xlsxwriter convention). Labels in column A; B..O banner-fill blanks. |
+| 1..12 | **attribute block** — the transposed `BASE_HEADERS`, one row each: Test#, Test Name, Param, Unit, SpecMin, SpecMax (static; FTR rows carry the synthetic ±0.999999 window, neutral yellow like E/F), then Min, Max, Mean, Cp, Cpk, Fails as **live formulas down each test column** over the DUT range — **filter-aware**, see *Filter-aware statistics* below — with cached results riding along (xlsxwriter convention). Banner-fill blanks over A..N; **labels in column O** — the last frozen column, adjacent to the test cells each label describes (2026-11-16 ruling, moved from A1:A12; column A serves DUT # alone below). |
 | 13 | **filter header row** — `DUT #`, the 14 field names, and the short test name per test column (AutoFilter tolerates duplicated test names — the same ruling that killed Excel Tables on the matrix sheet; **AutoFilter, not a Table**, for the identical reason) |
 | 14..13+N | one row per DUT: DUT #, metadata cells, test cells |
 | 14+N | **Total row** — bold banner footer under the frozen columns (see *Total row* below); test columns stay blank beneath it |
@@ -234,6 +234,13 @@ adjacent (base DUT Summary first, creation order otherwise).
   is written but hides with the column — a value only appears if the
   column is manually unhidden. General rule: Total cells hide with their
   column.
+- Attribute labels move from A1:A12 to O1:O12 (2026-11-16): the labels
+  sit in the last frozen column, adjacent to the test cells they
+  describe; A1:A12 joins the banner-blank zone and column A serves DUT #
+  alone. Renderer-only change — the spec's `attribute_block` rows keep
+  `[label, …cells]`.
+- Cp/Cpk σ code corrected to `SUBTOTAL(107)` (2026-11-16, user-caught):
+  106 is PRODUCT in the 101–111 series, 107 is sample STDEV.
 
 ## Left to the builder
 
