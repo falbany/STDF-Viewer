@@ -4,12 +4,16 @@ builder (the DUT Summary matrix transposed) and its renderer."""
 import pytest
 
 from deps.exporter.helpers import cp_cached, cpk_cached
+from deps.exporter.theme import ModernTheme
 from deps.exporter.worksheets.dut_status import (
     TEST_CHUNK_CAP,
     build_dut_status_spec,
 )
 from deps.exporter.worksheets.dut_summary import FTR_SPEC_MAX, FTR_SPEC_MIN
+from deps.exporter.writer import render_dut_status_sheet
+from tests.exporter.conftest import load_workbook_bytes, read_xml, render_workbook
 from tests.exporter.test_generator_dut import make_summary
+from tests.exporter.test_writer import cf_block, col_dim, dxf_fill_hex
 
 # Layout (the transpose): attribute block rows 1..12, filter header 13,
 # data 14+. Test columns start at P (A + the 14 metadata columns B..O).
@@ -310,3 +314,109 @@ class TestChunkingAndDegenerates:
         assert values[(11, 16)] == ""
         assert values[(7, 16)] == 1.0
         assert spec["conditional_formatting"]["fails_max"] == 0.2
+
+
+# --------------------------------------------------------------------------
+# renderer
+# --------------------------------------------------------------------------
+
+
+def rendered(spec=None):
+    """Render a spec (default: the standard 2-test x 3-DUT one) to a saved
+    workbook's bytes."""
+    if spec is None:
+        spec = built()[0]
+
+    def build(wb, ws_by_name):
+        render_dut_status_sheet(ws_by_name["DUT Status"], spec, ModernTheme(wb))
+
+    return render_workbook(["DUT Status"], build)
+
+
+class TestRenderer:
+    def test_render_layout_and_styles(self):
+        ws = load_workbook_bytes(rendered())["DUT Status"]
+        assert ws["A1"].value == "Test#"
+        assert ws["A7"].value == "Min"
+        assert ws["A13"].value == "DUT #"
+        assert ws["B1"].fill.start_color.rgb.endswith("CBD5E1")  # banner
+        assert ws["A13"].fill.start_color.rgb.endswith("1E40AF")  # header
+        assert ws["P5"].fill.start_color.rgb.endswith("FFF3CD")  # neutral
+        assert ws["P14"].value == 1.0
+        assert ws["Q14"].value == 0
+        assert ws["P16"].value in (None, "")  # blank die cell
+        assert ws.row_dimensions[13].height == pytest.approx(22, abs=0.26)
+
+    def test_hidden_columns_keep_values(self):
+        # Review Focus: hidden columns keep their written values — only the
+        # dropdown is gone; a user who unhides can still read/filter them
+        ws = load_workbook_bytes(rendered())["DUT Status"]
+        for letter in ("B", "H", "K", "L", "N"):
+            assert col_dim(ws, letter).hidden is True, letter
+        assert ws["B14"].value == 1
+        assert ws["N14"].value == 123
+        assert col_dim(ws, "U").hidden is True and col_dim(ws, "V").hidden is True
+        assert ws["U13"].value == "flags (do not edit)"
+
+    def test_transposed_cf_rules(self):
+        ws = load_workbook_bytes(rendered())["DUT Status"]
+        rules = cf_block(ws, "P14:Q16")
+        assert [r.formula[0] for r in rules] == [
+            'P14=""',
+            'AND(P14<>"",P$5<>"",P14<P$5)',
+            'AND(P14<>"",P$6<>"",P14>P$6)',
+            'AND(U14=1,P$5="",P$6="")',
+            'P14<>""',
+        ]
+        assert [dxf_fill_hex(r) for r in rules] == [
+            "FFFFF3CD",
+            "FFFFCCCC",
+            "FFFFCCCC",
+            "FFFFCCCC",
+            "FFCCFFCC",
+        ]
+        assert [r.formula[0] for r in cf_block(ws, "P11:Q11")][0] == "AND(ISNUMBER(P11),P11>=1.67)"
+        assert [r.formula[0] for r in cf_block(ws, "O14:O16")] == [
+            'ISNUMBER(SEARCH("Superseded",O14))',
+            'ISNUMBER(SEARCH("Fail",O14))',
+            'ISNUMBER(SEARCH("Pass",O14))',
+        ]
+        duplicate = cf_block(ws, "C14:C16")
+        assert len(duplicate) == 1 and duplicate[0].type == "duplicateValues"
+        scale = cf_block(ws, "P12:Q12")
+        assert len(scale) == 1 and scale[0].colorScale is not None
+
+    def test_autofilter_freeze_print(self):
+        book = rendered()
+        xml = read_xml(book, "xl/worksheets/sheet1.xml")
+        assert 'autoFilter ref="A13:Q16"' in xml
+        ws = load_workbook_bytes(book)["DUT Status"]
+        assert ws.freeze_panes == "P14"
+        assert ws.print_title_rows == "$1:$13"
+        assert ws.sheet_properties.tabColor.rgb.endswith("1E40AF")
+
+    def test_sparkline_xml(self):
+        # openpyxl drops sparklines — assert on the raw package XML; the
+        # qualified range carries quotes (the sheet name has a space)
+        assert "'DUT Status'!P14:Q14" in read_xml(rendered(), "xl/worksheets/sheet1.xml")
+
+    def test_column_widths(self):
+        # xlsxwriter stores width + ~0.71 (max-digit-width compensation);
+        # assert within that tolerance
+        ws = load_workbook_bytes(rendered())["DUT Status"]
+        assert col_dim(ws, "A").width == pytest.approx(8, abs=0.75)
+        assert col_dim(ws, "B").width == pytest.approx(9, abs=0.75)
+        assert col_dim(ws, "C").width == pytest.approx(18, abs=0.75)
+        assert col_dim(ws, "D").width == pytest.approx(18, abs=0.75)
+        assert col_dim(ws, "P").width == pytest.approx(8, abs=0.75)
+        assert col_dim(ws, "S").width == pytest.approx(20, abs=0.75)
+
+    def test_render_zero_tests_smoke(self):
+        spec = build_dut_status_spec(make_summary(), [], ORDER, sheet_name="DUT Status")[0]
+        book = rendered(spec)
+        ws = load_workbook_bytes(book)["DUT Status"]
+        assert ws["A13"].value == "DUT #"
+        assert ws["O13"].value == "DUT Flag"
+        xml = read_xml(book, "xl/worksheets/sheet1.xml")
+        assert 'P14=""' not in xml  # no die rules without test columns
+        assert 'autoFilter ref="A13:O16"' in xml
