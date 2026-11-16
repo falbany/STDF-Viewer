@@ -170,17 +170,23 @@ class TestFormulas:
 
     def test_flags_fails_path_for_no_limit_tests(self):
         # a parametric test with NO limits takes the mirror-counting flags
-        # path — the transpose of the matrix's no-limit FAILS formula
+        # path — the transpose of the matrix's no-limit FAILS formula. The
+        # range is the test's OWN mirror column (test k's flags live in
+        # test_col(T + 3 + k)): with 3 tests the no-limit column is R and
+        # its mirror is X alone (V/W belong to tests P/Q)
         summary = make_summary()
         summary["TestInfo"][(15, 0, "3_nolimit/x")] = ["3_nolimit/x", 15, float("nan"), float("nan"), ""]
         spec = build_dut_status_spec(
             summary, TEST_TUPLES + [(15, 0, "3_nolimit/x")], ORDER, sheet_name="DUT Status"
         )[0]
         block = spec["attribute_block"]
-        assert block[11][3] == (
-            # third test column R, its mirrors at V:X (T+3 columns right)
-            '=IFERROR(SUMPRODUCT((V14:X16<>"")*(V14:X16=1)),"")'
-        )
+        formula = block[11][3]
+        assert formula == '=IFERROR(SUMPRODUCT((X14:X16<>"")*(X14:X16=1)),"")'
+        # cache and formula can never disagree: the cache counts only this
+        # test's mirrors, so the formula must reference only this test's
+        # mirror column (a chunk-wide range would count every test's flags)
+        assert "V14" not in formula and "W14" not in formula
+        assert spec["formula_values"][(12, 18)] == 0  # data-less test: no flags
 
     def test_cached_values(self):
         values = built()[0]["formula_values"]
