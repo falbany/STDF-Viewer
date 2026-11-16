@@ -29,23 +29,22 @@ Columns, fixed:
 | A | **DUT #** — block-row label column above the header (`Test#`..`Fails`), the `DUT #` filter header at row 13, then the global DUT number 1..N per data row (restores display order after sort/filter; names blank-ID DUTs) |
 | B..O | the 14 `METADATA_ROWS` fields in order: File ID, Part ID, Part TXT, Temperature, HW Bin, SW Bin, Wafer, X, Y, Head, Site, Tests Executed, Test Time, DUT Flag — values from the same `_metadata_cell` computations the matrix uses (Bins → bare int, Test Time → bare ms, Head/Site parsed, Temperature via the shared resolver + file-temperature fallback) |
 | P.. | test columns, one per test of the chunk: parametric value or FTR flag cell, blank for NaN/missing |
-| +3 | spacer, **Trend**, spacer — Trend holds one sparkline per DUT row across the chunk's test values (the transpose of the matrix's per-test trend; type `line`, same visual tokens) |
-| +T+3 | hidden **flag-mirror columns**, one per test in the same order (mirror of test k sits k columns right of the first mirror) — identical constant-offset geometry to the matrix's mirror columns (`flag_col_offset = T + 3`), so the CF rules and no-limit Fails formulas transpose mechanically |
+| +T+1 | one blank spacer, then hidden **flag-mirror columns**, one per test in the same order (mirror of test k sits k columns right of the first mirror) — constant-offset geometry (`flag_col_offset = T + 1`), so the CF rules and no-limit Fails formulas transpose mechanically. (2026-11-16 ruling: the matrix's Trend column and its sparklines are **dropped** on this sheet — a per-DUT line across a chunk's tests is not relevant in the status view; the matrix keeps its own.) |
 
 Rows, computed from `len(BASE_HEADERS)` (never hard-coded):
 
 | rows | content |
 |---|---|
-| 1..12 | **attribute block** — the transposed `BASE_HEADERS`, one row each: Test#, Test Name, Param, Unit, SpecMin, SpecMax (static; FTR rows carry the synthetic ±0.999999 window, neutral yellow like E/F), then Min, Max, Mean, Cp, Cpk, Fails as **live formulas down each test column** over the DUT range, with cached results riding along (xlsxwriter convention). Labels in column A; B..O banner-fill blanks. |
+| 1..12 | **attribute block** — the transposed `BASE_HEADERS`, one row each: Test#, Test Name, Param, Unit, SpecMin, SpecMax (static; FTR rows carry the synthetic ±0.999999 window, neutral yellow like E/F), then Min, Max, Mean, Cp, Cpk, Fails as **live formulas down each test column** over the DUT range — **filter-aware**, see *Filter-aware statistics* below — with cached results riding along (xlsxwriter convention). Labels in column A; B..O banner-fill blanks. |
 | 13 | **filter header row** — `DUT #`, the 14 field names, and the short test name per test column (AutoFilter tolerates duplicated test names — the same ruling that killed Excel Tables on the matrix sheet; **AutoFilter, not a Table**, for the identical reason) |
 | 14..13+N | one row per DUT: DUT #, metadata cells, test cells |
-| below | nothing — no banner row, no footer rows (nothing transposes into them) |
+| 14+N | **Total row** — bold banner footer under the frozen columns (see *Total row* below); test columns stay blank beneath it |
 
 - `freeze_panes = P14`: 15 frozen columns + 13 frozen rows (~300 px of
   vertical freeze — the transpose's price; the whole attribute block and
   all field names stay visible while scrolling DUTs and tests).
-- AutoFilter ref `A13:{last test col}{13+N}` — spacer/Trend/mirrors stay
-  outside the filter, like the matrix.
+- AutoFilter ref `A13:{last test col}{13+N}` — spacer/mirrors/Total row
+  stay outside the filter, like the matrix.
 - Fails heat (`fails_max = 0.2 × N`), Cp/Cpk band rules (over block rows
   10 and 11), DUT Flag status rules (over the DUT Flag column's data
   cells), duplicate-Part-ID rule (over Part ID's data cells) — all
@@ -56,6 +55,53 @@ Rows, computed from `len(BASE_HEADERS)` (never hard-coded):
 - Tab color `DUT_TAB_HEX`, footer, gridlines off, print titles rows
   1..13 — same polish as the matrix.
 
+## Filter-aware statistics (2026-11-16 ruling)
+
+The six live attribute rows (Min, Max, Mean, Cp, Cpk, Fails) speak about
+the **visible** DUTs: after an AutoFilter they recalculate over the rows
+that survive the filter, not the full population.
+
+- Min → `SUBTOTAL(105, range)`, Max → `SUBTOTAL(104)`, Mean →
+  `SUBTOTAL(101)` — same semantics as the plain functions they replace,
+  restricted to visible rows.
+- σ inside Cp/Cpk → `SUBTOTAL(106)` (sample STDEV, identical semantics to
+  today's `STDEV`); the Spec/Mean cell references are unchanged, so Cp/
+  Cpk recompose from visible σ and the visible Mean.
+- The two Fails formulas (limits path and flags path) multiply their
+  existing `SUMPRODUCT` by the visible-mask idiom
+  `SUBTOTAL(103, OFFSET(anchor, ROW(range)-ROW(anchor), 0))` row-by-row
+  — the standard non-array "count visible matching cells" pattern. Honest
+  cost: these formulas are volatile (OFFSET), so recalc time grows with
+  DUT count; accepted.
+- Cached results stay the **unfiltered** full-population numbers — the
+  sheet opens on today's full-data preview (fast, no volatile recalc on
+  open), then recalculates when the user filters or edits.
+- A filter that leaves nothing visible yields the IFERROR blank, per the
+  existing guard convention.
+
+## Total row (2026-11-16 ruling)
+
+One bold banner row at `14+N`, **below** the AutoFilter ref — filtering
+and sorting never hide, move, or reorder it. Every cell is SUBTOTAL-based
+so it tracks the filter like the attribute rows. Mapping over the frozen
+columns; test columns stay blank beneath it (the filter-aware Mean row
+already covers per-test stats):
+
+| column | content |
+|---|---|
+| A (DUT #) | label + displayed-DUT count: `="Total ("&SUBTOTAL(102, A-range)&" DUTs)"`, cached literal `Total (N DUTs)` |
+| Temperature, HW Bin, SW Bin, X, Y, Head, Site | Min–Max pair of the visible cells: `IFERROR(SUBTOTAL(105, rng)&"–"&SUBTOTAL(104, rng),"")`, cached `"2–5"` style |
+| Tests Executed | `IFERROR(SUBTOTAL(109, rng),"")` — SUM of executed tests across displayed DUTs |
+| Test Time | `IFERROR(SUBTOTAL(101, rng),"")` — mean test time |
+| DUT Flag | visible fails count — the flags SUMPRODUCT × visible-mask idiom above, matching the same fail literal the DUT Flag CF rules match |
+| File ID, Part ID, Part TXT, Wafer | blank (non-numeric identity fields) |
+
+Masked columns keep their Total cell — it simply hides with the column
+(user ruling 2026-11-16: the Test Time mean exists under the always-masked
+column and appears only if the user unhides it; the same visibility-follows-
+column rule covers constant-masked Temperature etc.). Skipped entirely when
+the sheet is degenerate (zero DUTs), like the AutoFilter.
+
 ## Masking transposes
 
 The same `METADATA_ROWS` mask rules apply **per column**: `never` keeps
@@ -63,12 +109,14 @@ the column; `blank` hides all-blank columns; `constant` hides columns
 whose non-blank values are all identical; `always` hides unconditionally
 (Test Time). Hidden columns are written then hidden via `set_column` —
 values exist, dropdowns gone. (User ruling 2026-11-16: hide constant
-columns the same way the matrix hides constant rows.)
+columns the same way the matrix hides constant rows.) The Total row rides
+the same rule: its cells are written under every mapped column and hide
+with their column.
 
 ## Chunking flips axis
 
 DUTs run down rows (no cap); **tests** overflow the 16,384-column cap.
-Per chunk: `15 + T + 3 + T ≤ 16384` → `TEST_CHUNK_CAP = 8183` tests per
+Per chunk: `15 + T + 1 + T ≤ 16384` → `TEST_CHUNK_CAP = 8184` tests per
 sheet, derived in-code. Overflow sheets `DUT Status (2)`… repeat the
 same DUT rows / frozen columns with the next tests, exactly like the
 matrix's die-overflow chunks in reverse. Every DUT Status sheet joins
@@ -102,16 +150,19 @@ adjacent (base DUT Summary first, creation order otherwise).
   declared there, per the gotcha).
 - **Tests:** new `tests/exporter/test_dut_status.py` (fixtures from
   `tests/exporter/conftest.py`): layout geometry, mask hiding, formula
-  strings + cached values, mirror offsets, CF ranges, chunk-cap math,
-  degenerate zero-DUT / zero-test sheets, render smoke test; a
-  generator-level test pins the call + tab order. The three gates stay
-  clean.
+  strings + cached values (filter-aware SUBTOTAL texts on the attribute
+  rows, Total-row cells + cached counts), mirror offsets, CF ranges,
+  chunk-cap math, degenerate zero-DUT / zero-test sheets, render smoke
+  test; a generator-level test pins the call + tab order. The three gates
+  stay clean.
 - **Progress:** one tick per test tuple inside `writeDUT_Status`
   (mirrors the matrix cadence; no fetches, so no extra info tick).
 
 ## Goals
 
 - One filter row answers "which DUTs failed / ran at 25 °C / binned 3".
+- Statistics speak about the **visible** DUTs: filter, and every stat —
+  the six attribute rows and the Total row — follows.
 - The matrix and the transpose never disagree: same field values, same
   resolver, same mask policy, same fail logic — by reusing the exact
   helpers, not by re-implementing them.
@@ -123,8 +174,10 @@ adjacent (base DUT Summary first, creation order otherwise).
 
 - No temperature-split sheets for DUT Status (filtering the Temperature
   column replaces §7.4 splits here).
-- No column stats for the metadata fields (the matrix keeps its row
-  stats; this sheet shows raw per-DUT values only).
+- No column stats for the metadata fields beyond the Total row's one-line
+  summary (2026-11-16 amended: the Total row adds the per-field Min–Max /
+  SUM / mean strip; no further per-field stat block — the matrix keeps
+  its row stats).
 - No ReportSelection member, no GUI check box, no settings field in this
   wave — the "Extended" check box is a later wave; this design only
   leaves the one-line guard at the call site.
@@ -168,15 +221,31 @@ adjacent (base DUT Summary first, creation order otherwise).
   to a later wave.
 - Complement status: DUT Summary untouched; generated on DUT Summary
   selection for now.
+- Trend column removed from DUT Status (2026-11-16): not relevant in the
+  status view; the matrix sheet keeps its own. Tail geometry = one spacer
+  + mirrors, `flag_col_offset = T + 1`, chunk cap 8,184.
+- Attribute rows are filter-aware (2026-11-16): Min/Max/Mean/Cp/Cpk/Fails
+  recalculate over the visible DUTs via the SUBTOTAL visible-cells family;
+  the volatile OFFSET idiom on the two Fails formulas is accepted.
+- Total row at 14+N (2026-11-16): displayed-DUT count in A, Min–Max pairs
+  for the numeric metadata columns, SUM for Tests Executed, mean for Test
+  Time, visible-fails count for DUT Flag; test columns blank beneath it.
+- Test Time stays always-masked (2026-11-16): its Total cell (the mean)
+  is written but hides with the column — a value only appears if the
+  column is manually unhidden. General rule: Total cells hide with their
+  column.
 
 ## Left to the builder
 
-- Exact transposed formula texts (stat / Cp / Cpk / fails over column
-  ranges) — semantics fixed, wording is builder-land; English syntax,
-  cached values always.
+- Exact transposed formula texts (filter-aware stat / Cp / Cpk / fails
+  over column ranges; Total-row cells) — semantics fixed, wording is
+  builder-land; English syntax, cached values always.
+- The DUT Flag fail literal the Total row's visible-fails count matches —
+  reuse whatever string the DUT Flag CF rules already match.
 - Exact column widths for A..O (proposal: A=8, Part ID/Part TXT wide,
-  rest 8–10; test columns 8, Trend 20) and any format fine-tuning on the
-  Temperature column.
+  rest 8–10; test columns 8) and any format fine-tuning on the
+  Temperature column; Total-row number formats (Min–Max cells general,
+  Tests Executed `"0"`, Test Time mean general).
 - Test names in the filter header: short name (`split_test_name`'s test
   part), Test Name block row likewise.
 - Degenerate-range handling transposed from the matrix's zero-die trick.
