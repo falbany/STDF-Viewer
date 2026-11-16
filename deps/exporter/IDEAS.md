@@ -26,25 +26,11 @@ is the single hook point — every wafer sheet already flows through it.
 Summary / Test Statistics sheets want the same treatment (scope creep
 risk — keep to wafer sheets first).
 
-## 2. Per-wafer yield chart on the stacked sheet — *medium*
+## 2. Per-wafer yield chart on the stacked sheet — *medium, MOOT 2026-11-16*
 
-**What.** A compact native column chart beside/below the Stacked Wafers
-table: categories = Wafer ID column, values = Yield column — sourced
-live from the table range, so it recalculates when the user edits
-cells, same contract as the table's live `=SUM`/`=COUNTIF` cells.
-
-**Why.** The engineering view currently reads yield row by row; a
-one-glance per-wafer comparison is the natural next layer, and the
-exporter already builds native charts (`build_bin_donut`, trend charts)
-to pattern from.
-
-**Where.** New chart factory in `deps/exporter/charts.py` (column
-variant of the donut pattern), called from `write_stacked_wafer_block`
-with an anchor below the die grid in the F.. zone.
-
-**Open.** Column vs bar orientation; anchor spot (below the grid vs
-right of the ID table); whether a second series (Bin 1 count) earns its
-place.
+~~Per-wafer yield chart~~ — moot: its data source (the Stacked Wafers
+table's Yield column) no longer exists; item 7 replaced the table with
+the names-only roster.
 
 ## 3. Flappy-die detection (cross-file intermittent fails) — *heavy, highest engineering value*
 
@@ -120,34 +106,12 @@ passes the strict limits.
 regression risk on rendering geometry, covered by the 767-test suite
 plus a visual check.
 
-## 7. Redesign (or drop) the Stacked Wafers ID table — *small, deferred 2026-11-16*
+## 7. Redesign (or drop) the Stacked Wafers ID table — *small, DONE 2026-11-16*
 
-**What.** The stacked sheet's "Stacked Wafers — per-wafer metrics" table
-(`write_stacked_wafer_table`, charts.py) gets rethought. The maintainer's
-ruling: the stacked map's job is to show WHICH wafers are stacked —
-anyone needing per-wafer detail opens that wafer's own sheet. The table
-as it stands (Wafer ID / Bin 1 / Yield with Python-computed static
-values, deferred from the live-Distribution work) carries detail the
-sheet doesn't need and semantics (DUT-level yield) the wafer sheets
-don't agree with.
-
-**Brainstorm seed — what earns a place next to each wafer name.**
-Candidates to weigh, all derivable from data already in hand (each
-fetched payload's grid/info rows — no new fetch round-trip):
-
-- Total failed DUTs of the wafer (Σ of its own dedup grid — the stacked
-  heatmap's per-wafer contribution; matches the sheet's fail-count
-  semantics, unlike DUT-level yield)
-- Fail coordinates (dies failing ≥1 time in that wafer)
-- Probed dies (its grid size — how much of the stack that wafer covers)
-- Files contributing / measurement date (which run stacked it)
-- Drop entirely and let the sheet name the wafers only.
-
-**Open.** Whether the table stays a table at all vs. a compact per-wafer
-legend block; interaction with idea 2 (per-wafer yield chart — moot if
-Yield leaves the table); if a per-wafer number survives, whether it
-goes live-formula (cross-sheet refs to each wafer sheet, approach A of
-the 2026-11-16 Distribution spec) or static.
+~~Redesign (or drop) the Stacked Wafers ID table~~ — DONE: replaced by
+the names-only metadata roster (`write_stacked_wafer_roster`) at the
+row-14 slot; spec
+`docs/superpowers/specs/2026-11-16-stacked-wafer-roster-design.md`.
 
 ## 8. Live Distribution formulas in the wafer tables — *small* (→ issue, 2026-11-16)
 
@@ -156,4 +120,5 @@ table (stacked sheet) get Excel-formula Distribution columns
 (`=Count/Total`, Total row `=SUM`), matching the live-COUNTIF Count
 columns they sit beside. Spec'd as
 `docs/superpowers/specs/2026-11-16-wafer-table-distribution-formulas-design.md`;
-the Stacked Wafers table's Yield column is deferred to item 7.
+the Stacked Wafers table's Yield column deferral is resolved 2026-11-16
+(item 7 shipped: the roster replaced the table — nothing left to defer).
