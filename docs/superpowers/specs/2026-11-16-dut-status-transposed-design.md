@@ -64,7 +64,7 @@ that survive the filter, not the full population.
 - Min → `SUBTOTAL(105, range)`, Max → `SUBTOTAL(104)`, Mean →
   `SUBTOTAL(101)` — same semantics as the plain functions they replace,
   restricted to visible rows.
-- σ inside Cp/Cpk → `SUBTOTAL(106)` (sample STDEV, identical semantics to
+- σ inside Cp/Cpk → `SUBTOTAL(107)` (sample STDEV, identical semantics to
   today's `STDEV`); the Spec/Mean cell references are unchanged, so Cp/
   Cpk recompose from visible σ and the visible Mean.
 - The two Fails formulas (limits path and flags path) multiply their

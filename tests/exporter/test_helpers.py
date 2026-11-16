@@ -312,8 +312,8 @@ class TestTransposedFormulas:
     above stay plain — the matrix is untouched)."""
 
     STAT_MIN_COL = '=IFERROR(SUBTOTAL(105,P14:P16),"")'
-    CP_COL = '=IFERROR((P6-P5)/(6*SUBTOTAL(106,P14:P16)),"")'
-    CPK_COL = '=IFERROR(MIN((P6-P9)/(3*SUBTOTAL(106,P14:P16)),(P9-P5)/(3*SUBTOTAL(106,P14:P16))),"")'
+    CP_COL = '=IFERROR((P6-P5)/(6*SUBTOTAL(107,P14:P16)),"")'
+    CPK_COL = '=IFERROR(MIN((P6-P9)/(3*SUBTOTAL(107,P14:P16)),(P9-P5)/(3*SUBTOTAL(107,P14:P16))),"")'
     FAILS_LIMITS_COL = (
         '=IFERROR(SUMPRODUCT((P14:P16<>"")'
         '*((P5<>"")*(P14:P16<P5)+(P6<>"")*(P14:P16>P6))'

@@ -324,9 +324,10 @@ def fails_formula_flags(row: int, first: str, last: str) -> str:
 
 
 # SUBTOTAL visible-cells codes (filter-aware attribute block, ruling
-# 2026-11-16): 101 AVERAGE / 104 MAX / 105 MIN / 106 STDEV (sample) —
+# 2026-11-16): 101 AVERAGE / 104 MAX / 105 MIN / 107 STDEV (sample) —
 # same semantics as the plain functions, restricted to visible rows;
 # 103 COUNTA drives the OFFSET visible-mask idiom on the Fails counts.
+# (106 is PRODUCT in the 101-111 series, NOT STDEV — 107 is.)
 _STAT_CODES = {"MIN": 105, "MAX": 104, "AVERAGE": 101}
 
 
@@ -342,13 +343,13 @@ def cp_formula_col(
     col: str, first_row: int, last_row: int, spec_min_row: int, spec_max_row: int
 ) -> str:
     """Column twin of cp_formula (DUT Status attribute block), filter-aware:
-    (USL-LSL)/(6σ) with σ embedded as SUBTOTAL(106, ...) (sample STDEV over
+    (USL-LSL)/(6σ) with σ embedded as SUBTOTAL(107, ...) (sample STDEV over
     the visible cells) down the test column; the limits read the attribute
     block's SpecMax/SpecMin cells ({col}{spec_max_row} / {col}{spec_min_row}).
     IFERROR blanks σ=0 and missing limits."""
     return (
         f'=IFERROR(({col}{spec_max_row}-{col}{spec_min_row})'
-        f'/(6*SUBTOTAL(106,{col}{first_row}:{col}{last_row})),"")'
+        f'/(6*SUBTOTAL(107,{col}{first_row}:{col}{last_row})),"")'
     )
 
 
@@ -361,11 +362,11 @@ def cpk_formula_col(
     mean_row: int,
 ) -> str:
     """Column twin of cpk_formula (DUT Status attribute block), filter-aware:
-    the smaller of the two ratio arms over σ = SUBTOTAL(106, ...) (visible
+    the smaller of the two ratio arms over σ = SUBTOTAL(107, ...) (visible
     cells); limits and mean read the attribute block's cells
     ({col}{spec_max_row} / {col}{mean_row} / {col}{spec_min_row}). IFERROR
     blanks σ=0 and missing/one-sided limits."""
-    rng = f"SUBTOTAL(106,{col}{first_row}:{col}{last_row})"
+    rng = f"SUBTOTAL(107,{col}{first_row}:{col}{last_row})"
     return (
         f"=IFERROR(MIN(({col}{spec_max_row}-{col}{mean_row})/(3*{rng}),"
         f'({col}{mean_row}-{col}{spec_min_row})/(3*{rng})),"")'
