@@ -24,7 +24,7 @@ SCIENTIFIC = "0.00E+00"
 
 # Exact formula strings (asserted literally, not via helpers — the
 # test_matrix.py convention). P/Q are the two fixture test columns;
-# U:V are their flag mirrors.
+# S:T are their flag mirrors (R is the blank spacer).
 MIN_P = '=IFERROR(MIN(P14:P16),"")'
 CP_P = '=IFERROR((P6-P5)/(6*STDEV(P14:P16)),"")'
 CPK_P = '=IFERROR(MIN((P6-P9)/(3*STDEV(P14:P16)),(P9-P5)/(3*STDEV(P14:P16))),"")'
@@ -95,11 +95,11 @@ class TestLayout:
     def test_dut_rows_cells_and_mirrors(self):
         rows = built()[0]["dut_rows"]
         assert len(rows) == 3
-        assert len(rows[0]) == 22  # dut# + 14 metadata + 2 tests + 3 tail + 2 mirrors
-        assert rows[0] == [1, 1, "SN541_T25C", "", 25.0, 1, 2, "", 3, -5, 1, 1, 42, 123, "Passed", 1.0, 0, "", "", "", 0, 0]
-        assert rows[1] == [2, 1, "SN542_T25C", "", 25.0, 1, 3, "", 4, -6, 1, 1, 42, 123, "Failed", 1.2, 1, "", "", "", 0, 1]
+        assert len(rows[0]) == 20  # dut# + 14 metadata + 2 tests + spacer + 2 mirrors
+        assert rows[0] == [1, 1, "SN541_T25C", "", 25.0, 1, 2, "", 3, -5, 1, 1, 42, 123, "Passed", 1.0, 0, "", 0, 0]
+        assert rows[1] == [2, 1, "SN542_T25C", "", 25.0, 1, 3, "", 4, -6, 1, 1, 42, 123, "Failed", 1.2, 1, "", 0, 1]
         # NaN -> blank test cell; flag -1 (not tested) -> blank mirror
-        assert rows[2] == [3, 1, "SN543_T85C", "", 85.0, 1, 2, "", 3, -5, 1, 1, 42, 123, "Passed", "", 0, "", "", "", "", 0]
+        assert rows[2] == [3, 1, "SN543_T85C", "", 85.0, 1, 2, "", 3, -5, 1, 1, 42, 123, "Passed", "", 0, "", "", 0]
 
     def test_masked_columns_and_metadata_formats(self):
         spec = built()[0]
@@ -123,9 +123,8 @@ class TestLayout:
         spec = built()[0]
         assert spec["first_test_col"] == "P"
         assert spec["test_columns"] == ["P", "Q"]
-        assert spec["trend_col"] == "S"  # spacer R / Trend S / spacer T
-        assert spec["mirror_first_col"] == "U"
-        assert spec["flag_col_offset"] == 5
+        assert spec["mirror_first_col"] == "S"  # spacer R / mirrors S:T (Trend dropped 2026-11-16)
+        assert spec["flag_col_offset"] == 3
         assert spec["freeze_panes"] == "P14"
         assert spec["name"] == "DUT Status"
         assert spec["dut_count"] == 3
@@ -172,8 +171,8 @@ class TestFormulas:
         # a parametric test with NO limits takes the mirror-counting flags
         # path — the transpose of the matrix's no-limit FAILS formula. The
         # range is the test's OWN mirror column (test k's flags live in
-        # test_col(T + 3 + k)): with 3 tests the no-limit column is R and
-        # its mirror is X alone (V/W belong to tests P/Q)
+        # test_col(T + 1 + k)): with 3 tests the no-limit column is R and
+        # its mirror is V alone (T/U belong to tests P/Q)
         summary = make_summary()
         summary["TestInfo"][(15, 0, "3_nolimit/x")] = ["3_nolimit/x", 15, float("nan"), float("nan"), ""]
         spec = build_dut_status_spec(
@@ -181,11 +180,11 @@ class TestFormulas:
         )[0]
         block = spec["attribute_block"]
         formula = block[11][3]
-        assert formula == '=IFERROR(SUMPRODUCT((X14:X16<>"")*(X14:X16=1)),"")'
+        assert formula == '=IFERROR(SUMPRODUCT((V14:V16<>"")*(V14:V16=1)),"")'
         # cache and formula can never disagree: the cache counts only this
         # test's mirrors, so the formula must reference only this test's
         # mirror column (a chunk-wide range would count every test's flags)
-        assert "V14" not in formula and "W14" not in formula
+        assert "T14" not in formula and "U14" not in formula
         assert spec["formula_values"][(12, 18)] == 0  # data-less test: no flags
 
     def test_cached_values(self):
@@ -205,7 +204,7 @@ class TestFormulas:
         assert cf["die_rules"] == {
             "range": "P14:Q16",
             "first_col": "P",
-            "flag_col_offset": 5,
+            "flag_col_offset": 3,
             "spec_min_row": 5,
             "spec_max_row": 6,
             "first_data_row": 14,
@@ -216,14 +215,6 @@ class TestFormulas:
         assert cf["fails_max"] == pytest.approx(0.6)  # 0.2 x N
         assert cf["dut_flag_range"] == "O14:O16"
         assert cf["part_id_range"] == "C14:C16"
-
-    def test_sparklines(self):
-        sparks = built()[0]["sparklines"]
-        assert sparks == [
-            {"row": 14, "type": "line", "range": "P14:Q14"},
-            {"row": 15, "type": "line", "range": "P15:Q15"},
-            {"row": 16, "type": "line", "range": "P16:Q16"},
-        ]
 
     def test_freeze_filter_and_names(self):
         spec = built()[0]
@@ -237,7 +228,7 @@ class TestFormulas:
 
 class TestChunkingAndDegenerates:
     def test_chunk_cap_and_overflow(self):
-        assert TEST_CHUNK_CAP == 8183
+        assert TEST_CHUNK_CAP == 8184
         many = [(i, 0, f"T{i}") for i in range(TEST_CHUNK_CAP + 1)]
         specs = build_dut_status_spec(make_summary(), many, ORDER, sheet_name="DUT Status")
         assert len(specs) == 2
@@ -252,7 +243,6 @@ class TestChunkingAndDegenerates:
     def test_zero_tests_degenerate(self):
         spec = build_dut_status_spec(make_summary(), [], ORDER, sheet_name="DUT Status")[0]
         assert spec["test_columns"] == []
-        assert spec["trend_col"] == "Q"  # spacer P / Trend Q / spacer R — always present
         assert spec["mirror_first_col"] is None
         assert spec["flag_col_offset"] == 0
         cf = spec["conditional_formatting"]
@@ -275,7 +265,7 @@ class TestChunkingAndDegenerates:
             "Test Time",
             "DUT Flag",
         ]
-        assert spec["dut_rows"][0][-3:] == ["", "", ""]  # tail, no mirrors
+        assert len(spec["dut_rows"][0]) == 15  # no tail without tests
         assert spec["auto_filter"] == {"ref": "A13:O16"}
 
     def test_zero_duts_degenerate(self):
@@ -361,8 +351,8 @@ class TestRenderer:
             assert col_dim(ws, letter).hidden is True, letter
         assert ws["B14"].value == 1
         assert ws["N14"].value == 123
-        assert col_dim(ws, "U").hidden is True and col_dim(ws, "V").hidden is True
-        assert ws["U13"].value == "flags (do not edit)"
+        assert col_dim(ws, "S").hidden is True and col_dim(ws, "T").hidden is True
+        assert ws["S13"].value == "flags (do not edit)"
 
     def test_transposed_cf_rules(self):
         ws = load_workbook_bytes(rendered())["DUT Status"]
@@ -371,7 +361,7 @@ class TestRenderer:
             'P14=""',
             'AND(P14<>"",P$5<>"",P14<P$5)',
             'AND(P14<>"",P$6<>"",P14>P$6)',
-            'AND(U14=1,P$5="",P$6="")',
+            'AND(S14=1,P$5="",P$6="")',
             'P14<>""',
         ]
         assert [dxf_fill_hex(r) for r in rules] == [
@@ -401,11 +391,6 @@ class TestRenderer:
         assert ws.print_title_rows == "$1:$13"
         assert ws.sheet_properties.tabColor.rgb.endswith("1E40AF")
 
-    def test_sparkline_xml(self):
-        # openpyxl drops sparklines — assert on the raw package XML; the
-        # qualified range carries quotes (the sheet name has a space)
-        assert "'DUT Status'!P14:Q14" in read_xml(rendered(), "xl/worksheets/sheet1.xml")
-
     def test_column_widths(self):
         # xlsxwriter stores width + ~0.71 (max-digit-width compensation);
         # assert within that tolerance
@@ -415,7 +400,6 @@ class TestRenderer:
         assert col_dim(ws, "C").width == pytest.approx(18, abs=0.75)
         assert col_dim(ws, "D").width == pytest.approx(18, abs=0.75)
         assert col_dim(ws, "P").width == pytest.approx(8, abs=0.75)
-        assert col_dim(ws, "S").width == pytest.approx(20, abs=0.75)
 
     def test_render_zero_tests_smoke(self):
         spec = build_dut_status_spec(make_summary(), [], ORDER, sheet_name="DUT Status")[0]

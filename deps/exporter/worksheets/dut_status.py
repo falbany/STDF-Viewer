@@ -47,7 +47,6 @@ from deps.exporter.helpers import (
     fails_formula_flags_col,
     fails_formula_limits_col,
     get_column_letter,
-    has_numeric,
     split_dut_chunks,
     stat_cached,
     stat_formula_col,
@@ -93,8 +92,9 @@ FIRST_TEST_COL_INDEX = 2 + len(METADATA_ROWS)
 
 # Test-axis overflow (the transpose of the matrix's die chunks): DUTs run
 # down rows (no cap); TESTS overflow the 16,384-column cap. Per chunk:
-# 15 fixed columns + T tests + 3 (spacer/Trend/spacer) + T mirrors <= 16384.
-TEST_CHUNK_CAP = (16384 - (1 + len(METADATA_ROWS)) - 3) // 2  # 8183
+# 15 fixed columns + T tests + 1 spacer + T mirrors <= 16384 (the Trend
+# column is gone here — ruling 2026-11-16).
+TEST_CHUNK_CAP = (16384 - (1 + len(METADATA_ROWS)) - 1) // 2  # 8184
 
 # Metadata column letters the CF ranges live over — derived from the
 # METADATA_ROWS positions, the transpose of the matrix's DUT_FLAG_ROW /
@@ -274,11 +274,10 @@ def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metad
     first_test = test_col(0)
     test_columns = [test_col(i) for i in range(test_count)]
     last_test = test_columns[-1] if tests else first_test
-    # one blank spacer after the tests, the Trend column, one more spacer,
-    # then the hidden flag mirrors — the matrix's tail geometry transposed
-    trend_col = test_col(test_count + 1)
-    mirror_first_col = test_col(test_count + 3) if tests else None
-    flag_col_offset = test_count + 3 if tests else 0
+    # one blank spacer after the tests, then the hidden flag mirrors — the
+    # matrix's tail geometry minus the Trend column (ruling 2026-11-16)
+    mirror_first_col = test_col(test_count + 1) if tests else None
+    flag_col_offset = test_count + 1 if tests else 0
     # the matrix's zero-die clamp: an empty DUT range pins the formulas'
     # bottom to DATA_START so every range stays well-formed
     last_data_row = DATA_START + dut_count - 1 if dut_count > 0 else DATA_START
@@ -303,16 +302,13 @@ def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metad
         formula_values.update(dict(cache_entries))
 
     # one DUT row per DUT: DUT #, the 14 metadata cells, the chunk's test
-    # cells, spacer/Trend/spacer, the hidden flag mirrors
+    # cells, one blank spacer, the hidden flag mirrors (no tests -> no tail)
     dut_rows = [
         [
             i + 1,
             *(column_values[i] for column_values in meta_columns),
             *(per_test_die[t][i] for t in range(test_count)),
-            "",
-            "",
-            "",
-            *(per_test_mirror[t][i] for t in range(test_count)),
+            *(["", *(per_test_mirror[t][i] for t in range(test_count))] if tests else []),
         ]
         for i in range(dut_count)
     ]
@@ -344,7 +340,6 @@ def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metad
         "dut_count": dut_count,
         "first_test_col": first_test,
         "test_columns": test_columns,
-        "trend_col": trend_col,
         "mirror_first_col": mirror_first_col,
         "flag_col_offset": flag_col_offset,
         "attribute_block": attribute_block,
@@ -371,7 +366,6 @@ def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metad
             FAILS_ROW: "0",
         },
         "formula_values": formula_values,
-        "sparklines": _dut_sparklines(per_test_die, first_test, last_test, dut_count),
         "freeze_panes": f"{first_test}{DATA_START}",
         "conditional_formatting": conditional_formatting,
     }
@@ -380,20 +374,6 @@ def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metad
             "ref": f"A{FILTER_ROW}:{get_column_letter(len(filter_header))}{FILTER_ROW + dut_count}"
         }
     return spec
-
-
-def _dut_sparklines(per_test_die, first_test, last_test, dut_count):
-    """One Trend sparkline per DUT row with numeric test values (always
-    "line" — the transpose of the matrix's per-test trend; local unqualified
-    range, the writer qualifies it with the sheet name)."""
-    sparklines = []
-    for i in range(dut_count):
-        if has_numeric([column[i] for column in per_test_die]):
-            row = DATA_START + i
-            sparklines.append(
-                {"row": row, "type": "line", "range": f"{first_test}{row}:{last_test}{row}"}
-            )
-    return sparklines
 
 
 class DUTStatusMixin(ReportHost):

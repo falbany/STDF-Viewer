@@ -690,16 +690,13 @@ def _set_dut_status_column_widths(ws, spec):
         ws.set_column(1 + i, 1 + i, width, None, options)
     for letter in spec.get("test_columns") or []:
         ws.set_column(_col0(letter), _col0(letter), DIE_COLUMN_WIDTH)
-    trend_col = spec.get("trend_col")
-    if trend_col:
-        ws.set_column(_col0(trend_col), _col0(trend_col), TREND_COLUMN_WIDTH)
 
 
 def render_dut_status_sheet(ws, spec: dict, theme) -> None:
     """Render one DUT Status spec dict onto ``ws`` (attribute block, filter
     header, DUT rows, transposed conditional formatting, hidden mask and
-    mirror columns, Trend sparklines, pinned column widths, freeze /
-    gridlines / print / tab / footer polish)."""
+    mirror columns, pinned column widths, freeze / gridlines / print / tab /
+    footer polish)."""
     _render_dut_status_attribute_block(ws, spec, theme)
 
     filter_row = spec["filter_row"]
@@ -750,7 +747,6 @@ def render_dut_status_sheet(ws, spec: dict, theme) -> None:
     # — Review Focus: hidden columns keep their data, only the dropdown is
     # gone); the mirrors hide separately (no width of their own)
     _hide_transposed_mirrors(ws, spec, theme)
-    _add_sparklines(ws, spec)
 
     ref = (spec.get("auto_filter") or {}).get("ref")
     if ref:
