@@ -306,8 +306,9 @@ def build_generated(
     waferTuples = [(0, 1, "W01")] if wafer_tuples is None else wafer_tuples
     reportPath = str(tmp_path / "report.xlsx")
     # classic totalLoopCnt formula (stdfExporter.start): Trend 2*1*1
-    # + Bin 1*1 + DUT (1 + 2) + Wafer len(waferTuples)
-    totalLoopCnt = 2 + 1 + 3 + 1
+    # + Bin 1*1 + DUT (1 + 2 + DUT Status 2, one per test tuple, no info
+    # tick) + Wafer len(waferTuples)
+    totalLoopCnt = 2 + 1 + 5 + 1
     selection = [
         ReportSelection.DUT,
         ReportSelection.Trend,
@@ -320,10 +321,11 @@ def build_generated(
         totalLoopCnt += 2  # Stat: +1 per data row
     if not with_dut:
         # stat-only selection: the DUT sheet (its info tick + 2 test
-        # columns) never renders — the filter's stat-only fallback fetch
+        # columns) and its DUT Status complement (2 test ticks, no info
+        # tick) never render — the filter's stat-only fallback fetch
         # path (§7.2) is what still honors the drop-set
         selection.remove(ReportSelection.DUT)
-        totalLoopCnt -= 3
+        totalLoopCnt -= 5
     if with_file_info:
         # classic sheet-creation order: FileInfo first (+1 loop tick)
         selection.insert(0, ReportSelection.FileInfo)
@@ -515,7 +517,7 @@ def generated_with_file_info(tmp_path, qapp):
 class TestSheetInventory:
     def test_sheets_classic_order_without_histogram(self, generated):
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
+        assert wb.sheetnames == ["DUT Summary", "DUT Status", "Trend Chart", "Bin Chart", "Wafer W01"]
 
     def test_unselected_and_overflow_sheets_absent(self, generated):
         _, wb, _, _, _ = generated
@@ -1094,8 +1096,9 @@ class TestChartSheets:
 class TestProgressContract:
     def test_loop_count_matches_classic_total(self, generated):
         gen, _, _, _, _ = generated
-        # DUT 1 + 2 tests, Trend 2 (2 tests x 1 head x 1 site), Bin 1, Wafer 1
-        assert gen.totalLoopCnt == 7
+        # DUT 1 + 2 tests + DUT Status 2 (one per test tuple, no info tick),
+        # Trend 2 (2 tests x 1 head x 1 site), Bin 1, Wafer 1
+        assert gen.totalLoopCnt == 9
         assert gen.loopCount == gen.totalLoopCnt
 
     def test_close_signal_emitted_no_error(self, generated):
@@ -1356,6 +1359,7 @@ class TestStatFtrCacheDetection:
         _, wb, _, _, _ = generated
         assert wb.sheetnames == [
             "DUT Summary",
+            "DUT Status",
             "Test Statistics",
             "Trend Chart",
             "Bin Chart",
@@ -1412,8 +1416,8 @@ class TestStatFtrCacheDetection:
 
     def test_loop_count_includes_stat_rows(self, generated):
         gen, _, _, _, _ = generated
-        # DUT 3 + Stat 2 + Trend 2 + Bin 1 + Wafer 1
-        assert gen.loopCount == gen.totalLoopCnt == 9
+        # DUT 3 + DUT Status 2 + Stat 2 + Trend 2 + Bin 1 + Wafer 1
+        assert gen.loopCount == gen.totalLoopCnt == 11
 
     def test_close_signal_emitted_no_error(self, generated):
         _, _, _, closed, errors = generated
@@ -1526,7 +1530,7 @@ class TestTemperatureSplit:
     def test_split_off_unchanged(self, tmp_path, qapp):
         generated = build_generated(tmp_path, qapp, part_ids=list(self.SPLIT_IDS))
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
+        assert wb.sheetnames == ["DUT Summary", "DUT Status", "Trend Chart", "Bin Chart", "Wafer W01"]
 
     def test_single_temperature_no_split_sheets(self, tmp_path, qapp, monkeypatch):
         generated = build_generated(
@@ -1535,7 +1539,7 @@ class TestTemperatureSplit:
             split_temperature=True, monkeypatch=monkeypatch,
         )
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
+        assert wb.sheetnames == ["DUT Summary", "DUT Status", "Trend Chart", "Bin Chart", "Wafer W01"]
 
     def test_split_does_not_touch_stats_kargs(self, tmp_path, qapp, monkeypatch):
         generated = self.split_generated(tmp_path, qapp, monkeypatch, with_stat=True)
@@ -1585,6 +1589,7 @@ class TestDutBlockTabOrder:
             "DUT Summary - T-55°C",
             "DUT Summary - T25°C",
             "DUT Summary - T125.5°C",
+            "DUT Status",
             "Trend Chart",
             "Bin Chart",
             "Wafer W01",
@@ -1886,3 +1891,38 @@ class TestWaferCellMap:
         assert not ws.tables
         assert ws["A2"].value == "WAFER_ID:"  # KPI cells drop out
         assert ws["B2"].value == "W01"
+
+
+# --------------------------------------------------------------------------
+# DUT Status sheet (the transposed DUT Summary complement)
+# --------------------------------------------------------------------------
+
+
+class TestDUTStatusSheet:
+    def test_dut_status_sheet_rendered(self, tmp_path, qapp, monkeypatch):
+        gen, wb, reportPath, closed, errors = build_generated(
+            tmp_path, qapp, monkeypatch=monkeypatch,
+        )
+        assert gen.loopCount == gen.totalLoopCnt  # +2 DUT Status ticks absorbed
+        ws = wb["DUT Status"]
+        assert ws["A13"].value == "DUT #"
+        assert ws["O13"].value == "DUT Flag"
+        assert ws["P13"].value == "0_TXCC"
+        assert ws["A14"].value == 1 and ws["A16"].value == 3
+        assert ws["O14"].value == "Passed"
+        assert ws["P14"].value == 1.0 and ws["Q14"].value == 0
+        cached = load_workbook(reportPath, data_only=True)["DUT Status"]
+        assert cached["P7"].value == 1.0  # Min of (1.0, 1.2, blank)
+        assert cached["P12"].value == 0  # Fails, limits path
+        assert cached["Q12"].value == 1  # Fails, FTR limits path
+
+    def test_dut_status_follows_the_dut_block(self, tmp_path, qapp, monkeypatch):
+        _, wb, _, _, _ = build_generated(tmp_path, qapp, monkeypatch=monkeypatch)
+        names = wb.sheetnames
+        assert names.index("DUT Status") == names.index("DUT Summary") + 1
+
+    def test_dut_summary_untouched(self, tmp_path, qapp, monkeypatch):
+        _, wb, _, _, _ = build_generated(tmp_path, qapp, monkeypatch=monkeypatch)
+        dut = wb["DUT Summary"]
+        assert dut["A16"].value == "Test#"  # repeated header row 16 intact
+        assert dut["M17"].value == 1.0  # first die cell of data row 17
