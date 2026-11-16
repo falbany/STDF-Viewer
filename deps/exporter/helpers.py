@@ -323,23 +323,32 @@ def fails_formula_flags(row: int, first: str, last: str) -> str:
 # --------------------------------------------------------------------------
 
 
+# SUBTOTAL visible-cells codes (filter-aware attribute block, ruling
+# 2026-11-16): 101 AVERAGE / 104 MAX / 105 MIN / 106 STDEV (sample) —
+# same semantics as the plain functions, restricted to visible rows;
+# 103 COUNTA drives the OFFSET visible-mask idiom on the Fails counts.
+_STAT_CODES = {"MIN": 105, "MAX": 104, "AVERAGE": 101}
+
+
 def stat_formula_col(name: str, col: str, first_row: int, last_row: int) -> str:
-    """Column twin of stat_formula (DUT Status attribute block):
-    ``=IFERROR(AVERAGE(P14:P1000),"")`` style — one IFERROR guard, the range
-    running down the test column."""
-    return f'=IFERROR({name}({col}{first_row}:{col}{last_row}),"")'
+    """Column twin of stat_formula (DUT Status attribute block), filter-aware:
+    ``=IFERROR(SUBTOTAL(101,P14:P1000),"")`` style — SUBTOTAL codes ignore
+    AutoFilter-hidden rows, one IFERROR guard, the range running down the
+    test column."""
+    return f'=IFERROR(SUBTOTAL({_STAT_CODES[name]},{col}{first_row}:{col}{last_row}),"")'
 
 
 def cp_formula_col(
     col: str, first_row: int, last_row: int, spec_min_row: int, spec_max_row: int
 ) -> str:
-    """Column twin of cp_formula (DUT Status attribute block): (USL-LSL)/(6σ)
-    with σ embedded as STDEV down the test column; the limits read the
-    attribute block's SpecMax/SpecMin cells ({col}{spec_max_row} /
-    {col}{spec_min_row}). IFERROR blanks σ=0 and missing limits."""
+    """Column twin of cp_formula (DUT Status attribute block), filter-aware:
+    (USL-LSL)/(6σ) with σ embedded as SUBTOTAL(106, ...) (sample STDEV over
+    the visible cells) down the test column; the limits read the attribute
+    block's SpecMax/SpecMin cells ({col}{spec_max_row} / {col}{spec_min_row}).
+    IFERROR blanks σ=0 and missing limits."""
     return (
         f'=IFERROR(({col}{spec_max_row}-{col}{spec_min_row})'
-        f'/(6*STDEV({col}{first_row}:{col}{last_row})),"")'
+        f'/(6*SUBTOTAL(106,{col}{first_row}:{col}{last_row})),"")'
     )
 
 
@@ -351,12 +360,12 @@ def cpk_formula_col(
     spec_max_row: int,
     mean_row: int,
 ) -> str:
-    """Column twin of cpk_formula (DUT Status attribute block): the smaller
-    of the two ratio arms over σ = STDEV down the test column; limits and
-    mean read the attribute block's cells ({col}{spec_max_row} /
-    {col}{mean_row} / {col}{spec_min_row}). IFERROR blanks σ=0 and
-    missing/one-sided limits."""
-    rng = f"STDEV({col}{first_row}:{col}{last_row})"
+    """Column twin of cpk_formula (DUT Status attribute block), filter-aware:
+    the smaller of the two ratio arms over σ = SUBTOTAL(106, ...) (visible
+    cells); limits and mean read the attribute block's cells
+    ({col}{spec_max_row} / {col}{mean_row} / {col}{spec_min_row}). IFERROR
+    blanks σ=0 and missing/one-sided limits."""
+    rng = f"SUBTOTAL(106,{col}{first_row}:{col}{last_row})"
     return (
         f"=IFERROR(MIN(({col}{spec_max_row}-{col}{mean_row})/(3*{rng}),"
         f'({col}{mean_row}-{col}{spec_min_row})/(3*{rng})),"")'
@@ -366,14 +375,19 @@ def cpk_formula_col(
 def fails_formula_limits_col(
     col: str, first_row: int, last_row: int, spec_min_row: int, spec_max_row: int
 ) -> str:
-    """Column twin of fails_formula_limits (DUT Status attribute block):
-    FAILS count down one test column vs the attribute block's SpecMin/
-    SpecMax cells, ignoring blank DUT cells."""
+    """Column twin of fails_formula_limits (DUT Status attribute block),
+    filter-aware: FAILS count down one test column vs the attribute block's
+    SpecMin/SpecMax cells, ignoring blank DUT cells and rows hidden by the
+    AutoFilter (SUBTOTAL(103, OFFSET(...)) visible-mask idiom — volatile,
+    accepted 2026-11-16; cached results stay full-population)."""
     rng = f"{col}{first_row}:{col}{last_row}"
+    anchor = f"{col}${first_row}"
+    visible = f"SUBTOTAL(103,OFFSET({anchor},ROW({rng})-ROW({anchor}),0))"
     return (
         f'=IFERROR(SUMPRODUCT(({rng}<>"")'
         f'*(({col}{spec_min_row}<>"")*({rng}<{col}{spec_min_row})'
-        f'+({col}{spec_max_row}<>"")*({rng}>{col}{spec_max_row})))'
+        f'+({col}{spec_max_row}<>"")*({rng}>{col}{spec_max_row}))'
+        f"*{visible})"
         ',"")'
     )
 
@@ -381,10 +395,14 @@ def fails_formula_limits_col(
 def fails_formula_flags_col(
     mirror_first: str, mirror_last: str, first_row: int, last_row: int
 ) -> str:
-    """Column twin of fails_formula_flags (DUT Status attribute block):
-    FAILS count of 0/1 flag cells down the hidden mirror range."""
+    """Column twin of fails_formula_flags (DUT Status attribute block),
+    filter-aware: FAILS count of 0/1 flag cells down the hidden mirror
+    range, restricted to rows visible under the AutoFilter (SUBTOTAL(103,
+    OFFSET(...)) visible-mask idiom — volatile, accepted 2026-11-16)."""
     mrng = f"{mirror_first}{first_row}:{mirror_last}{last_row}"
-    return f'=IFERROR(SUMPRODUCT(({mrng}<>"")*({mrng}=1)),"")'
+    anchor = f"{mirror_first}${first_row}"
+    visible = f"SUBTOTAL(103,OFFSET({anchor},ROW({mrng})-ROW({anchor}),0))"
+    return f'=IFERROR(SUMPRODUCT(({mrng}<>"")*({mrng}=1)*{visible}),"")'
 
 
 def metadata_stat_formulas(

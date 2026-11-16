@@ -306,16 +306,23 @@ class TestFailsFormulas:
 class TestTransposedFormulas:
     """DUT Status wave: the formula builders' column twins — ranges run DOWN
     a test column; spec-min/max/mean are attribute-block cells {col}5 /
-    {col}6 / {col}9 (the transpose of the matrix's fixed E/F/I letters)."""
+    {col}6 / {col}9 (the transpose of the matrix's fixed E/F/I letters).
+    Filter-aware since the 2026-11-16 ruling: SUBTOTAL visible-cells codes,
+    the Fails counts carrying the OFFSET visible-mask idiom (the row twins
+    above stay plain — the matrix is untouched)."""
 
-    STAT_MIN_COL = '=IFERROR(MIN(P14:P16),"")'
-    CP_COL = '=IFERROR((P6-P5)/(6*STDEV(P14:P16)),"")'
-    CPK_COL = '=IFERROR(MIN((P6-P9)/(3*STDEV(P14:P16)),(P9-P5)/(3*STDEV(P14:P16))),"")'
+    STAT_MIN_COL = '=IFERROR(SUBTOTAL(105,P14:P16),"")'
+    CP_COL = '=IFERROR((P6-P5)/(6*SUBTOTAL(106,P14:P16)),"")'
+    CPK_COL = '=IFERROR(MIN((P6-P9)/(3*SUBTOTAL(106,P14:P16)),(P9-P5)/(3*SUBTOTAL(106,P14:P16))),"")'
     FAILS_LIMITS_COL = (
         '=IFERROR(SUMPRODUCT((P14:P16<>"")'
-        '*((P5<>"")*(P14:P16<P5)+(P6<>"")*(P14:P16>P6))),"")'
+        '*((P5<>"")*(P14:P16<P5)+(P6<>"")*(P14:P16>P6))'
+        '*SUBTOTAL(103,OFFSET(P$14,ROW(P14:P16)-ROW(P$14),0))),"")'
     )
-    FAILS_FLAGS_COL = '=IFERROR(SUMPRODUCT((U14:V16<>"")*(U14:V16=1)),"")'
+    FAILS_FLAGS_COL = (
+        '=IFERROR(SUMPRODUCT((U14:V16<>"")*(U14:V16=1)'
+        '*SUBTOTAL(103,OFFSET(U$14,ROW(U14:V16)-ROW(U$14),0))),"")'
+    )
 
     def test_transposed_formula_builders(self):
         assert stat_formula_col("MIN", "P", 14, 16) == self.STAT_MIN_COL

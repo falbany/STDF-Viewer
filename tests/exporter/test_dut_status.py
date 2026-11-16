@@ -24,13 +24,18 @@ SCIENTIFIC = "0.00E+00"
 
 # Exact formula strings (asserted literally, not via helpers — the
 # test_matrix.py convention). P/Q are the two fixture test columns;
-# S:T are their flag mirrors (R is the blank spacer).
-MIN_P = '=IFERROR(MIN(P14:P16),"")'
-CP_P = '=IFERROR((P6-P5)/(6*STDEV(P14:P16)),"")'
-CPK_P = '=IFERROR(MIN((P6-P9)/(3*STDEV(P14:P16)),(P9-P5)/(3*STDEV(P14:P16))),"")'
+# S:T are their flag mirrors (R is the blank spacer). The attribute rows
+# are filter-aware (ruling 2026-11-16): SUBTOTAL visible-cells codes, the
+# Fails counts carrying the OFFSET visible-mask idiom.
+MIN_P = '=IFERROR(SUBTOTAL(105,P14:P16),"")'
+MAX_P = '=IFERROR(SUBTOTAL(104,P14:P16),"")'
+MEAN_P = '=IFERROR(SUBTOTAL(101,P14:P16),"")'
+CP_P = '=IFERROR((P6-P5)/(6*SUBTOTAL(106,P14:P16)),"")'
+CPK_P = '=IFERROR(MIN((P6-P9)/(3*SUBTOTAL(106,P14:P16)),(P9-P5)/(3*SUBTOTAL(106,P14:P16))),"")'
 FAILS_LIMITS_P = (
     '=IFERROR(SUMPRODUCT((P14:P16<>"")'
-    '*((P5<>"")*(P14:P16<P5)+(P6<>"")*(P14:P16>P6))),"")'
+    '*((P5<>"")*(P14:P16<P5)+(P6<>"")*(P14:P16>P6))'
+    '*SUBTOTAL(103,OFFSET(P$14,ROW(P14:P16)-ROW(P$14),0))),"")'
 )
 
 TEST_TUPLES = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
@@ -155,8 +160,8 @@ class TestFormulas:
     def test_formula_strings(self):
         block = built()[0]["attribute_block"]
         assert block[6][1] == MIN_P
-        assert block[7][1] == '=IFERROR(MAX(P14:P16),"")'
-        assert block[8][1] == '=IFERROR(AVERAGE(P14:P16),"")'
+        assert block[7][1] == MAX_P
+        assert block[8][1] == MEAN_P
         assert block[9][1] == CP_P
         assert block[10][1] == CPK_P
         assert block[11][1] == FAILS_LIMITS_P  # parametric with limits
@@ -164,7 +169,8 @@ class TestFormulas:
         # exactly like the matrix's FTR rows (third wave)
         assert block[11][2] == (
             '=IFERROR(SUMPRODUCT((Q14:Q16<>"")'
-            '*((Q5<>"")*(Q14:Q16<Q5)+(Q6<>"")*(Q14:Q16>Q6))),"")'
+            '*((Q5<>"")*(Q14:Q16<Q5)+(Q6<>"")*(Q14:Q16>Q6))'
+            '*SUBTOTAL(103,OFFSET(Q$14,ROW(Q14:Q16)-ROW(Q$14),0))),"")'
         )
 
     def test_flags_fails_path_for_no_limit_tests(self):
@@ -180,7 +186,10 @@ class TestFormulas:
         )[0]
         block = spec["attribute_block"]
         formula = block[11][3]
-        assert formula == '=IFERROR(SUMPRODUCT((V14:V16<>"")*(V14:V16=1)),"")'
+        assert formula == (
+            '=IFERROR(SUMPRODUCT((V14:V16<>"")*(V14:V16=1)'
+            '*SUBTOTAL(103,OFFSET(V$14,ROW(V14:V16)-ROW(V$14),0))),"")'
+        )
         # cache and formula can never disagree: the cache counts only this
         # test's mirrors, so the formula must reference only this test's
         # mirror column (a chunk-wide range would count every test's flags)
@@ -273,7 +282,7 @@ class TestChunkingAndDegenerates:
         assert spec["dut_count"] == 0
         assert spec["dut_rows"] == []
         # the matrix's zero-die clamp: last data row pins to DATA_START
-        assert spec["attribute_block"][6][1] == '=IFERROR(MIN(P14:P14),"")'
+        assert spec["attribute_block"][6][1] == '=IFERROR(SUBTOTAL(105,P14:P14),"")'
         cf = spec["conditional_formatting"]
         assert cf["fails_max"] == 0.0
         assert "auto_filter" not in spec
