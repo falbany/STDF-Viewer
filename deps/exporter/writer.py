@@ -772,7 +772,8 @@ def _render_dut_summary_dut_rows(ws, spec, theme):
     data_start = spec["data_start"]
     dut_rows = spec["dut_rows"]
     expected_columns = max(map(len, dut_rows), default=0)
-    column_formats = [None] * (expected_columns + 1)  # 1-based: index 0 unused
+    # 1-based: index 0 unused; num_fmt strings placed per column, None = plain body
+    column_formats: list[str | None] = [None] * (expected_columns + 1)
     for letter, num_fmt in (spec.get("metadata_formats") or {}).items():
         column = _col0(letter) + 1
         if column <= expected_columns:
