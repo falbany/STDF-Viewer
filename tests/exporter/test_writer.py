@@ -17,6 +17,7 @@ from tests.exporter.conftest import (
 )
 from deps.exporter.theme import ModernTheme
 from deps.exporter.writer import (
+    _render_data_rows,
     _write_cell,
     _write_cell_fast,
     apply_autofit,
@@ -1482,3 +1483,92 @@ class TestWriteCellFast:
         book = render_workbook(["Sheet"], build)
         ws = load_workbook_bytes(book)["Sheet"]
         assert not ws.column_dimensions
+
+
+# --------------------------------------------------------------------------
+# _render_data_rows format hoisting (exporter perf task 3)
+# --------------------------------------------------------------------------
+
+
+def make_hoist_rows():
+    """20 data rows x 21 cells (12 base + 6 die + 3 flags); one P/F row so
+    the die "0" number-format variant occurs too."""
+    rows = []
+    for i in range(20):
+        is_pf = i == 19
+        rows.append(
+            [
+                100 + i,
+                f"{i}_TEST",
+                "PARAM",
+                "P/F" if is_pf else "V",
+                0.5,
+                1.5,
+                '=IFERROR(MIN(M17:R17),"")',
+                '=IFERROR(MAX(M17:R17),"")',
+                '=IFERROR(AVERAGE(M17:R17),"")',
+                f"=CP{17 + i}",
+                f"=CPK{17 + i}",
+                f"=FAILS{17 + i}",
+                *([0] * 6 if is_pf else [1.0 + d for d in range(6)]),
+                0,
+                1,
+                0,
+            ]
+        )
+    return rows
+
+
+class TestMatrixFormatHoist:
+    """Perf task 3: _render_data_rows resolves each cell's Format from a
+    per-render memo keyed by every argument variation in the loop
+    (column, fill, num_fmt, boundary) instead of composing theme kwargs
+    per cell — theme.cell_format calls must track the static variant set,
+    not rows x cells."""
+
+    def hoist_spec(self):
+        """20-row x 6-die variant of make_matrix_spec; row_groups [0, 10]
+        put the boundary row INSIDE the banded odd group."""
+        return make_matrix_spec(
+            rows=make_hoist_rows(),
+            die_columns=["M", "N", "O", "P", "Q", "R"],
+            row_groups=[0, 10],
+            number_formats={
+                "M": SCIENTIFIC,
+                "N": SCIENTIFIC,
+                "O": SCIENTIFIC,
+                "P": SCIENTIFIC,
+                "Q": SCIENTIFIC,
+                "R": SCIENTIFIC,
+                "SpecMin": SCIENTIFIC,
+                "SpecMax": SCIENTIFIC,
+                "Min": SCIENTIFIC,
+                "Max": SCIENTIFIC,
+                "Mean": SCIENTIFIC,
+                "Fails": "0",
+                "Cp": "0.00",
+                "Cpk": "0.00",
+                "Test#": "0",
+            },
+        )
+
+    def test_data_rows_cell_format_calls_bounded_by_variants(self, monkeypatch):
+        # before the hoist: one theme.cell_format composition per cell =
+        # 20 rows x 21 cells = 420 calls; after: bounded by the static
+        # variant set (~49 for this spec — fixed columns by fill x boundary,
+        # E/F neutral pair, die columns by P/F-ness) — far below 60.
+        spec = self.hoist_spec()
+        original = ModernTheme.cell_format
+        calls = []
+
+        def counting(theme_self, **kwargs):
+            calls.append(kwargs)
+            return original(theme_self, **kwargs)
+
+        monkeypatch.setattr(ModernTheme, "cell_format", counting)
+
+        def build(wb, ws_by_name):
+            _render_data_rows(ws_by_name["Sheet"], spec, ModernTheme(wb))
+
+        render_workbook(["Sheet"], build)
+        assert len(calls) < 60

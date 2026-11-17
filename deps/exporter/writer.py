@@ -307,7 +307,15 @@ def _render_data_rows(ws, spec, theme):
 
     SpecMin/SpecMax (E/F) carry a static neutral yellow fill on every data
     row (2026-11-10), overriding the group banding there; Test/Param keep
-    the right/left column alignment."""
+    the right/left column alignment.
+
+    The styling arguments vary only by (column, fill, num_fmt, boundary)
+    across the whole loop — font/body, border and the per-column alignment
+    are constant — so each cell's Format resolves through a per-render memo
+    and theme.cell_format runs once per variant, not once per cell. The
+    boundary extra dict is a per-render constant, so the has_extra boolean
+    keys it. The prebuilt Format goes straight to _write_cell_fast (the
+    matrix pins its widths — nothing may reach the autofit ledger)."""
     die_columns = spec["die_columns"]
     formats = spec.get("number_formats") or {}
     fixed_formats = {
@@ -319,6 +327,8 @@ def _render_data_rows(ws, spec, theme):
     banded_offsets = _odd_group_offsets(spec)
     neutral = NEUTRAL_FILL_HEX
     group = GROUP_FILL_HEX
+    boundary_extra = {"top": 2, "top_color": f"#{GROUP_BORDER_HEX}"}
+    fmt_cache: dict = {}
 
     data_start = _data_start(spec)
     for offset, values in enumerate(spec["rows"]):
@@ -339,24 +349,26 @@ def _render_data_rows(ws, spec, theme):
                 fill = group
             else:
                 fill = None
-            extra = (
-                {"top": 2, "top_color": f"#{GROUP_BORDER_HEX}"}
-                if boundary and fixed_column
-                else None
-            )
-            _write_cell(
+            has_extra = boundary and fixed_column
+            key = (column, fill, number_format, has_extra)
+            fmt = fmt_cache.get(key)
+            if fmt is None:
+                fmt = theme.cell_format(
+                    font="body",
+                    align=_body_align_key(column),
+                    border=True,
+                    fill_hex=fill,
+                    num_fmt=number_format,
+                    extra=boundary_extra if has_extra else None,
+                )
+                fmt_cache[key] = fmt
+            _write_cell_fast(
                 ws,
                 row,
                 column,
                 value,
-                theme,
-                font="body",
-                align=_body_align_key(column),
-                border=True,
-                fill_hex=fill,
-                num_fmt=number_format,
+                fmt,
                 cached=formula_values.get((row, column)),
-                extra=extra,
             )
 
 
