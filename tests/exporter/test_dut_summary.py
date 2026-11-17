@@ -1,7 +1,10 @@
 """Tests for deps/exporter/worksheets/dut_summary.py: the DUT Summary spec
 builder (the Test Summary matrix transposed) and its renderer."""
 
+import io
+
 import pytest
+import xlsxwriter.utility as xlsxwriter_utility
 
 from deps.exporter.helpers import cp_cached, cpk_cached
 from deps.exporter.theme import ModernTheme
@@ -11,7 +14,12 @@ from deps.exporter.worksheets.dut_summary import (
 )
 from deps.exporter.worksheets.test_summary import FTR_SPEC_MAX, FTR_SPEC_MIN
 from deps.exporter.writer import render_dut_summary_sheet
-from tests.exporter.conftest import load_workbook_bytes, read_xml, render_workbook
+from tests.exporter.conftest import (
+    load_workbook_bytes,
+    read_xml,
+    render_workbook,
+    xlsxwriter_Workbook,
+)
 from tests.exporter.test_generator_dut import make_summary
 from tests.exporter.test_writer import cf_block, col_dim, dxf_fill_hex
 
@@ -511,3 +519,93 @@ class TestRenderer:
         xml = read_xml(book, "xl/worksheets/sheet1.xml")
         assert 'P14=""' not in xml  # no die rules without test columns
         assert 'autoFilter ref="A13:O16"' in xml
+
+
+# --------------------------------------------------------------------------
+# DUT-row format hoisting (exporter perf task 4)
+# --------------------------------------------------------------------------
+
+
+class TestDutRowFormatHoist:
+    """Perf task 4: the DUT-row loop precomputes one num_fmt per column
+    ONCE per sheet and resolves every cell's Format through a num_fmt-keyed
+    memo (body font, centered, bordered, no fill — identical for every DUT
+    cell): theme.cell_format compositions track the distinct column
+    formats, and xl_col_to_name must never scale with rows x columns (it
+    used to run once per cell)."""
+
+    COLUMNS = 20  # DUT # + 14 metadata + 2 tests + spacer + 2 mirrors
+
+    def counting_render(self, monkeypatch, row_multiplier=1, render=None):
+        """Render the DUT Summary spec (default: the full sheet) with
+        counting proxies around xl_col_to_name and ModernTheme.cell_format;
+        return (col_name_calls, format_calls) counted over the RENDER only
+        (the counter window closes before wb.close() — xlsxwriter's save
+        path hits xl_col_to_name through a process-global column-name
+        cache, which would poison the counts with order-dependent noise).
+        `row_multiplier` duplicates the spec's DUT rows — neither count may
+        move."""
+        if render is None:
+            render = render_dut_summary_sheet
+        spec = built()[0]
+        if row_multiplier > 1:
+            spec["dut_rows"] = spec["dut_rows"] * row_multiplier
+
+        original_col = xlsxwriter_utility.xl_col_to_name
+        col_calls = []
+
+        def counting_col(*args):
+            col_calls.append(args)
+            return original_col(*args)
+
+        monkeypatch.setattr(xlsxwriter_utility, "xl_col_to_name", counting_col)
+
+        original_cf = ModernTheme.cell_format
+        format_calls = []
+
+        def counting_cf(theme_self, **kwargs):
+            format_calls.append(kwargs)
+            return original_cf(theme_self, **kwargs)
+
+        monkeypatch.setattr(ModernTheme, "cell_format", counting_cf)
+
+        out = io.BytesIO()
+        wb = xlsxwriter_Workbook(out)
+        ws = wb.add_worksheet("DUT Summary")
+        render(ws, spec, ModernTheme(wb))
+        counts = (len(col_calls), len(format_calls))
+        wb.close()
+        return counts
+
+    def test_xl_col_to_name_does_not_scale_with_rows_x_columns(self, monkeypatch):
+        # before the hoist: one xl_col_to_name per DUT cell (3 rows x 20
+        # columns = 60 render calls); after: the loop's per-column
+        # precompute reads the spec's letter-keyed dicts (zero calls) —
+        # the remaining calls are the static CF-rule plumbing, identical
+        # at 10x the rows.
+        small_cols, _ = self.counting_render(monkeypatch, row_multiplier=1)
+        big_cols, _ = self.counting_render(monkeypatch, row_multiplier=10)
+        assert small_cols == big_cols
+
+    def test_dut_row_format_compositions_do_not_scale_with_rows(self, monkeypatch):
+        # theme.cell_format over the whole sheet is row-static: the DUT-row
+        # loop resolves through the memo, so 10x the rows must compose the
+        # exact same set of formats as 1x (the attribute block / filter
+        # header / mirror headers / Total row don't vary with rows either).
+        _, small = self.counting_render(monkeypatch, row_multiplier=1)
+        _, big = self.counting_render(monkeypatch, row_multiplier=10)
+        assert small == big
+
+    def test_dut_rows_compose_exactly_the_distinct_column_formats(self, monkeypatch):
+        # loop-only render: every distinct column num_fmt composed once —
+        # "0" (DUT # + integer metadata), the test columns' SCIENTIFIC/"0",
+        # None (blank metadata, spacer, mirrors) — a handful of
+        # compositions, not rows x cells (was 3 x 20 = 60 before the hoist);
+        # xl_col_to_name never runs per cell (bound: column_count + slack).
+        from deps.exporter.writer import _render_dut_summary_dut_rows
+
+        col_calls, format_calls = self.counting_render(
+            monkeypatch, render=_render_dut_summary_dut_rows
+        )
+        assert format_calls <= 4
+        assert col_calls <= self.COLUMNS + 5

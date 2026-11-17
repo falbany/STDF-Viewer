@@ -723,6 +723,51 @@ def _set_dut_summary_column_widths(ws, spec):
         ws.set_column(_col0(letter), _col0(letter), DIE_COLUMN_WIDTH)
 
 
+def _render_dut_summary_dut_rows(ws, spec, theme):
+    """The DUT rows (first at ``data_start``): body cells throughout —
+    DUT # "0", integer metadata columns via the spec's formats, test
+    columns per their FTR/parametric format; the spacer and flag mirrors
+    stay plain body (no num_fmt — Task 6 bulk-writes the mirrors). No
+    group banding: DUT rows carry no workflow groups.
+
+    The per-column num_fmt list is precomputed ONCE per sheet: the spec's
+    letter-keyed format dicts placed at their 1-based columns (unknown
+    letters stay None, the DUT # column pins "0" last so it wins the
+    column-1 priority the old per-cell branch had). Every cell's Format
+    then resolves through a memo keyed by num_fmt alone — font/body,
+    centered, bordered, no fill are loop constants, identical for every
+    DUT cell — so the per-cell hot path is a list index, a memo lookup
+    and _write_cell_fast: no per-cell xl_col_to_name, no per-cell theme
+    composition, nothing reaches the autofit ledger (the sheet pins its
+    widths)."""
+    data_start = spec["data_start"]
+    dut_rows = spec["dut_rows"]
+    expected_columns = max(map(len, dut_rows), default=0)
+    column_formats = [None] * (expected_columns + 1)  # 1-based: index 0 unused
+    for letter, num_fmt in (spec.get("metadata_formats") or {}).items():
+        column = _col0(letter) + 1
+        if column <= expected_columns:
+            column_formats[column] = num_fmt
+    for letter, num_fmt in (spec.get("test_column_formats") or {}).items():
+        column = _col0(letter) + 1
+        if column <= expected_columns:
+            column_formats[column] = num_fmt
+    if expected_columns:
+        column_formats[1] = "0"  # the DUT # column
+    fmt_cache: dict = {}
+    for offset, row_values in enumerate(dut_rows):
+        row = data_start + offset
+        for column, value in enumerate(row_values, start=1):
+            num_fmt = column_formats[column]
+            fmt = fmt_cache.get(num_fmt)
+            if fmt is None:
+                fmt = theme.cell_format(
+                    font="body", align="center", border=True, fill_hex=None, num_fmt=num_fmt
+                )
+                fmt_cache[num_fmt] = fmt
+            _write_cell_fast(ws, row, column, value, fmt)
+
+
 def render_dut_summary_sheet(ws, spec: dict, theme) -> None:
     """Render one DUT Summary spec dict onto ``ws`` (attribute block, filter
     header, DUT rows, transposed conditional formatting, hidden mask and
@@ -737,26 +782,9 @@ def render_dut_summary_sheet(ws, spec: dict, theme) -> None:
         )
     ws.set_row(filter_row - 1, ROW_HEIGHT)
 
-    # DUT rows: body cells throughout — DUT # "0", integer metadata columns
-    # via the spec's formats, test columns per their FTR/parametric format.
-    # No group banding: DUT rows carry no workflow groups.
-    data_start = spec["data_start"]
-    meta_count = spec["metadata_column_count"]
-    metadata_formats = spec.get("metadata_formats") or {}
-    test_formats = spec.get("test_column_formats") or {}
-    for offset, row_values in enumerate(spec["dut_rows"]):
-        row = data_start + offset
-        for column, value in enumerate(row_values, start=1):
-            letter = xlutil.xl_col_to_name(column - 1)
-            if column == 1:
-                num_fmt = "0"
-            elif column <= 1 + meta_count:
-                num_fmt = metadata_formats.get(letter)
-            else:
-                num_fmt = test_formats.get(letter)
-            _write_cell(
-                ws, row, column, value, theme, font="body", align="center", border=True, num_fmt=num_fmt
-            )
+    # DUT rows: body cells throughout — prebuilt per-column Formats, no
+    # per-cell col names (see _render_dut_summary_dut_rows)
+    _render_dut_summary_dut_rows(ws, spec, theme)
 
     # Total row (ruling 2026-11-16): banner footer below the AutoFilter ref;
     # SUBTOTAL cells track the filter, masked columns hide their cell with
