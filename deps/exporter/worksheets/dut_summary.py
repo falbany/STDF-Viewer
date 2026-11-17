@@ -375,18 +375,33 @@ def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metad
         spec["auto_filter"] = {
             "ref": f"A{FILTER_ROW}:{get_column_letter(len(filter_header))}{FILTER_ROW + dut_count}"
         }
-        # Total row (ruling 2026-11-16): one banner footer below the
-        # AutoFilter ref — filtering and sorting never hide, move or sort it
+        # Total row (ruling 2026-11-16): one banner footer ONE BLANK ROW
+        # below the AutoFilter ref — the spacer breaks Excel's filter/sort
+        # current-region sweep (contiguous rows get taken into account), so
+        # filtering and sorting never hide, move or sort it
         spec["total_row"] = {
-            "row": DATA_START + dut_count,
+            "row": DATA_START + dut_count + 1,
             "cells": _total_row_cells(meta_columns, dut_count, last_data_row, tr),
         }
     return spec
 
 
 # Metadata fields the Total row carries a Min–Max pair for (the numeric
-# per-DUT fields); File ID / Part ID / Part TXT / Wafer stay blank.
-_TOTAL_MINMAX_NAMES = ("Temperature", "HW Bin", "SW Bin", "X", "Y", "Head", "Site")
+# per-DUT fields); Part ID / Part TXT stay blank. File ID and Wafer joined
+# 2026-11-17: both are numeric by unit_type, but a Wafer ID can be text —
+# SUBTOTAL drops the text, the IFERROR guard blanks the cell when no
+# numeric value survives, and the cached preview rides the numeric subset.
+_TOTAL_MINMAX_NAMES = (
+    "Temperature",
+    "HW Bin",
+    "SW Bin",
+    "X",
+    "Y",
+    "Head",
+    "Site",
+    "File ID",
+    "Wafer",
+)
 
 
 def _total_row_cells(meta_columns, dut_count, last_data_row, tr):

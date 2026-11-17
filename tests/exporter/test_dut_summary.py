@@ -332,7 +332,9 @@ class TestTotalRow:
     def test_total_row_spec_mapping(self):
         spec = built()[0]
         total = spec["total_row"]
-        assert total["row"] == 17  # DATA_START + dut_count, below the filter ref (ends 16)
+        assert total["row"] == 18  # DATA_START + dut_count + 1: one blank
+        # spacer (row 17) between the filter ref (ends 16) and the banner —
+        # filters sweep contiguous rows, the blank breaks the sweep
         cells = total["cells"]  # 15 entries, A..O
         assert len(cells) == 15
         assert cells[0] == ['="Total ("&SUBTOTAL(102,A14:A16)&" DUTs)"', "Total (3 DUTs)", None]
@@ -351,14 +353,19 @@ class TestTotalRow:
             '*SUBTOTAL(103,OFFSET(O$14,ROW(O14:O16)-ROW(O$14),0))),"")'
         )
         assert cells[14][1] == 1 and cells[14][2] == "0"  # one Failed among visible
-        for blank in (1, 2, 3, 7):  # File ID, Part ID, Part TXT, Wafer
+        # File ID and Wafer ride the min–max pair too (2026-11-17): the same
+        # IFERROR-blanked SUBTOTAL(105)–SUBTOTAL(104) as the other numeric
+        # fields — Wafer can be text, the guard blanks the cell then
+        assert cells[1] == ['=IFERROR(SUBTOTAL(105,B14:B16)&"–"&SUBTOTAL(104,B14:B16),"")', "1–1", None]
+        assert cells[7] == ['=IFERROR(SUBTOTAL(105,H14:H16)&"–"&SUBTOTAL(104,H14:H16),"")', "0–0", None]
+        for blank in (2, 3):  # Part ID, Part TXT
             assert cells[blank] == ["", None, None]
 
     def test_total_row_degenerates_and_chunks(self):
         zero = build_dut_summary_spec(make_summary(), TEST_TUPLES, [], sheet_name="DUT Summary")[0]
         assert "total_row" not in zero  # zero DUTs: no Total row
         no_tests = build_dut_summary_spec(make_summary(), [], ORDER, sheet_name="DUT Summary")[0]
-        assert no_tests["total_row"]["row"] == 17  # tests don't gate it
+        assert no_tests["total_row"]["row"] == 18  # tests don't gate it
         chunks = build_dut_summary_spec(
             make_summary(),
             [(i, 0, f"T{i}") for i in range(TEST_CHUNK_CAP + 1)],
@@ -367,12 +374,35 @@ class TestTotalRow:
         )
         assert chunks[0]["total_row"] == chunks[1]["total_row"]  # identical on every chunk
 
+    def test_total_row_text_wafer_guards_blank(self):
+        # Wafer IDs can be text (2026-11-17): the min–max formula ignores
+        # text (SUBTOTAL keeps only numbers) and the IFERROR guard blanks
+        # the cell when no numeric value survives; the cached preview
+        # follows the numeric subset ("0–0" = MIN/MAX over no numbers)
+        summary = make_summary()
+        summary["dutInfo"][1] = {
+            i: info[:8] + (f"W0{i + 1}",) + info[9:] for i, info in summary["dutInfo"][1].items()
+        }
+        cells = build_dut_summary_spec(summary, TEST_TUPLES, ORDER, sheet_name="DUT Summary")[0]["total_row"]["cells"]
+        assert cells[7][0] == '=IFERROR(SUBTOTAL(105,H14:H16)&"–"&SUBTOTAL(104,H14:H16),"")'
+        assert cells[7][1] == "0–0"
+        # one numeric wafer among text ones: the numeric subset rides alone
+        summary["dutInfo"][1] = {
+            i: info[:8] + ((7,) if i == 1 else (f"W0{i + 1}",)) + info[9:]
+            for i, info in summary["dutInfo"][1].items()
+        }
+        cells = build_dut_summary_spec(summary, TEST_TUPLES, ORDER, sheet_name="DUT Summary")[0]["total_row"]["cells"]
+        assert cells[7][1] == "7–7"
+
     def test_total_row_render(self):
         ws = load_workbook_bytes(rendered())["DUT Summary"]
-        assert ws["A17"].value == '="Total ("&SUBTOTAL(102,A14:A16)&" DUTs)"'
-        assert ws["A17"].fill.start_color.rgb.endswith("CBD5E1")  # banner fill
-        assert ws["M17"].value == '=IFERROR(SUBTOTAL(109,M14:M16),"")'
-        assert ws["N17"].value == '=IFERROR(SUBTOTAL(101,N14:N16),"")'
+        assert ws["A17"].value is None  # blank spacer: filters ignore the Total row
+        assert ws["A18"].value == '="Total ("&SUBTOTAL(102,A14:A16)&" DUTs)"'
+        assert ws["A18"].fill.start_color.rgb.endswith("CBD5E1")  # banner fill
+        assert ws["B18"].value == '=IFERROR(SUBTOTAL(105,B14:B16)&"–"&SUBTOTAL(104,B14:B16),"")'
+        assert ws["H18"].value == '=IFERROR(SUBTOTAL(105,H14:H16)&"–"&SUBTOTAL(104,H14:H16),"")'
+        assert ws["M18"].value == '=IFERROR(SUBTOTAL(109,M14:M16),"")'
+        assert ws["N18"].value == '=IFERROR(SUBTOTAL(101,N14:N16),"")'
         assert col_dim(ws, "N").hidden is True  # mean hides with its column
         xml = read_xml(rendered(), "xl/worksheets/sheet1.xml")
         assert 'autoFilter ref="A13:Q16"' in xml  # Total row outside the filter
