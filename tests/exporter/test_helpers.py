@@ -112,6 +112,11 @@ class TestParseTemperatureText:
             ("25", 25.0),
             ("-40C", -40.0),
             ("25.5 °C", 25.5),
+            ("25°", 25.0),  # bare degree sign
+            ("25 °K", -248.15),  # Kelvin -> Celsius
+            ("298 K", 24.85),
+            ("25 kelvin", -248.15),
+            ("25 [KELVIN]", -248.15),
             ("+25C", 25.0),  # sign dropped by the regex, number still found
             ("#1 → 25C\n#2 → -40C", 25.0),  # composite: first subfile wins
             ("Set to 25C on chuck", 25.0),  # free text: first number wins

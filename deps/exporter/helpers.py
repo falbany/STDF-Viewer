@@ -76,13 +76,17 @@ TEMPERATURE_RE = re.compile(
 _KELVIN_UNITS = frozenset(("K", "KELVIN"))
 _KELVIN_OFFSET = 273.15
 
+# Free-text temperature (MIR TST_TEMP): first number, optional loose unit,
+# no separator/anchor requirement — "25", "25C", "25.5 °C", "298 K".
+_TEMPERATURE_TEXT_RE = re.compile(
+    rf"(?P<temp>[+-]?\d+(?:\.\d+)?)\s*{_ESCAPED_SEPARATOR}?\s*"
+    rf"(?P<unit>{_TEMP_UNIT})?",
+    re.IGNORECASE,
+)
+
 # First integer anywhere in a string (fallback extractor for the DB-shaped
 # "N ms" / "Bin N" metadata values below).
 _FIRST_INT_RE = re.compile(r"-?\d+")
-
-# First signed decimal number anywhere in a string (File Info temperature
-# fallback: MIR TST_TEMP arrives as free text like "25C" / "-40C" / "25.5 °C").
-_FIRST_FLOAT_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
 # Default test/param split: "workflow/rest/of/name/param" -> test + last segment.
 DEFAULT_PARAM_PATTERN = re.compile(r"^(?P<test>.+)/(?P<param>[^/]+)$")
@@ -123,13 +127,13 @@ def parse_temperature(part_id: str | None) -> float | None:
 
 
 def parse_temperature_text(value) -> float | None:
-    """Temperature as a float from a File Info "Test Temperature:" cell.
-
-    MIR TST_TEMP is free text — ``"25C"``, ``"-40C"``, ``"25.5 °C"`` and a
-    bare ``"25"`` all parse; the first signed decimal wins. A multi-subfile
-    group cell collapses per formatFileGroupValues into
-    ``"#1 → 25C\\n#2 → -40C"`` — the first subfile's line is taken. ``None``
-    when the value is absent or carries no number (blank cell, "N/A").
+    """Temperature as a float in Celsius from a File Info "Test
+    Temperature:" cell. MIR TST_TEMP is free text: the first number wins,
+    an adjacent loose unit is honored (``"298 K"`` -> ``24.85``), a bare
+    number parses as-is. A multi-subfile group cell collapses per
+    formatFileGroupValues into ``"#1 → 25C\\n#2 → -40C"`` — the first
+    subfile's line is taken. ``None`` when the value is absent or carries
+    no number (blank cell, "N/A").
     """
     if value is None:
         return None
@@ -142,8 +146,10 @@ def parse_temperature_text(value) -> float | None:
     if text.startswith("#") and "→" in text:
         # drop the "#n →" source prefix so its index never parses as a number
         text = text.split("→", 1)[1]
-    match = _FIRST_FLOAT_RE.search(text)
-    return float(match.group(0)) if match else None
+    match = _TEMPERATURE_TEXT_RE.search(text)
+    if match is None:
+        return None
+    return _to_celsius(float(match.group("temp")), match.group("unit"))
 
 
 def resolve_dut_temperature(part_id: str | None, file_temperature: float | None) -> float | None:
