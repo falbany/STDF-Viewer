@@ -6,10 +6,15 @@ hands in the `dutInfo` dicts it already fetches and receives a drop-set
 of `(fid, dutIndex)` pairs; nothing touches the Rust core or the GUI
 (see the 2026-11-10 DUT Summary enhancements design, §7.2).
 
-Matching is exact, case-sensitive string equality on non-empty Part
-IDs; the LAST occurrence in (Fid, DUTIndex) order wins — "remeasured",
-not "best result". STDF-flagged supersede rows (DUT Flag text starting
-with "Superseded", the loader's own `Supersede=1` truth) drop too.
+Matching is exact, case-sensitive string equality on the pair
+(WAFER_ID, Part ID); the LAST occurrence in (Fid, DUTIndex) order wins —
+"remeasured", not "best result". The wafer id rides at index 8 of the
+classic dutInfo tuple (the full fetch joins Wafer_Info; Rust gives None
+for a missing id — None and "" are one bucket, the no-wafer lot, which
+keeps the bare-Part-ID cross-file dedup). The input is the full dutInfo
+fetch in every call path (the stat-only path is repointed to it,
+2026-11-17). STDF-flagged supersede rows (DUT Flag text starting with
+"Superseded", the loader's own `Supersede=1` truth) drop too.
 
 The (Fid, DUTIndex) order can be overridden with a per-Fid rank map
 (`compute_fid_ranks`, below): merge-utility loads rank by Fid, open-button
@@ -38,6 +43,13 @@ def _is_superseded(info) -> bool:
 
 def _part_id(info):
     return info[1] if len(info) > 1 and info[1] else None
+
+
+def _wafer_id(info):
+    # slot 8 = WAFER_ID (the full fetch joins Wafer_Info; Rust gives
+    # None for a missing id). None and "" are one bucket: the no-wafer
+    # lot, which keeps the bare-Part-ID cross-file dedup.
+    return info[8] if len(info) > 8 and info[8] else ""
 
 
 def file_dates_from_rows(
@@ -91,14 +103,18 @@ def compute_remeasure_drops(
     (superseded DUTs included). Rules, in (rank(fid), DUTIndex) order:
     (a) any row whose DUT Flag text starts with "Superseded" drops;
     (b) any row with a non-empty Part ID drops when another row with the
-    same Part ID exists at a strictly greater `(rank(fid), dutIndex)`
-    within `selected_fids`. Unselected fids neither suppress nor are
-    dropped. `fid_ranks` (optional) overrides the raw Fid ordering —
-    see `compute_fid_ranks`; without it the order is `(Fid, DUTIndex)`.
+    same `(WAFER_ID, Part ID)` pair exists at a strictly greater
+    `(rank(fid), dutIndex)` within `selected_fids` — 2026-11-17: matching
+    is per wafer, so the same serial on two wafers is two physical parts.
+    No-wafer rows (`None`/`""` WAFER_ID) bucket together, keeping the
+    bare-Part-ID cross-file dedup for lot files. Unselected fids neither
+    suppress nor are dropped. `fid_ranks` (optional) overrides the raw
+    Fid ordering — see `compute_fid_ranks`; without it the order is
+    `(Fid, DUTIndex)`.
     """
     selected = set(selected_fids)
-    # Part ID -> [(fid, dutIndex)] ascending, selection only
-    occurrences: dict[str, list[tuple[int, int]]] = {}
+    # (WAFER_ID, Part ID) -> [(fid, dutIndex)] ascending, selection only
+    occurrences: dict[tuple[str, str], list[tuple[int, int]]] = {}
     superseded: set[tuple[int, int]] = set()
     for fid in dutInfo:
         if fid not in selected:
@@ -109,7 +125,7 @@ def compute_remeasure_drops(
                 superseded.add(pair)
             part_id = _part_id(info)
             if part_id is not None:
-                occurrences.setdefault(part_id, []).append(pair)
+                occurrences.setdefault((_wafer_id(info), part_id), []).append(pair)
 
     ranks = fid_ranks or {}
     drops = set(superseded)

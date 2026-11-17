@@ -10,13 +10,13 @@ from deps.exporter.dedup import (
     compute_fid_ranks,
     compute_remeasure_drops,
     drops_to_exclusion,
-    dut_info_from_partial,
     file_dates_from_rows,
 )
 
 
-def make_info(part_id="", dut_flag="Passed - 0x00"):
-    """11-slot dutInfo tuple; only Part ID (1) and DUT Flag (10) matter."""
+def make_info(part_id="", dut_flag="Passed - 0x00", wafer_id=None):
+    """11-slot dutInfo tuple; only Part ID (1), Wafer ID (8) and DUT
+    Flag (10) matter."""
     return (
         1,  # 0: File ID
         part_id,  # 1: Part ID
@@ -26,17 +26,18 @@ def make_info(part_id="", dut_flag="Passed - 0x00"):
         "123 ms",  # 5: Test Time
         "Bin 1",  # 6: HW Bin
         "Bin 2",  # 7: SW Bin
-        "",  # 8: Wafer ID
+        wafer_id,  # 8: Wafer ID
         (3, -5),  # 9: (X, Y)
         dut_flag,  # 10: DUT Flag
     )
 
 
 def dut_info(entries):
-    """{fid: {dutIndex: part_id/flag kwargs}} -> classic dutInfo dict."""
+    """{fid: {dutIndex: (part_id, flag[, wafer_id]) kwargs}} -> classic dutInfo dict."""
     out = {}
-    for fid, dut_index, part_id, flag in entries:
-        out.setdefault(fid, {})[dut_index] = make_info(part_id, flag)
+    for fid, dut_index, part_id, flag, *rest in entries:
+        wafer_id = rest[0] if rest else None
+        out.setdefault(fid, {})[dut_index] = make_info(part_id, flag, wafer_id)
     return out
 
 
@@ -184,33 +185,74 @@ class TestRankAwareDrops:
         assert compute_remeasure_drops(info, [1, 2], fid_ranks=ranks) == {(2, 0)}
 
 
-class TestDutInfoFromPartial:
-    def test_partial_padded_to_dutinfo_shape(self):
-        partial = {
-            1: {
-                2: ("SN541", "txt", "Head 1 - Site 1", "Passed - 0x00"),
-            }
-        }
-        assert dut_info_from_partial(partial) == {
-            1: {
-                2: (
-                    "",  # 0: File ID
-                    "SN541",  # 1: Part ID
-                    "txt",  # 2: Part Text
-                    "",  # 3: Head-Site
-                    "",  # 4
-                    "",  # 5
-                    "",  # 6
-                    "",  # 7
-                    "",  # 8
-                    "",  # 9
-                    "Passed - 0x00",  # 10: DUT Flag
-                )
-            }
-        }
+class TestWaferAwareDrops:
+    """2026-11-17: matching is per wafer — same SN on two wafers is two
+    physical parts; the wafer id rides at slot 8 of the full fetch."""
 
-    def test_empty_fetch_degrades_to_empty(self):
-        assert dut_info_from_partial({}) == {}
+    def test_same_part_different_wafer_neither_drops(self):
+        info = dut_info(
+            [
+                (1, 0, "SN541", "Failed - 0x08", "W01"),
+                (2, 0, "SN541", "Passed - 0x00", "W02"),
+            ]
+        )
+        assert compute_remeasure_drops(info, [1, 2]) == set()
+
+    def test_same_part_same_wafer_drops_earlier(self):
+        info = dut_info(
+            [
+                (1, 0, "SN541", "Failed - 0x08", "W01"),
+                (2, 0, "SN541", "Passed - 0x00", "W01"),
+            ]
+        )
+        assert compute_remeasure_drops(info, [1, 2]) == {(1, 0)}
+
+    def test_same_file_same_wafer_duplicate_drops_earlier(self):
+        info = dut_info(
+            [
+                (1, 0, "SN541", "Failed - 0x08", "W01"),
+                (1, 1, "SN541", "Passed - 0x00", "W01"),
+            ]
+        )
+        assert compute_remeasure_drops(info, [1]) == {(1, 0)}
+
+    def test_wafer_and_no_wafer_never_match(self):
+        info = dut_info(
+            [
+                (1, 0, "SN541", "Failed - 0x08", "W01"),
+                (2, 0, "SN541", "Passed - 0x00"),  # no-wafer lot
+            ]
+        )
+        assert compute_remeasure_drops(info, [1, 2]) == set()
+
+    def test_none_and_empty_wafer_bucket_together(self):
+        # Rust None and "" are the same no-wafer bucket: the old
+        # bare-Part-ID cross-file dedup still applies to lot files
+        info = dut_info(
+            [
+                (1, 0, "SN541", "Failed - 0x08", None),
+                (2, 0, "SN541", "Passed - 0x00", ""),
+            ]
+        )
+        assert compute_remeasure_drops(info, [1, 2]) == {(1, 0)}
+
+    def test_open_mode_rank_same_wafer(self):
+        # same wafer on both files; open-mode ranks make fid 2 the
+        # EARLIER measurement — fid 2 drops despite the lower fid
+        info = dut_info(
+            [
+                (1, 0, "SN541", "Passed - 0x00", "W01"),
+                (2, 0, "SN541", "Failed - 0x08", "W01"),
+            ]
+        )
+        ranks = compute_fid_ranks({1: (1, "2026-01-09", ""), 2: (1, "2026-01-01", "")})
+        assert compute_remeasure_drops(info, [1, 2], fid_ranks=ranks) == {(2, 0)}
+
+    def test_missing_fid_key_is_no_occurrence(self):
+        # the repointed stat-only fetch omits fids with no DUTs under the
+        # head/site selection — a missing key is "no occurrences", not an error
+        info = dut_info([(1, 0, "SN541", "Failed - 0x08", "W01")])
+        assert compute_remeasure_drops(info, [1, 2]) == set()
 
 
 class TestDropsToExclusion:
