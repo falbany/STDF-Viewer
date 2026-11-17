@@ -44,9 +44,37 @@ def get_column_letter(col: int) -> str:
     return xl_col_to_name(col - 1)
 
 
-# Part-ID temperature tag, e.g. the "_T25C" in "SN541_T25C"; case-insensitive,
-# optional decimal, and signed so cold temperatures ("_T-5.5C") match.
-TEMPERATURE_RE = re.compile(r"_T(-?\d+(?:\.\d+)?)C", re.IGNORECASE)
+# Default Part-ID separator. The temperature tag patterns below are built
+# from it once at import — change this constant to retarget both.
+PART_ID_SEPARATOR = "_"
+_ESCAPED_SEPARATOR = re.escape(PART_ID_SEPARATOR)
+
+# Loose temperature unit after the number, longest-first, case-insensitive
+# (applied by the compiling flags): words, bracketed words, bracketed
+# letters, degree sign, bare letters.
+_TEMP_UNIT = (
+    r"\[?\s*°?\s*(?:CELSIUS|KELVIN)\s*\]?"
+    r"|\[\s*°?\s*[CK]\s*\]"
+    r"|°\s*[CK]?"
+    r"|[CK]"
+)
+
+# Part-ID temperature tag, e.g. the "_T25C" in "SN541_T25C": optional sign
+# and decimal, spaces allowed around the number and unit, unit optional
+# (word / [word] / [C] / [K] / ° / °C / °K / C / K, optionally after a
+# separator); without a unit the tag must be followed by the separator or
+# end of string ("_T25_", "_T25_DIE1", "_T25"). Case-insensitive; signed
+# so cold temperatures ("_T-5.5C") match.
+TEMPERATURE_RE = re.compile(
+    rf"{_ESCAPED_SEPARATOR}T\s*(?P<temp>[+-]?\d+(?:\.\d+)?)\s*"
+    rf"(?:{_ESCAPED_SEPARATOR}?\s*(?P<unit>{_TEMP_UNIT})"
+    rf"|(?=\s*{_ESCAPED_SEPARATOR}|\s*$))",
+    re.IGNORECASE,
+)
+
+# Kelvin unit tokens, normalized (strip brackets/degree/spaces, upper).
+_KELVIN_UNITS = frozenset(("K", "KELVIN"))
+_KELVIN_OFFSET = 273.15
 
 # First integer anywhere in a string (fallback extractor for the DB-shaped
 # "N ms" / "Bin N" metadata values below).
@@ -67,18 +95,31 @@ DEFAULT_PARAM_PATTERN = re.compile(r"^(?P<test>.+)/(?P<param>[^/]+)$")
 DUT_CHUNK_CAP = 8184
 
 
-def parse_temperature(part_id: str | None) -> float | None:
-    """Return the temperature encoded in a part ID, last match wins.
+def _to_celsius(value: float, unit: str | None) -> float:
+    """Value as Celsius: Kelvin units shift by 273.15, rounded to 2
+    decimals so float noise never reaches a sheet label; Celsius units and
+    an absent unit pass through."""
+    if unit is None:
+        return value
+    if unit.strip("[]° \t").upper() in _KELVIN_UNITS:
+        return round(value - _KELVIN_OFFSET, 2)
+    return value
 
-    ``"SN541_T25C"`` -> ``25.0``; ``"SN541_T-5.5C"`` -> ``-5.5``;
-    ``None`` when the ID is ``None`` or carries no ``_T<n>C`` tag.
-    """
+
+def parse_temperature(part_id: str | None) -> float | None:
+    """Return the temperature encoded in a part ID as Celsius, last match
+    wins. Accepts the loose unit grammar of ``TEMPERATURE_RE`` (C/K words,
+    brackets, degree sign, spaces, or no unit before the separator/end) and
+    converts Kelvin tags (``"_T298K"`` -> ``24.85``). ``None`` when the ID
+    is ``None`` or carries no tag."""
     if part_id is None:
         return None
-    matches = TEMPERATURE_RE.findall(part_id)
-    if not matches:
+    last = None
+    for match in TEMPERATURE_RE.finditer(part_id):
+        last = match
+    if last is None:
         return None
-    return float(matches[-1])
+    return _to_celsius(float(last.group("temp")), last.group("unit"))
 
 
 def parse_temperature_text(value) -> float | None:
@@ -130,8 +171,11 @@ def format_temperature_label(value: float) -> str:
 def part_id_base(part_id: str | None) -> str:
     """Return the part ID without its (last) temperature tag.
 
-    ``"SN541_T25C"`` -> ``"SN541"``; returns the full original ID unchanged
-    when no tag is present (``""`` for a ``None`` ID).
+    ``"SN541_T25C"`` -> ``"SN541"`` — the strip removes the tag including a
+    matched unit; with the no-unit lookahead form the separator survives
+    (``"SN541_T25_DIE1"`` -> ``"SN541_DIE1"``, ``"SN541_T25_"`` stays
+    ``"SN541_"``). Returns the full original ID unchanged when no tag is
+    present (``""`` for a ``None`` ID).
     """
     if part_id is None:
         return ""

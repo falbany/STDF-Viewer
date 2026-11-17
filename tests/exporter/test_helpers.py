@@ -59,6 +59,27 @@ class TestParseTemperature:
             ("SN541_T85C", 85.0),
             ("SN541_T-5.5C", -5.5),
             ("SN541_t85c", 85.0),  # IGNORECASE
+            ("SN541_T298K", 24.85),  # Kelvin -> Celsius
+            ("SN541_T298Kelvin", 24.85),
+            ("SN541_T298[Kelvin]", 24.85),
+            ("SN541_T298_K", 24.85),  # separator before unit
+            ("SN541_T25K", -248.15),
+            ("SN541_T25_KELVIN", -248.15),
+            ("SN541_T25 °K", -248.15),
+            ("SN541_T25_", 25.0),  # no unit, trailing separator
+            ("SN541_T25_DIE1", 25.0),  # no unit, separator + suffix
+            ("SN541_T25", 25.0),  # no unit, end of string
+            ("SN541_T25 C", 25.0),  # spaces around unit
+            ("SN541_T 25C", 25.0),  # space after T
+            ("SN541_T25°C", 25.0),  # degree sign
+            ("SN541_T25°", 25.0),  # bare degree sign
+            ("SN541_T25_C", 25.0),  # separator before unit
+            ("SN541_T25_CELSIUS", 25.0),
+            ("SN541_T25Celsius", 25.0),
+            ("SN541_T25[CELSIUS]", 25.0),
+            ("SN541_T25[C]", 25.0),
+            ("SN541_T+25C", 25.0),  # plus sign
+            ("SN541_T255X", None),  # anti-goal: junk suffix, no tag
             ("SN541", None),
             (None, None),
         ],
@@ -68,6 +89,12 @@ class TestParseTemperature:
 
     def test_multi_match_takes_last(self):
         assert parse_temperature("SN541_T25C_T85C") == 85.0
+
+    def test_multi_match_mixed_units_last_wins(self):
+        assert parse_temperature("SN541_T25C_T298K") == 24.85
+
+    def test_kelvin_label_free_of_float_noise(self):
+        assert format_temperature_label(parse_temperature("SN541_T298K")) == "24.85"
 
     def test_returns_float(self):
         assert isinstance(parse_temperature("SN541_T25C"), float)
@@ -117,6 +144,10 @@ class TestPartIdBase:
         [
             ("SN541_T25C", "SN541"),
             ("SN541", "SN541"),
+            ("SN541_T25_DIE1", "SN541_DIE1"),  # separator survives the strip
+            ("SN541_T25_", "SN541_"),  # end-of-string separator stays (documented)
+            ("SN541_T25_CELSIUS", "SN541"),
+            ("SN541_T25°C", "SN541"),
         ],
     )
     def test_spec_cases(self, part_id, expected):
