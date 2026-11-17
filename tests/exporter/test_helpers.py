@@ -2,6 +2,7 @@
 
 import re
 
+import numpy as np
 import pytest
 
 from deps.exporter.helpers import (
@@ -777,3 +778,15 @@ class TestFormatTemperatureLabel:
     def test_fractional_temperatures_keep_their_decimals(self):
         assert format_temperature_label(125.5) == "125.5"
         assert format_temperature_label(-5.5) == "-5.5"
+
+
+def test_sanitize_cell_nan_fast_paths():
+    import math
+    from deps.exporter.helpers import sanitize_cell
+    assert sanitize_cell(float("nan")) == ""
+    assert sanitize_cell(np.float64("nan")) == ""      # numpy float subclass
+    assert sanitize_cell(1.5) == 1.5
+    assert sanitize_cell(np.float64(1.5)) == np.float64(1.5)
+    assert sanitize_cell(np.int64(3)) == np.int64(3)   # not float -> no isnan branch
+    assert sanitize_cell(None) == ""
+    assert sanitize_cell("a\x00b") == "ab"             # illegal-char strip unchanged

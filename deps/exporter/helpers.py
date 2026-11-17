@@ -31,7 +31,6 @@ import math
 import re
 import statistics
 
-import numpy as np
 from xlsxwriter.utility import xl_col_to_name
 
 from deps.SharedSrc import isPass
@@ -736,9 +735,6 @@ def sanitize_cell(value):
         return ILLEGAL_CHARACTERS_RE.sub("", value)
     if value is None:
         return ""
-    try:
-        if np.isnan(value):
-            return ""
-    except (TypeError, ValueError):
-        pass
+    if isinstance(value, float) and math.isnan(value):
+        return ""
     return value
