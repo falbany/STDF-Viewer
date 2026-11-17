@@ -299,6 +299,7 @@ def build_generated(
     wafer_tuples=None,
     monkeypatch=None,
     file_dates=None,
+    stat_dut_rows=None,
 ):
     """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus Stat when
     `with_stat`, FileInfo when `with_file_info`) and return (generator,
@@ -308,7 +309,9 @@ def build_generated(
     `duplicate_sn` shares SN541 between the first and third DUT;
     `hide_remeasured` flips the filter setting for the run (pass the test's
     `monkeypatch` fixture so it auto-restores). `wafer_tuples` overrides the
-    wafer selection (e.g. [(-1, -1, "STACK")] for the stacked-wafer path)."""
+    wafer selection (e.g. [(-1, -1, "STACK")] for the stacked-wafer path).
+    `stat_dut_rows` overrides the stat-only `waitForDutInfo` stub — the
+    2026-11-17 parity pin feeds the same rows the heavy fetch serves."""
     testTuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
     selectedFiles = [1]
     selectedHeads = [1]
@@ -396,12 +399,19 @@ def build_generated(
     )
     gen._captured_stat_kargs = []
     if not with_dut:
-        gen.waitForDutInfo = lambda heads, sites, fids: {
-            1: {
-                0: _full_info("SN541", "Failed - 0x08"),
-                2: _full_info("SN541", "Passed - 0x00"),
+        # `stat_dut_rows` (parity pin, 2026-11-17) overrides the stub so
+        # the stat-only pipeline consumes the SAME rows the heavy fetch
+        # serves — identical input, identical drop-set expected (§7.2)
+        gen.waitForDutInfo = lambda heads, sites, fids: (
+            stat_dut_rows
+            if stat_dut_rows is not None
+            else {
+                1: {
+                    0: _full_info("SN541", "Failed - 0x08"),
+                    2: _full_info("SN541", "Passed - 0x00"),
+                }
             }
-        }
+        )
     if hide_remeasured:
         assert monkeypatch is not None, "hide_remeasured=True requires monkeypatch"
         monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
@@ -1342,6 +1352,21 @@ class TestRemeasureRankOrder:
             2: (1, "2026-01-09 10:00:00 (UTC+0)", ""),
         }
         assert gen._resolve_remeasure_drops() == set()
+
+    def test_stat_only_matches_dut_path_dropset(self, tmp_path, qapp, monkeypatch):
+        # §7.2 parity re-pinned under the wafer-aware key (2026-11-17):
+        # identical rows through both pipelines — the DUT-block path
+        # (stored drops) and the stat-only path (_resolve_remeasure_drops)
+        # must yield the same drop-set for the same selection
+        rows = make_summary(duplicate_sn=True)["dutInfo"]
+        gen_dut, _wb, _path, _closed, _errors = build_generated(
+            tmp_path, qapp, hide_remeasured=True, duplicate_sn=True, monkeypatch=monkeypatch
+        )
+        gen_stat, _wb, _path, _closed, _errors = build_generated(
+            tmp_path, qapp, hide_remeasured=True, with_dut=False,
+            monkeypatch=monkeypatch, stat_dut_rows=rows,
+        )
+        assert gen_dut._remeasure_drops == gen_stat._resolve_remeasure_drops()
 
 
 class TestStatsExclusionChain:
