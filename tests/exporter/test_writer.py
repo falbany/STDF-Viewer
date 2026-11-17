@@ -17,8 +17,12 @@ from tests.exporter.conftest import (
 )
 from deps.exporter.theme import ModernTheme
 from deps.exporter.writer import (
+    _write_cell,
+    _write_cell_fast,
+    apply_autofit,
     render_matrix_sheet,
     render_plain_table,
+    reset_widths,
     write_plain_row,
 )
 
@@ -1395,3 +1399,86 @@ class TestMatrixSparklines:
         book = render_matrix_bytes(spec, "Test Summary (2)")
         xml = read_xml(book, "xl/worksheets/sheet1.xml")
         assert "'Test Summary (2)'!M17:O17" in xml
+
+
+# --------------------------------------------------------------------------
+# _write_cell_fast: prebuilt-format write path (exporter perf task 2)
+# --------------------------------------------------------------------------
+
+
+class TestWriteCellFast:
+    """_write_cell_fast receives a PREBUILT Format (no theme lookup) and
+    never notes column widths (pinned-width sheets only); every input shape
+    must land in the sheet IDENTICALLY to _write_cell — parity is the
+    perf contract."""
+
+    # (value, cached, expected after round-trip) — the five dispatch shapes
+    SHAPES = [
+        ('=IFERROR(A2/A3,"")', 2.5, '=IFERROR(A2/A3,"")'),  # formula + cache
+        (1.25, None, 1.25),  # float
+        (float("nan"), None, None),  # NaN -> sanitize -> blank
+        ("", None, None),  # empty string -> blank
+        ("plain", None, "plain"),  # string
+    ]
+
+    def write_both_paths(self):
+        """Row 2 through _write_cell (theme kwargs), row 3 through
+        _write_cell_fast (the SAME theme format prebuilt) -> the reloaded
+        sheet twice (formulas / cached values)."""
+
+        def build(wb, ws_by_name):
+            ws = ws_by_name["Sheet"]
+            theme = ModernTheme(wb)
+            fmt = theme.cell_format(font="body", align="center", border=True)
+            for offset, (value, cached, _expected) in enumerate(self.SHAPES):
+                column = offset + 1
+                _write_cell(
+                    ws,
+                    2,
+                    column,
+                    value,
+                    theme,
+                    font="body",
+                    align="center",
+                    border=True,
+                    cached=cached,
+                )
+                _write_cell_fast(ws, 3, column, value, fmt, cached=cached)
+
+        book = render_workbook(["Sheet"], build)
+        return (
+            load_workbook_bytes(book)["Sheet"],
+            load_workbook_bytes(book, data_only=True)["Sheet"],
+        )
+
+    def test_parity_with_write_cell_per_shape(self):
+        ws, ws_cached = self.write_both_paths()
+        for offset, (value, cached, expected) in enumerate(self.SHAPES):
+            column = offset + 1
+            slow = ws.cell(row=2, column=column)
+            fast = ws.cell(row=3, column=column)
+            assert fast.value == expected, column
+            assert fast.value == slow.value, column
+            assert type(fast.value) is type(slow.value), column
+            # one shared workbook-scoped Format -> identical styling
+            assert fast.border.left.style == slow.border.left.style == "thin", column
+            # formulas carry their explicit cache (never the default 0)
+            if isinstance(value, str) and value.startswith("="):
+                assert ws_cached.cell(row=2, column=column).value == cached, column
+                assert ws_cached.cell(row=3, column=column).value == cached, column
+
+    def test_fast_path_never_notes_width(self):
+        # pinned-width sheets only: nothing may reach the autofit ledger,
+        # so apply_autofit after a fast-path write must leave all widths unset
+
+        def build(wb, ws_by_name):
+            ws = ws_by_name["Sheet"]
+            theme = ModernTheme(wb)
+            fmt = theme.cell_format(font="body", align="center", border=True)
+            reset_widths()
+            _write_cell_fast(ws, 1, 1, "a very wide value", fmt)
+            apply_autofit(ws)
+
+        book = render_workbook(["Sheet"], build)
+        ws = load_workbook_bytes(book)["Sheet"]
+        assert not ws.column_dimensions

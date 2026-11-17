@@ -181,7 +181,9 @@ def _write_cell(
     """Write one cell: formula strings verbatim (with their cached result —
     EVERY write_formula passes an explicit value=; xlsxwriter's default
     cached 0 would regress previews), everything else sanitized. All
-    styling composes into one workbook-scoped Format at write time."""
+    styling composes into one workbook-scoped Format at write time. The
+    write dispatch itself lives in _write_cell_fast (one implementation
+    for both paths)."""
     fmt = theme.cell_format(
         font=font,
         align=align,
@@ -191,6 +193,16 @@ def _write_cell(
         extra=extra,
     )
     _note_width(ws, column, value)
+    _write_cell_fast(ws, row, column, value, fmt, cached=cached)
+
+
+def _write_cell_fast(ws, row: int, column: int, value, fmt, cached=None) -> None:
+    """The shared write dispatch of _write_cell minus its theme lookup and
+    width note: formula strings verbatim with their explicit cached result
+    (never xlsxwriter's default cached 0), everything else sanitized into
+    blank or written. ``fmt`` is a PREBUILT workbook-scoped Format — the
+    pinned-width renderers hoist the theme.cell_format call out of the
+    per-cell hot path, so this must never touch theme or ledger."""
     row0, col0 = row - 1, column - 1
     if isinstance(value, str) and value.startswith("="):
         ws.write_formula(row0, col0, value, fmt, "" if cached is None else cached)
