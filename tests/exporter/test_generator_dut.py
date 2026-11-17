@@ -67,6 +67,14 @@ def ws_row_height(generated, sheet, row_1based) -> float:
     return dim.height if dim is not None else None
 
 
+def _full_info(part_id="", dut_flag="Passed - 0x00", wafer_id=None):
+    """11-slot dutInfo tuple (getFullDUTInfoFromDutArray shape)."""
+    return (
+        1, part_id, "", "1 - 1", 42, "123 ms", "Bin 1", "Bin 2",
+        wafer_id, (3, -5), dut_flag,
+    )
+
+
 def bin_table(bin_type: str) -> list[list]:
     """One classic waitForDataList(tab.Bin) row (single file): VHeader +
     yield/total/count cells + one '"name"\\nBin N: P.P%' cell per non-zero
@@ -380,8 +388,9 @@ def build_generated(
         {1: (1, "2026-01-01 10:00:00 (UTC+0)", "")} if file_dates is None else file_dates
     )
     # the filter path must never reach the GUI for dutInfo when the DUT
-    # sheet rendered; the stat-only selection stubs the light fetch with
-    # the partial dutInfo shape (getPartialDUTInfoOnCondition rows)
+    # sheet rendered; the stat-only selection stubs the dutInfo fetch
+    # with the FULL dutInfo shape (getFullDUTInfoFromDutArray rows,
+    # 2026-11-17: the stat-only fetch is repointed to the full fetch)
     gen.waitForDutInfo = lambda *args: (_ for _ in ()).throw(
         AssertionError("waitForDutInfo must not be called when the DUT sheet ran")
     )
@@ -389,8 +398,8 @@ def build_generated(
     if not with_dut:
         gen.waitForDutInfo = lambda heads, sites, fids: {
             1: {
-                0: ("SN541", "", "Head 1 - Site 1", "Failed - 0x08"),
-                2: ("SN541", "", "Head 1 - Site 1", "Passed - 0x00"),
+                0: _full_info("SN541", "Failed - 0x08"),
+                2: _full_info("SN541", "Passed - 0x00"),
             }
         }
     if hide_remeasured:
@@ -1279,11 +1288,10 @@ class TestRemeasureRankOrder:
         # SN541 re-measured across files: fid 2 (higher fid) measured
         # EARLIER (FINISH_T 01-01) than fid 1 (01-09) — the fid-2
         # occurrence drops; raw fid order would have dropped (1, 0).
-        # waitForDutInfo answers the partial fetch shape (PartID, PartText,
-        # head-site, flag-text)
+        # waitForDutInfo answers the FULL dutInfo fetch shape
         gen.waitForDutInfo = lambda heads, sites, fids: {
-            1: {0: ("SN541", "", "Head 1 - Site 1", "Passed - 0x00")},
-            2: {0: ("SN541", "", "Head 1 - Site 1", "Failed - 0x08")},
+            1: {0: _full_info("SN541", "Passed - 0x00", "W01")},
+            2: {0: _full_info("SN541", "Failed - 0x08", "W01")},
         }
         gen.waitForFileDates = lambda fids: {
             1: (1, "2026-01-09 10:00:00 (UTC+0)", ""),
@@ -1304,14 +1312,36 @@ class TestRemeasureRankOrder:
         )
         gen._remeasure_drops = None
         gen.waitForDutInfo = lambda heads, sites, fids: {
-            1: {0: ("SN541", "", "Head 1 - Site 1", "Passed - 0x00")},
-            2: {0: ("SN541", "", "Head 1 - Site 1", "Failed - 0x08")},
+            1: {0: _full_info("SN541", "Passed - 0x00", "W01")},
+            2: {0: _full_info("SN541", "Failed - 0x08", "W01")},
         }
         gen.waitForFileDates = lambda fids: {
             1: (1, "2026-01-09 10:00:00 (UTC+0)", ""),
             2: (2, "2026-01-01 10:00:00 (UTC+0)", ""),  # 2 SubFids -> merge mode
         }
         assert gen._resolve_remeasure_drops() == {(1, 0)}
+
+    def test_stat_only_wafer_scoped(self, tmp_path, qapp, monkeypatch):
+        # same SN on two wafers: the stat-only path must keep both —
+        # wafer-aware like the DUT-block path (2026-11-17)
+        monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
+        reportInfo = (
+            [ReportSelection.Stat], [], [1, 2], [1], [-1],
+            str(tmp_path / "report.xlsx"), [], 0,
+        )
+        gen = ModernReportGenerator(
+            signals(), QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, dataChannel()
+        )
+        gen._remeasure_drops = None
+        gen.waitForDutInfo = lambda heads, sites, fids: {
+            1: {0: _full_info("SN541", "Failed - 0x08", "W01")},
+            2: {0: _full_info("SN541", "Passed - 0x00", "W02")},
+        }
+        gen.waitForFileDates = lambda fids: {
+            1: (1, "2026-01-01 10:00:00 (UTC+0)", ""),
+            2: (1, "2026-01-09 10:00:00 (UTC+0)", ""),
+        }
+        assert gen._resolve_remeasure_drops() == set()
 
 
 class TestStatsExclusionChain:

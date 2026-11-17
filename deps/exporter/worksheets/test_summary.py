@@ -38,7 +38,7 @@ import re
 import numpy as np
 
 from deps.exporter.contract import ReportHost
-from deps.exporter.dedup import compute_remeasure_drops, dut_info_from_partial
+from deps.exporter.dedup import compute_remeasure_drops
 from deps.exporter.helpers import (
     DUT_CHUNK_CAP,
     cp_cached,
@@ -939,13 +939,15 @@ class TestSummaryMixin(ReportHost):
         _prepare_dut_context stores the drop-set whenever either
         DUT-block sheet renders (reuse it; an empty set means "ran,
         nothing to drop" — never refetch). None means the context never
-        ran (stat-only export): the light dutInfo-only fetch answers,
-        and an empty fetch degrades gracefully to an empty drop-set."""
+        ran (stat-only export): the dutInfo-only fetch answers, and an
+        empty fetch degrades gracefully to an empty drop-set."""
         if self._remeasure_drops is not None:
             return self._remeasure_drops
-        partial = self.waitForDutInfo(self.selectedHeads, self.selectedSites, self.selectedFiles)
+        # 2026-11-17: the stat-only fetch is the FULL dutInfo fetch (wafer
+        # id at slot 8) — same source as the DUT-block path, so both
+        # directions of the sheet selection always agree (§7.2 parity).
         return compute_remeasure_drops(
-            dut_info_from_partial(partial or {}),
+            self.waitForDutInfo(self.selectedHeads, self.selectedSites, self.selectedFiles) or {},
             self.selectedFiles,
             fid_ranks=self._fid_ranks(),  # 2026-11-13: shared supersede ranks
         )

@@ -22,17 +22,8 @@ loads rank by STDF timestamps — the app-default "latest" rule shared by
 the wafer merge (see the 2026-11-13 wafer-merge design).
 """
 
-# Partial DUT info (DatabaseFetcherRust.getPartialDUTInfoOnCondition):
-# {DUTIndex: (PartID, PartText, "Head h - Site s", "State - 0xFL")}.
-# Part ID sits at index 1, Part Text at index 2 and the DUT Flag text at
-# index 10 of the classic dutInfo tuple — the only slots the dedup needs.
-_PARTIAL_PART_ID = 1
-_PARTIAL_PART_TEXT = 2
-_PARTIAL_FLAG = 10
-_PARTIAL_WIDTH = 11
-
 # The loader's supersede mark, as rendered by the SQL CASE into the DUT
-# Flag text of both the full and the partial fetches.
+# Flag text of the full dutInfo fetch.
 _SUPERSEDED_PREFIX = "Superseded"
 
 
@@ -136,28 +127,6 @@ def compute_remeasure_drops(
             if index + 1 < len(pairs):
                 drops.add(pair)
     return drops
-
-
-def dut_info_from_partial(partial_by_fid: dict[int, dict]) -> dict:
-    """Partial fetch rows reshaped to the classic dutInfo tuple width.
-
-    `{fid: {DUTIndex: (PartID, PartText, head-site, flag-text)}}` ->
-    `{fid: {DUTIndex: 11-slot info}}` with Part ID at index 1, Part Text
-    at index 2, DUT Flag text at index 10 and `""` everywhere else —
-    enough for `compute_remeasure_drops`, which reads only Part ID and
-    DUT Flag.
-    """
-    out: dict[int, dict] = {}
-    for fid, rows in partial_by_fid.items():
-        shaped: dict[int, tuple] = {}
-        for dut_index, row in rows.items():
-            info = [""] * _PARTIAL_WIDTH
-            info[_PARTIAL_PART_ID] = row[0] if len(row) > 0 else ""
-            info[_PARTIAL_PART_TEXT] = row[1] if len(row) > 1 else ""
-            info[_PARTIAL_FLAG] = row[3] if len(row) > 3 else ""
-            shaped[dut_index] = tuple(info)
-        out[fid] = shaped
-    return out
 
 
 def drops_to_exclusion(drops: set[tuple[int, int]]) -> dict[int, set[int]]:

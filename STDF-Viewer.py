@@ -1537,12 +1537,16 @@ class MyWindow(QtWidgets.QMainWindow):
 
 
     def getDutInfoForReport(self, heads: list[int], sites: list[int], fids: list[int]) -> dict:
-        # fork(falbany): re-measure filter — light dutInfo-only fetch for
-        # stat-only exports (Part ID + DUT Flag suffice for the drop-set;
-        # superseded DUTs included, same as the DUT Summary fetch)
+        # fork(falbany): re-measure filter — dutInfo-only fetch for stat-only
+        # exports. 2026-11-17: wafer-aware dedup reads the WAFER_ID (slot 8),
+        # so this uses the FULL dutInfo fetch — the same rows the DUT-block
+        # path reads (superseded DUTs included); identical selections give
+        # identical drop-sets on both paths. Fids with no DUTs under the
+        # head/site selection are omitted (same as the heavy fetch).
+        dutIndexDict = self.data_interface.DatabaseFetcher.getDutIndexDictFromHeadSite(heads, sites, fids)
         return {
-            fid: self.data_interface.DatabaseFetcher.getPartialDUTInfoOnCondition(heads, sites, fid)
-            for fid in fids
+            fid: self.data_interface.DatabaseFetcher.getFullDUTInfoFromDutArray(dutIndexes, fid)
+            for fid, dutIndexes in dutIndexDict.items()
         }
 
 
