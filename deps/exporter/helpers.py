@@ -53,9 +53,9 @@ _ESCAPED_SEPARATOR = re.escape(PART_ID_SEPARATOR)
 # (applied by the compiling flags): words, bracketed words, bracketed
 # letters, degree sign, bare letters.
 _TEMP_UNIT = (
-    r"\[?\s*°?\s*(?:CELSIUS|KELVIN)\s*\]?"
-    r"|\[\s*°?\s*[CK]\s*\]"
-    r"|°\s*[CK]?"
+    r"\[?\s*+°?\s*+(?:CELSIUS|KELVIN)\s*+\]?"
+    r"|\[\s*+°?\s*+[CK]\s*+\]"
+    r"|°\s*+[CK]?"
     r"|[CK]"
 )
 
@@ -66,9 +66,9 @@ _TEMP_UNIT = (
 # end of string ("_T25_", "_T25_DIE1", "_T25"). Case-insensitive; signed
 # so cold temperatures ("_T-5.5C") match.
 TEMPERATURE_RE = re.compile(
-    rf"{_ESCAPED_SEPARATOR}T\s*(?P<temp>[+-]?\d+(?:\.\d+)?)\s*"
-    rf"(?:{_ESCAPED_SEPARATOR}?\s*(?P<unit>{_TEMP_UNIT})"
-    rf"|(?=\s*{_ESCAPED_SEPARATOR}|\s*$))",
+    rf"{_ESCAPED_SEPARATOR}T\s*+(?P<temp>[+-]?\d+(?:\.\d+)?)\s*+"
+    rf"(?:{_ESCAPED_SEPARATOR}?\s*+(?P<unit>{_TEMP_UNIT})"
+    rf"|(?=\s*+{_ESCAPED_SEPARATOR}|\s*+$))",
     re.IGNORECASE,
 )
 
@@ -79,7 +79,7 @@ _KELVIN_OFFSET = 273.15
 # Free-text temperature (MIR TST_TEMP): first number, optional loose unit,
 # no separator/anchor requirement — "25", "25C", "25.5 °C", "298 K".
 _TEMPERATURE_TEXT_RE = re.compile(
-    rf"(?P<temp>[+-]?\d+(?:\.\d+)?)\s*{_ESCAPED_SEPARATOR}?\s*"
+    rf"(?P<temp>[+-]?\d+(?:\.\d+)?)\s*+{_ESCAPED_SEPARATOR}?\s*+"
     rf"(?P<unit>{_TEMP_UNIT})?",
     re.IGNORECASE,
 )

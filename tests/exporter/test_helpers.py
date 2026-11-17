@@ -80,6 +80,7 @@ class TestParseTemperature:
             ("SN541_T25[C]", 25.0),
             ("SN541_T+25C", 25.0),  # plus sign
             ("SN541_T255X", None),  # anti-goal: junk suffix, no tag
+            ("SN541_T25" + " \t" * 100 + "X", None),  # whitespace run + junk: no tag
             ("SN541", None),
             (None, None),
         ],
