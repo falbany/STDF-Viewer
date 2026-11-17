@@ -1572,3 +1572,104 @@ class TestMatrixFormatHoist:
 
         render_workbook(["Sheet"], build)
         assert len(calls) < 60
+
+
+# --------------------------------------------------------------------------
+# Matrix die/tail/mirror bulk segments (exporter perf task 5)
+# --------------------------------------------------------------------------
+
+
+class TestMatrixBulkSegments:
+    """Perf task 5: the die segment (values[12:12+D]) and the tail+mirror
+    segment (values[12+D:]) go through ONE ws.write_row call each per data
+    row — only the static 12 stay on the per-cell fast path. Output identity
+    is the contract: the openpyxl oracle below must hold unchanged (the CF
+    rules anchor the mirror ranges)."""
+
+    def test_bulk_segments_read_back_identical(self):
+        # openpyxl oracle on the REAL mixed PTR+FTR spec (D=3, builder-built):
+        # die values survive (NaN -> blank), the scientific die format and the
+        # P/F-row "0" die format hold, mirror flags and blanks survive, the
+        # tail spacers stay blank, and the uniform body styling (thin border,
+        # no fill — banding stops at column L) reaches every bulk cell.
+        from tests.exporter.test_test_summary import base_duts, base_tests, build
+
+        spec = build(base_tests(), base_duts())[0]
+        ws = roundtrip(render(spec))["Test Summary"]
+        # parametric die cells (row 17): numbers survive, the NaN DUT is blank
+        assert ws["M17"].value == 1.0
+        assert ws["N17"].value == 1.2
+        assert ws["O17"].value is None
+        for cell in ("M17", "N17", "O17"):
+            assert ws[cell].number_format == SCIENTIFIC, cell
+        # P/F row (row 19): die flags 0/1/0 under the "0" die format
+        assert ws["M19"].value == 0
+        assert ws["N19"].value == 1
+        assert ws["O19"].value == 0
+        for cell in ("M19", "N19", "O19"):
+            assert ws[cell].number_format == "0", cell
+        # mirror flags (hidden columns S..U): pass/fail/blank survive
+        assert ws["S17"].value == 0
+        assert ws["T17"].value == 0
+        assert ws["U17"].value is None  # flag -1 (not tested) -> blank
+        assert (ws["S18"].value, ws["T18"].value, ws["U18"].value) == (0, 1, 0)
+        assert (ws["S19"].value, ws["T19"].value, ws["U19"].value) == (0, 1, 0)
+        # tail spacers P/R and the Trend cell Q stay blank on every data row
+        for row in (17, 18, 19):
+            for letter in ("P", "Q", "R"):
+                assert ws[f"{letter}{row}"].value is None, f"{letter}{row}"
+        # the bulk body Format keeps the uniform styling: thin border, no
+        # fill on die/tail/mirror cells even on the banded boundary row 18
+        for cell in ("M18", "S18", "R18", "Q17"):
+            assert ws[cell].border.top.style == "thin", cell
+            assert ws[cell].fill.patternType is None, cell
+
+    def test_bulk_die_segment_nan_written_blank(self):
+        # writer-side guard: a raw NaN reaching the die segment lands as a
+        # blank cell exactly like the per-cell path did (sanitize_cell),
+        # never as an invalid number in the sheet XML
+        spec = make_matrix_spec()
+        spec["rows"][0][14] = float("nan")  # die cell O17
+        ws = roundtrip(render(spec))["Test Summary"]
+        assert ws["O17"].value is None
+
+    def test_bulk_write_row_call_bounds(self, monkeypatch):
+        # counter bound: matrix data rows now add at most 12 fast-path
+        # wrapper calls per row (the static A..L cells — was 21/row) plus
+        # exactly two write_row calls (die segment at 0-based col 12,
+        # tail+mirror at col 12 + D).
+        import xlsxwriter.worksheet as xlworksheet
+
+        import deps.exporter.writer as writer_module
+
+        spec = TestMatrixFormatHoist().hoist_spec()
+        rows = spec["rows"]
+        die_count = len(spec["die_columns"])
+        original_fast = writer_module._write_cell_fast
+        original_write_row = xlworksheet.Worksheet.write_row
+        fast_calls = []
+        bulk_calls = []
+
+        def counting_fast(ws, row, column, value, fmt, cached=None):
+            fast_calls.append((row, column))
+            return original_fast(ws, row, column, value, fmt, cached=cached)
+
+        def counting_write_row(ws_self, row, col, data, cell_format=None):
+            bulk_calls.append((row, col, len(data)))
+            return original_write_row(ws_self, row, col, data, cell_format)
+
+        monkeypatch.setattr(writer_module, "_write_cell_fast", counting_fast)
+        monkeypatch.setattr(xlworksheet.Worksheet, "write_row", counting_write_row)
+
+        def build(wb, ws_by_name):
+            _render_data_rows(ws_by_name["Sheet"], spec, ModernTheme(wb))
+
+        render_workbook(["Sheet"], build)
+
+        assert len(fast_calls) <= 12 * len(rows)
+        assert len(bulk_calls) == 2 * len(rows)
+        # geometry of the first data row (0-based): die segment starts at
+        # col 12, tail+mirror right after it and runs to the row's end
+        row0 = 2 + len(spec["metadata_rows"])
+        assert bulk_calls[0] == (row0, 12, die_count)
+        assert bulk_calls[1] == (row0, 12 + die_count, len(rows[0]) - 12 - die_count)

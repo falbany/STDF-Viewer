@@ -309,13 +309,25 @@ def _render_data_rows(ws, spec, theme):
     row (2026-11-10), overriding the group banding there; Test/Param keep
     the right/left column alignment.
 
-    The styling arguments vary only by (column, fill, num_fmt, boundary)
-    across the whole loop — font/body, border and the per-column alignment
-    are constant — so each cell's Format resolves through a per-render memo
-    and theme.cell_format runs once per variant, not once per cell. The
-    boundary extra dict is a per-render constant, so the has_extra boolean
-    keys it. The prebuilt Format goes straight to _write_cell_fast (the
-    matrix pins its widths — nothing may reach the autofit ledger)."""
+    Row layout is [12 static | D die | 3 tail | D mirrors] (test_summary.py
+    _build_chunk). The static A..L cells keep the per-cell fast path —
+    their formats/fills/cached formulas vary — and their Format resolves
+    through a per-render memo keyed by (column, fill, num_fmt, boundary):
+    within the static block the band/boundary gating is unconditional (the
+    columns are fixed by construction), so the memo variant set is bounded.
+    The two uniform segments BULK-write through one ws.write_row each per
+    row: the die segment under body/center/border + the die number format
+    (the builder gives every die column the same SCIENTIFIC_FORMAT entry —
+    the first die column is the representative) or + "0" on P/F rows
+    (values[3] == "P/F", detection preserved verbatim); the tail+mirror
+    segment under plain body/center/border. Neither segment can carry a
+    fill or the boundary extra — banding and the boundary are gated on
+    fixed_column (column <= 12) — and the builder never puts formulas or
+    cached results there (dies are floats/flags, tail "" and flag values),
+    so write_row's plain write dispatch produces identical XML; the values
+    still pass through sanitize_cell so NaN/None land blank like before.
+    All three segment Formats build once per render (the matrix pins its
+    widths — nothing may reach the autofit ledger)."""
     die_columns = spec["die_columns"]
     formats = spec.get("number_formats") or {}
     fixed_formats = {
@@ -330,27 +342,31 @@ def _render_data_rows(ws, spec, theme):
     boundary_extra = {"top": 2, "top_color": f"#{GROUP_BORDER_HEX}"}
     fmt_cache: dict = {}
 
+    # Segment Formats (once per render; theme._format memoizes the kwargs).
+    die_fmt = pf_die_fmt = None
+    if die_columns:
+        die_fmt = theme.cell_format(
+            font="body", align="center", border=True, num_fmt=formats.get(die_columns[0])
+        )
+        pf_die_fmt = theme.cell_format(font="body", align="center", border=True, num_fmt="0")
+    tail_fmt = theme.cell_format(font="body", align="center", border=True)
+    die_end = BASE_COLUMN_COUNT + len(die_columns)
+
     data_start = _data_start(spec)
     for offset, values in enumerate(spec["rows"]):
         row = data_start + offset
         is_pf = len(values) > 3 and values[3] == "P/F"
         band = offset in banded_offsets
         boundary = offset in boundaries
-        for column, value in enumerate(values, start=1):
+        for column, value in zip(range(1, BASE_COLUMN_COUNT + 1), values, strict=False):
             number_format = fixed_formats.get(column)
-            if number_format is None:
-                die_index = column - 1 - BASE_COLUMN_COUNT
-                if 0 <= die_index < len(die_columns):
-                    number_format = "0" if is_pf else formats.get(die_columns[die_index])
-            fixed_column = column <= BASE_COLUMN_COUNT
             if column in (SPEC_MIN_COLUMN, SPEC_MAX_COLUMN):
                 fill = neutral
-            elif band and fixed_column:
+            elif band:
                 fill = group
             else:
                 fill = None
-            has_extra = boundary and fixed_column
-            key = (column, fill, number_format, has_extra)
+            key = (column, fill, number_format, boundary)
             fmt = fmt_cache.get(key)
             if fmt is None:
                 fmt = theme.cell_format(
@@ -359,7 +375,7 @@ def _render_data_rows(ws, spec, theme):
                     border=True,
                     fill_hex=fill,
                     num_fmt=number_format,
-                    extra=boundary_extra if has_extra else None,
+                    extra=boundary_extra if boundary else None,
                 )
                 fmt_cache[key] = fmt
             _write_cell_fast(
@@ -370,6 +386,19 @@ def _render_data_rows(ws, spec, theme):
                 fmt,
                 cached=formula_values.get((row, column)),
             )
+        if die_columns:
+            ws.write_row(
+                row - 1,
+                BASE_COLUMN_COUNT,
+                [sanitize_cell(value) for value in values[BASE_COLUMN_COUNT:die_end]],
+                pf_die_fmt if is_pf else die_fmt,
+            )
+        ws.write_row(
+            row - 1,
+            die_end,
+            [sanitize_cell(value) for value in values[die_end:]],
+            tail_fmt,
+        )
 
 
 def _group_boundary_offsets(spec):
