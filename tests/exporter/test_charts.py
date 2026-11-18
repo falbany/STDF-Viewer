@@ -28,6 +28,7 @@ the xlsxwriter output; merged-band styling asserts on the merge ANCHOR
 
 import io
 import zipfile
+from collections import Counter
 from types import SimpleNamespace
 
 import numpy as np
@@ -1319,6 +1320,33 @@ class TestWriteWaferMapBlock:
         data_only = env.reload_data_only()
         assert data_only["C17"].value == 1
         assert data_only["C18"].value == 1
+
+    def test_sw_table_counts_single_counter_pass(self, env):
+        # bins_present/counts ride ONE Counter pass over the die values
+        # (hygiene: the grid is <= 10k dies); the SW table pins the
+        # contract — one row per distinct sbin in SORTED order (first-seen
+        # order here would be 5, 2, 9) and Count cells equal to the grid's
+        # per-bin counts
+        m = dict(
+            MAP,
+            Data={
+                5: {"x": np.array([-1, 0]), "y": np.array([0, 0])},
+                2: {"x": np.array([1, 1, 1]), "y": np.array([0, 1, -1])},
+                9: {"x": np.array([0]), "y": np.array([-1])},
+            },
+            Statistic={5: ("B5", 2, 40.0), 2: ("B2", 3, 60.0)},
+        )
+        self.written(env, map_data=m)
+        _, _, grid, _ = build_wafer_grid(m)
+        counter = Counter(grid.values())
+        reloaded = env["reload"]()
+        data_only = env.reload_data_only()
+        # SW table: header 16, data 17..19 (B value / C count), total 20
+        assert [reloaded.cell(row=r, column=2).value for r in (17, 18, 19)] == sorted(counter)
+        assert [data_only.cell(row=r, column=3).value for r in (17, 18, 19)] == [
+            counter[b] for b in sorted(counter)
+        ]
+        assert data_only["C20"].value == 6  # total = sum of the per-bin counts
 
     def test_sw_table_distribution_cells_are_live_formulas(self, env):
         # issue #8: Distribution data cells = =IFERROR(Count/Total) against
