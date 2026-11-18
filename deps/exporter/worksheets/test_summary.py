@@ -41,23 +41,20 @@ from deps.exporter.contract import ReportHost
 from deps.exporter.dedup import compute_remeasure_drops
 from deps.exporter.helpers import (
     DUT_CHUNK_CAP,
-    cp_cached,
     cp_formula,
-    cpk_cached,
     cpk_formula,
     die_col,
-    fails_cached_flags,
-    fails_cached_limits_one_sided,
     fails_formula_flags,
     fails_formula_limits,
     flag_value,
     format_temperature_label,
-    has_numeric,
     metadata_stat_formulas,
+    numeric_values,
     parse_bin,
     parse_test_time,
     part_id_base,
     resolve_dut_temperature,
+    row_stat_caches,
     split_dut_chunks,
     split_test_name,
     stat_cached,
@@ -664,24 +661,21 @@ def _test_rows(summaryTable, tests, chunk_cells, first_die, last_die, mirror_fir
 
         # cached formula results (xlsxwriter migration, spec §7.5): the same
         # values the formulas compute, keyed (absolute row, 1-based col) —
-        # None caches as "" so previews never show a stray 0. The FAILS
-        # cache follows the same branch selection as the formula.
+        # None caches as "" so previews never show a stray 0. ONE
+        # numeric_values pass over the die cells, then row_stat_caches
+        # (sigma/fmean once for Cp+Cpk; the FAILS branch selection lives
+        # inside: one-sided OR semantics when a limit is present, the
+        # flag-mirror count when BOTH sides are missing).
         lo = spec_min if spec_min != "" else None
         hi = spec_max if spec_max != "" else None
-        # has_limits is OR semantics: the limits-path SUMPRODUCT guards each
-        # side with (E<>"")/(F<>"") — the cache mirrors that per-side
-        # behavior for one-sided rows; the flag cache applies only when
-        # BOTH sides are missing (the formula switches to the mirror there)
-        if lo is not None or hi is not None:
-            fails_cache = fails_cached_limits_one_sided(die_cells, lo, hi)
-        else:
-            fails_cache = fails_cached_flags(mirror_cells)
+        nums = numeric_values(die_cells)
+        mn, mx, avg, cp, cpk, fails_cache = row_stat_caches(nums, lo, hi, mirror_cells)
         for col, cached in (
-            (7, stat_cached("MIN", die_cells)),
-            (8, stat_cached("MAX", die_cells)),
-            (9, stat_cached("AVERAGE", die_cells)),
-            (10, cp_cached(lo, hi, die_cells)),
-            (11, cpk_cached(lo, hi, die_cells)),
+            (7, mn),
+            (8, mx),
+            (9, avg),
+            (10, cp),
+            (11, cpk),
             (12, fails_cache),
         ):
             if cached is None and col in (7, 8):
@@ -693,8 +687,9 @@ def _test_rows(summaryTable, tests, chunk_cells, first_die, last_die, mirror_fir
         # Trend sparkline per data row with numeric die values (FTR rows
         # spark as columns — the 0=pass encoding would render passes as
         # win/loss "losses"); local unqualified die range, the writer
-        # qualifies it with the sheet name
-        if has_numeric(die_cells):
+        # qualifies it with the sheet name. The gate reuses the one-pass
+        # nums list (bool(nums) == has_numeric(die_cells)).
+        if bool(nums):
             sparklines.append(
                 {
                     "row": row_index,

@@ -39,15 +39,13 @@ renderer consumes the spec dicts produced here.
 
 from deps.exporter.contract import ReportHost
 from deps.exporter.helpers import (
-    cp_cached,
     cp_formula_col,
-    cpk_cached,
     cpk_formula_col,
-    fails_cached_flags,
-    fails_cached_limits_one_sided,
     fails_formula_flags_col,
     fails_formula_limits_col,
     get_column_letter,
+    numeric_values,
+    row_stat_caches,
     split_dut_chunks,
     stat_cached,
     stat_formula_col,
@@ -189,21 +187,23 @@ def _test_column(summaryTable, test, offset, order, last_data_row, flag_col_offs
     ]
 
     # cached formula results keyed (1-based row, 1-based col) — the same
-    # gating as test_summary._test_rows: None caches "" so previews never
-    # show a stray 0, except MIN/MAX cache the faithful 0 (their guarded
-    # formulas compute 0 on an empty range, never the error branch)
+    # gating as test_summary._test_rows: ONE numeric_values pass over the
+    # die cells, then row_stat_caches (sigma/fmean once for Cp+Cpk; the
+    # FAILS branch selection lives inside: one-sided OR semantics when a
+    # limit is present, the flag-mirror count when BOTH sides are
+    # missing). None caches "" so previews never show a stray 0, except
+    # MIN/MAX cache the faithful 0 (their guarded formulas compute 0 on
+    # an empty range, never the error branch)
     lo = spec_min if spec_min != "" else None
     hi = spec_max if spec_max != "" else None
-    if lo is not None or hi is not None:
-        fails_cache = fails_cached_limits_one_sided(die_cells, lo, hi)
-    else:
-        fails_cache = fails_cached_flags(mirror_cells)
+    nums = numeric_values(die_cells)
+    mn, mx, avg, cp, cpk, fails_cache = row_stat_caches(nums, lo, hi, mirror_cells)
     cache_rows = (
-        (MIN_ROW, stat_cached("MIN", die_cells)),
-        (MAX_ROW, stat_cached("MAX", die_cells)),
-        (MEAN_ROW, stat_cached("AVERAGE", die_cells)),
-        (CP_ROW, cp_cached(lo, hi, die_cells)),
-        (CPK_ROW, cpk_cached(lo, hi, die_cells)),
+        (MIN_ROW, mn),
+        (MAX_ROW, mx),
+        (MEAN_ROW, avg),
+        (CP_ROW, cp),
+        (CPK_ROW, cpk),
         (FAILS_ROW, fails_cache),
     )
     cache_entries = []

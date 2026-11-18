@@ -1511,6 +1511,29 @@ class TestOneSidedLimitRow:
         fv = spec["formula_values"]
         assert fv[(17, 12)] == 1  # flags alone would say 0 — cache matches formula
 
+    def test_low_limit_only_fails_cache_equals_manual_count(self):
+        # equality pin (perf overhaul): the FAILS cache for a one-sided
+        # lo-only row equals the manually-computed one-sided count —
+        # below a PRESENT lo, the blank hi side never fails (exclusive
+        # comparison: a die value exactly at lo passes)
+        dies = [0.5, 2.0, 0.9, 1.0, 1.5]
+        tests = [
+            dict(
+                name="0_T/v",
+                num=10,
+                unit="V",
+                llimit=1.0,
+                hlimit=np.nan,  # one-sided: no high limit
+                rec=REC.PTR,
+                data={1: (dies, [0] * len(dies))},  # flags all pass
+            )
+        ]
+        duts = [(1, i, make_dut_info(fid=1, part_id=f"D{i}")) for i in range(len(dies))]
+        spec = build(tests, duts)[0]
+        expected = sum(1 for v in dies if v < 1.0)  # manual count, no helpers
+        assert expected == 2  # fixture sanity: 0.5 and 0.9 sit below LL
+        assert spec["formula_values"][(17, 12)] == expected
+
 
 # --------------------------------------------------------------------------
 # temperature split grouping (split §7.4)
