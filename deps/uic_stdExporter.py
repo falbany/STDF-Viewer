@@ -71,6 +71,7 @@ class ReportSelection(IntEnum):
     PPQQ = 8
     Correlation = 9
     TestSummary = 10  # fork(falbany): the Test Summary matrix (modern-only)
+    WaferHeatMap = 11  # fork(falbany): the stacked all-wafers heat map (modern-only)
 
 
 class sv:
@@ -886,6 +887,7 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.TestSummary_cb.clicked.connect(self.changeBtnStyle)  # fork(falbany)
         self.exportUI.FileInfo_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.Wafer_cb.clicked.connect(self.changeBtnStyle)
+        self.exportUI.WaferHeatMap_cb.clicked.connect(self.changeBtnStyle)  # fork(falbany)
         self.exportUI.GDR_DTR_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.PPQQ_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.Correlation_cb.clicked.connect(self.changeBtnStyle)
@@ -900,6 +902,9 @@ class stdfExporter(QtWidgets.QDialog):
         # fork(falbany): Test Summary matrix toggle (modern-only)
         self.exportUI.TestSummary_cb.setChecked(getSetting().gen.test_summary)
         self.exportUI.TestSummary_cb.toggled.connect(self.onTestSummaryToggled)
+        # fork(falbany): Wafer Heat Map toggle (modern-only)
+        self.exportUI.WaferHeatMap_cb.setChecked(getSetting().gen.wafer_heat_map)
+        self.exportUI.WaferHeatMap_cb.toggled.connect(self.onWaferHeatMapToggled)
         self._sync_option_checkboxes()
         # bind check/cancel button to function
         self.exportUI.checkAll.clicked.connect(lambda: self.toggleSite(True))
@@ -930,12 +935,18 @@ class stdfExporter(QtWidgets.QDialog):
         getSetting().gen.test_summary = checked
         dumpConfigFile()
 
+    def onWaferHeatMapToggled(self, checked: bool):
+        # fork(falbany): persist Wafer Heat Map toggle
+        getSetting().gen.wafer_heat_map = checked
+        dumpConfigFile()
+
     def _sync_option_checkboxes(self):
         # fork(falbany): these options are Modern-only — disabled with it
         enabled = self.exportUI.ModernReport_cb.isChecked()
         self.exportUI.HideRemeasured_cb.setEnabled(enabled)
         self.exportUI.SplitTemperature_cb.setEnabled(enabled)
         self.exportUI.TestSummary_cb.setEnabled(enabled)
+        self.exportUI.WaferHeatMap_cb.setEnabled(enabled)
                 
     def showUI(self):
         # used to determine the source of close event
@@ -1139,6 +1150,8 @@ class stdfExporter(QtWidgets.QDialog):
         if self.exportUI.TestSummary_cb.isChecked(): selectedContents.append(ReportSelection.TestSummary)
         if self.exportUI.FileInfo_cb.isChecked(): selectedContents.append(ReportSelection.FileInfo)
         if self.exportUI.Wafer_cb.isChecked(): selectedContents.append(ReportSelection.Wafer)
+        # fork(falbany): modern-only — the classic exporter never sees this member
+        if self.exportUI.WaferHeatMap_cb.isChecked(): selectedContents.append(ReportSelection.WaferHeatMap)
         if self.exportUI.GDR_DTR_cb.isChecked(): selectedContents.append(ReportSelection.GDR_DTR)
         if self.exportUI.PPQQ_cb.isChecked(): selectedContents.append(ReportSelection.PPQQ)
         if self.exportUI.Correlation_cb.isChecked(): selectedContents.append(ReportSelection.Correlation)
@@ -1232,8 +1245,9 @@ class stdfExporter(QtWidgets.QDialog):
                 self.exportUI.previousBtn.setEnabled(True)
                 self.exportUI.stackedWidget.setCurrentIndex(1)
                 
-            elif len(set(selectedContents) & {ReportSelection.Bin, 
+            elif len(set(selectedContents) & {ReportSelection.Bin,
                                               ReportSelection.Wafer,
+                                              ReportSelection.WaferHeatMap,
                                               ReportSelection.Correlation}) > 0:
                 # go to site page
                 self.previousPageIndex = 0
