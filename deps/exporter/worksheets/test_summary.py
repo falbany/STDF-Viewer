@@ -331,7 +331,10 @@ def build_test_summary_spec(
     through ``pos``. The six stat caches and the sparkline gate are
     whole-order-scoped, so only the single-chunk export consumes them;
     a chunk smaller than the order recomputes its chunk-local caches
-    inline. None (direct calls) computes everything inline.
+    inline — and so does an order smaller than the TABLE's (a
+    temperature split's subset ``sub_order``: its stats cover the kept
+    DUTs only, `_is_table_order` refuses). None (direct calls) computes
+    everything inline.
 
     Since 2026-11-10 the banner row carries plain numeric DUT indices
     (global numbering, fix wave 2) and the numeric cell formats are
@@ -723,11 +726,13 @@ def _test_rows(
     die/mirror cells for EVERY chunk — chunking is placement-only (spec
     Wave 3.2), cells slice through ``pos`` with the inline fallback for
     degraded pairs. `shared_caches` (True only for a chunk covering the
-    whole order — `_build_chunk` sets it, since the six caches and the
-    sparkline gate span the chunk's own die range while the entry's cover
-    the FULL order) additionally lets those come from the entry; partial
-    chunks recompute them chunk-locally inline. shared_stats=None (direct
-    calls) computes everything inline exactly as before."""
+    whole TABLE order — `_build_chunk` sets it via `_is_table_order`,
+    since the six caches and the sparkline gate span the chunk's own die
+    range while the entry's cover the FULL table order) additionally lets
+    those come from the entry; partial chunks — and subset orders like a
+    temperature split's — recompute them chunk-locally inline.
+    shared_stats=None (direct calls) computes everything inline exactly
+    as before."""
     rows = []
     formula_values = {}
     sparklines = []
@@ -836,6 +841,19 @@ def _row_groups(tests):
     return groups
 
 
+def _is_table_order(order, pos):
+    """True when ``order`` IS the order the shared table was built from:
+    ``pos`` maps every pair to its exact position and covers nothing else.
+
+    The table's six stat caches span that order only, so a chunk may
+    consume them only under it (the base sheet passes the context order);
+    a temperature split's ``sub_order`` is a strict subset and must keep
+    its chunk-local caches (Task 10)."""
+    return len(pos) == len(order) and all(
+        pos.get(pair) == index for index, pair in enumerate(order)
+    )
+
+
 def _build_chunk(
     summaryTable,
     tests,
@@ -864,8 +882,13 @@ def _build_chunk(
     # gate span the chunk's own die range, so ONLY a chunk covering every
     # ordered DUT from its start (the single-chunk export) may take the
     # entry's whole-order caches verbatim; partial chunks recompute them
-    # chunk-locally inline (their formula ranges differ)
-    whole_order = chunk_start == 0 and die_count == len(order)
+    # chunk-locally inline (their formula ranges differ). The caches span
+    # the TABLE's order (pos's domain), not merely the order argument — a
+    # temperature split's sub_order is a strict subset of it, so its
+    # single chunk recomputes too (Task 10; _is_table_order refuses).
+    whole_order = chunk_start == 0 and die_count == len(order) and (
+        shared_stats is None or _is_table_order(order, shared_stats["pos"])
+    )
 
     first_die = die_col(0)
     last_die = die_col(die_count - 1) if die_count > 0 else first_die
@@ -1249,8 +1272,8 @@ class TestSummaryMixin(ReportHost):
             file_temperatures=file_temperatures,
             # finding 4: the per-test die/mirror cells and stat caches
             # were computed ONCE in _prepare_dut_context — consume them
-            # (the temperature splits below keep the inline computation;
-            # Task 10 owns their shared-table wiring)
+            # (the temperature splits below pass the same table; their
+            # subset stat caches stay chunk-local, see the split loop)
             shared_stats={"entries": self._dut_ctx_stats, "pos": self._dut_ctx_pos},
         )
 
@@ -1290,6 +1313,13 @@ class TestSummaryMixin(ReportHost):
                         sheet_name=f"{self.tr('Test Summary')} - T{format_temperature_label(temp)}°C",
                         tr=self.tr,
                         file_temperatures=file_temperatures,
+                        # finding 4: the splits consume the SAME table as
+                        # the base sheet — cells slice through pos (every
+                        # kept pair is in the context order, the groups
+                        # are built FROM it); the whole-order cache gate
+                        # keeps the six caches subset-local (sub_order is
+                        # a strict subset of the table's order)
+                        shared_stats={"entries": self._dut_ctx_stats, "pos": self._dut_ctx_pos},
                     )
                     for spec in split_specs:
                         ws = wb.add_worksheet(spec["name"])
