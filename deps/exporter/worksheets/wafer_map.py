@@ -49,15 +49,17 @@ from deps.exporter.charts import (
     WAFER_LABEL_COL_WIDTH,
     WAFER_SPACER_PINNED_WIDTH,
     WAFER_VALUE_COL_WIDTH,
-    stacked_wafer_ids,
     wafer_sheet_name,
     wafer_table_name,
-    write_stacked_wafer_block,
     write_wafer_map_block,
 )
 from deps.exporter.contract import ReportHost
 from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.wafer_merge import merge_wafer_payloads, merged_wafer_groups
+from deps.exporter.worksheets.wafer_heat_map import (
+    stacked_wafer_ids,
+    write_stacked_wafer_block,
+)
 from deps.exporter.writer import FOOTER_TEXT
 from deps.SharedSrc import getSetting, tab
 from deps.uic_stdExporter import ReportSelection

@@ -13,7 +13,6 @@ from PyQt5 import QtCore
 
 from deps.DataInterface import stacked_report_payload
 from deps.SharedSrc import getSetting
-from deps.exporter.charts import WAFER_STACKED_LEGEND
 from deps.exporter.generator import ModernReportGenerator
 from deps.exporter.worksheets.file_info import file_temperatures_from_file_info
 from deps.exporter.worksheets.test_statistics import (
@@ -25,6 +24,7 @@ from deps.exporter.worksheets.test_statistics import (
     transform_stat_header,
     transform_stat_row,
 )
+from deps.exporter.worksheets.wafer_heat_map import WAFER_STACKED_LEGEND
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
 from tests.exporter.conftest import read_xml
 

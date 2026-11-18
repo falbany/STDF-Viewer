@@ -44,7 +44,6 @@ from deps.exporter.charts import (
     BIN_LABEL_FONT,
     BIN_PAGE_COLUMN_WIDTH,
     BIN_TABLE_HEADERS,
-    WAFER_STACKED_LEGEND,
     WAFER_SUPERSEDED_BORDER_HEX,
     cm_to_px,
     aggregate_bin_counts,
@@ -58,8 +57,6 @@ from deps.exporter.charts import (
     write_bin_table,
     write_kpi_cards,
     write_merged_headline,
-    stacked_wafer_ids,
-    write_stacked_wafer_block,
     write_wafer_map_block,
     wafer_info_rows,
     wafer_kpi_from_grid,
@@ -67,6 +64,11 @@ from deps.exporter.charts import (
     wafer_table_name,
 )
 from deps.exporter.theme import ModernTheme
+from deps.exporter.worksheets.wafer_heat_map import (
+    WAFER_STACKED_LEGEND,
+    stacked_wafer_ids,
+    write_stacked_wafer_block,
+)
 from tests.exporter.conftest import load_workbook_bytes, read_xml, render_workbook
 
 
