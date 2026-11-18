@@ -23,6 +23,7 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
 | `test_summary.py` | `writeTest_Summary()` + `_prepare_dut_context()` (generator-level, shared context) |
 | `trend_chart.py` | `writeTrendPlot(testTuple, head, site)` |
 | `wafer_map.py` | `writeWaferMap()` |
+| `wafer_heat_map.py` | `writeWaferHeatMap()` |
 
 (The names are camelCase by ruling — see the parent's Settled rulings.)
 

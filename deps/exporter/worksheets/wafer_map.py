@@ -35,24 +35,23 @@ per-file payloads fused die-by-die (latest file wins), re-measured dies
 thick-orange-bordered, counts recomputed from the merged grid.
 
 2026-11-13 stacked wafer map (issue #5): the stacked tuple
-(`waferIndex == -1`) renders ONE sheet — "Wafer Stacked Map (All
-Wafers)" — LAST among the wafer sheets (2026-11-14 user ruling: an
+(`waferIndex == -1`) rendered ONE sheet — "Wafer Stacked Map (All
+Wafers)" — last among the wafer sheets (2026-11-14 user ruling: an
 extended engineering view of the wafer, appended after the per-wafer
-and merged sheets; reverses the original GUI-mirroring first
-placement), whenever Wafer Map content is selected and independent of
-the hide-remeasured setting: the cross-wafer fail-count heatmap as a
-live cell grid under one green→yellow→red color-scale, with its
-reading legend right below the title.
+and merged sheets), the cross-wafer fail-count heatmap as a live cell
+grid under one green→yellow→red color-scale. 2026-11-18 (issue #13):
+that sheet moved to `worksheets/wafer_heat_map.py` — the self-gated
+WaferHeatMapMixin composed right after this mixin; this writer fetches
+REAL tuples only and stashes their payloads for the heat sheet's
+roster.
 """
 
 from deps.exporter.charts import (
     WAFER_LABEL_COL_WIDTH,
     WAFER_SPACER_PINNED_WIDTH,
     WAFER_VALUE_COL_WIDTH,
-    stacked_wafer_ids,
     wafer_sheet_name,
     wafer_table_name,
-    write_stacked_wafer_block,
     write_wafer_map_block,
 )
 from deps.exporter.contract import ReportHost
@@ -96,10 +95,16 @@ class WaferMapMixin(ReportHost):
 
     def writeWaferMap(self):
         """The Wafer Map sheets: one sheet per wafer tuple, plus a merged
-        sheet per re-measured ID (issue #4) and the stacked all-wafers
-        sheet last (issue #5); payloads fetched in tuple order."""
+        sheet per re-measured ID (issue #4); payloads fetched in tuple
+        order. Wafer Map content not selected (no pre-created base
+        sheet) → return before any fetch or sheet write (the classic's
+        guard); the fetched (index, wafer, payload) triples of the REAL
+        tuples land on ``self._wafer_fetched`` — the WaferHeatMapMixin's
+        roster stash (issue #13)."""
         key = ReportSelection.Wafer
         base_sheet = self.sheetDict.get(key, None)
+        if base_sheet is None:
+            return
         # report_core binds workbook and theme before any write* runs
         wb = self._wb
         theme = self._theme
@@ -110,8 +115,7 @@ class WaferMapMixin(ReportHost):
         # one sheet per wafer is added — they land at the workbook end,
         # which is exactly the "Wafer Map" tab position of the classic
         # creation order
-        if base_sheet is not None:
-            wb.worksheets_objs = [ws for ws in wb.worksheets_objs if ws is not base_sheet]
+        wb.worksheets_objs = [ws for ws in wb.worksheets_objs if ws is not base_sheet]
         taken = {ws.get_name() for ws in wb.worksheets_objs}
         row = self._row.get(key, 0)
         # merged groups only exist when the filter is ON (2026-11-13
@@ -122,28 +126,13 @@ class WaferMapMixin(ReportHost):
             else set()
         )
         fetched = []  # (tuple index, wafer tuple, payload) in tuple order
-        stacked_payload = None  # the (-1, -1) tuple's payload (issue #5)
-        stacked_index = 0
         # pass 1 — fetch payloads in tuple order (no ticks here); the
-        # stacked tuple keeps its tick exactly as today
+        # stacked tuple is skipped — the WaferHeatMapMixin owns its fetch
+        # and its tick now (issue #13)
         for index, wafer in enumerate(self.waferTuples):
             if self.forceQuit:
                 return
             if wafer[0] == -1:
-                # stacked wafer (fail-count colormap, issue #5): fetch the
-                # aggregation here, write its sheet LAST in pass 2 (after
-                # every wafer-dedicated sheet) — the tick stays with the
-                # tuple exactly as today
-                stacked_payload = self.waitForDataList(
-                    [],
-                    self.selectedSites,
-                    self.selectedFiles,
-                    tab.Wafer,
-                    {"testTuples": [wafer], "waferMapData": wafer},
-                )
-                stacked_index = index
-                self.loopCount += 1
-                self.sendProgress()
                 continue
             # flagged fetch: one bundled payload (info rows + map data
             # + palette) per wafer; the block fills the wafer's sheet
@@ -155,11 +144,13 @@ class WaferMapMixin(ReportHost):
                 {"testTuples": [wafer], "waferMapData": wafer},
             )
             fetched.append((index, wafer, payload))
+        # the heat map's roster stash (issue #13): real tuples only, so
+        # the heat sheet's roster never re-fetches a payload
+        self._wafer_fetched = fetched
         # pass 2 — per-file sheets in the SAME order as today; after the
-        # LAST tuple of a merge group, write its merged sheet; the
-        # stacked sheet LAST (2026-11-14 user ruling: an extended
-        # engineering view of the wafer, appended after every
-        # wafer-dedicated sheet)
+        # LAST tuple of a merge group, write its merged sheet (the
+        # stacked all-wafers sheet moved to the WaferHeatMapMixin,
+        # issue #13)
         group_last = {
             wafer[2]: index
             for index, wafer, _ in fetched  # later tuples overwrite: last wins
@@ -193,29 +184,6 @@ class WaferMapMixin(ReportHost):
                 row = start_row
                 self.loopCount += 1
                 self.sendProgress()
-        if stacked_payload is not None:
-            name = wafer_sheet_name(stacked_index, "Stacked Map (All Wafers)", taken)
-            taken.add(name)
-            StackedSheet = wb.add_worksheet(name)
-            # per-wafer roster: every fetched payload is already in
-            # hand — no new fetch round-trip, and a names-only roster
-            # needs no table name
-            wafer_ids, total_duts = stacked_wafer_ids(
-                [(w[2], p) for _i, w, p in fetched]
-            )
-            write_stacked_wafer_block(
-                StackedSheet,
-                theme,
-                stacked_payload["rows"],
-                stacked_payload["map"],
-                1,
-                freeze_panes=True,  # same grid freeze as the sbin sheets
-                wafer_ids=wafer_ids,
-                total_duts=total_duts,
-                fail_table_name=wafer_table_name(stacked_index, "FailMapCount"),
-                wb=wb,  # issue #7: the Fail Map Count table gets its donut
-            )
-            self._style_wafer_sheet(StackedSheet)
         self._row[key] = row
 
     def _write_merged_wafer_sheet(self, wafer_id, index, taken, group):

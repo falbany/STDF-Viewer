@@ -81,6 +81,7 @@ from deps.exporter.worksheets.histogram import HistogramMixin
 from deps.exporter.worksheets.test_statistics import TestStatisticsMixin
 from deps.exporter.worksheets.test_summary import TestSummaryMixin, order_dut_block
 from deps.exporter.worksheets.trend_chart import TrendChartMixin
+from deps.exporter.worksheets.wafer_heat_map import WaferHeatMapMixin
 from deps.exporter.worksheets.wafer_map import WaferMapMixin
 from deps.exporter.writer import (
     apply_autofit,
@@ -101,7 +102,9 @@ AUTOFIT_FACTOR = 1.1
 AUTOFIT_CAP = 60
 
 
-class ModernReportGenerator(
+class ModernReportGenerator(  # pylint: disable=too-many-ancestors
+    # fork(falbany): 13 ancestors after WaferHeatMapMixin joined the
+    # composition (issue #13) — one more mixin than max-parents=12 admits
     FileInfoMixin,
     GdrDtrMixin,
     TestSummaryMixin,
@@ -109,6 +112,7 @@ class ModernReportGenerator(
     TestStatisticsMixin,
     BinChartMixin,
     WaferMapMixin,
+    WaferHeatMapMixin,
     TrendChartMixin,
     HistogramMixin,
     reportGenerator,
@@ -138,6 +142,7 @@ class ModernReportGenerator(
         self._ftr_tests: set = set()
         self._remeasure_drops: set | None = None
         self._fid_ranks_cache: dict | None = None
+        self._wafer_fetched: list = []
         self._dut_sheet_block: list = []
 
     # ----------------------------------------------------------------------
@@ -160,7 +165,7 @@ class ModernReportGenerator(
     # report assembly
     # ----------------------------------------------------------------------
 
-    def report_core(self):  # pylint: disable=too-many-branches
+    def report_core(self):  # pylint: disable=too-many-branches,too-many-statements
         # strings_to_urls MUST stay off: URL-looking strings (File Info
         # paths) would silently become hyperlinks (xlsxwriter's default)
         self._wb = xlsxwriter.Workbook(
@@ -190,6 +195,10 @@ class ModernReportGenerator(
         # first _fid_ranks() call — ONE waitForFileDates round-trip per
         # export, shared by the Test Summary dedup and the wafer merge
         self._fid_ranks_cache: dict | None = None
+        # per-run stash (issue #13): (index, wafer, payload) triples
+        # writeWaferMap fetched — the heat map's roster rides it; []
+        # until pass 1 runs
+        self._wafer_fetched: list = []
         # the DUT-derived sheet block (Test Summary base + chunk overflow +
         # temperature splits + the DUT Summary per-DUT sheets, base first)
         # for the close-time tab-order reorder (§7.4)
@@ -294,6 +303,12 @@ class ModernReportGenerator(
                 return
             # wafer sheet
             self.writeWaferMap()
+            if self.forceQuit:
+                return
+
+            # stacked all-wafers heat map (issue #13): self-gated mixin —
+            # appends "Wafer Heat Map" last, after every wafer-dedicated sheet
+            self.writeWaferHeatMap()
             if self.forceQuit:
                 return
 

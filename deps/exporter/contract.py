@@ -47,6 +47,8 @@ class ReportHost:  # pylint: disable=too-few-public-methods
     _ftr_tests: set  # (test_num, test_name) tuples filled by _prepare_dut_context
     _remeasure_drops: set | None  # None = stat-only signal (§7.2)
     _fid_ranks_cache: dict | None  # None until the first _fid_ranks() call
+    _wafer_fetched: list  # per-run stash (issue #13): (index, wafer, payload)
+                          # triples writeWaferMap fetched; [] until then
     _dut_sheet_block: list  # DUT-derived sheets, base first (§7.4 reorder)
 
     # -- DUT-block shared context (_prepare_dut_context, generator level:
@@ -69,6 +71,7 @@ class ReportHost:  # pylint: disable=too-few-public-methods
     loopCount: int = 0
     forceQuit: bool
     sheetDict: dict  # ReportSelection -> xlsxwriter worksheet
+    selectedContents: list  # ReportSelection members, bound from reportInfo[0]
     testTuples: list
     selectedFiles: list
     selectedHeads: list
@@ -90,6 +93,9 @@ class ReportHost:  # pylint: disable=too-few-public-methods
     # supersede rank map, one waitForFileDates round-trip per export
     # (reportGenerator._fid_ranks, cached through _fid_ranks_cache)
     _fid_ranks: Callable[[], dict]
+    # WaferMapMixin's per-wafer cosmetics (issue #13: the heat map sheet
+    # reuses them — cross-mixin by convention)
+    _style_wafer_sheet: Callable[..., None]
     # TestSummaryMixin's re-measure drop-set resolver (§7.2)
     _resolve_remeasure_drops: Callable[[], Any]
     # DUTSummaryMixin's per-DUT sheet writer (generator-invoked; reads the

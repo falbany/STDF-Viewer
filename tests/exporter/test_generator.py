@@ -13,7 +13,6 @@ from PyQt5 import QtCore
 
 from deps.DataInterface import stacked_report_payload
 from deps.SharedSrc import getSetting
-from deps.exporter.charts import WAFER_STACKED_LEGEND
 from deps.exporter.generator import ModernReportGenerator
 from deps.exporter.worksheets.file_info import file_temperatures_from_file_info
 from deps.exporter.worksheets.test_statistics import (
@@ -25,6 +24,7 @@ from deps.exporter.worksheets.test_statistics import (
     transform_stat_header,
     transform_stat_row,
 )
+from deps.exporter.worksheets.wafer_heat_map import WAFER_STACKED_LEGEND
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
 from tests.exporter.conftest import read_xml
 
@@ -432,22 +432,42 @@ def build_wafer_report(
     file_dates,
     hide_remeasured,
     selectedFiles=None,
+    heat_selected=False,
+    wafer_selected=True,
+    fetch_log=None,
 ):
-    """Stage a Wafer-only export and run report_core() once. `payloads`
-    maps (waferInd, fid, ID) -> payload dict; `file_dates` feeds the
-    waitForFileDates stub. totalLoopCnt mirrors stdfExporter.start():
-    one tick per wafer tuple + one per merged group when hiding."""
+    """Stage a Wafer-optional export and run report_core() once.
+    `payloads` maps (waferInd, fid, ID) -> payload dict; `file_dates`
+    feeds the waitForFileDates stub. totalLoopCnt mirrors
+    stdfExporter.start() post-split (issue #13): real wafer tuples +
+    one per merged group when hiding, +1 when the heat sheet renders.
+    `heat_selected`/`wafer_selected` compose the selection; with
+    Wafer deselected a benign FileInfo rides along (+1 tick, so the
+    reloaded workbook is never sheet-less). `fetch_log` (a list) records
+    every waitForDataList waferMapData key in fetch order."""
+    contents = (
+        ([ReportSelection.Wafer] if wafer_selected else [])
+        + ([ReportSelection.WaferHeatMap] if heat_selected else [])
+    )
     selectedFiles = (
         sorted({t[1] for t in waferTuples}) if selectedFiles is None else selectedFiles
     )
-    totalLoopCnt = len(waferTuples)
-    if hide_remeasured:
-        from deps.exporter.wafer_merge import merged_wafer_groups
+    totalLoopCnt = 0
+    if wafer_selected:
+        # modern formula post-split: real tuples + merged groups
+        totalLoopCnt += sum(1 for w in waferTuples if w[0] != -1)
+        if hide_remeasured:
+            from deps.exporter.wafer_merge import merged_wafer_groups
 
-        totalLoopCnt += len(merged_wafer_groups(waferTuples))
+            totalLoopCnt += len(merged_wafer_groups(waferTuples))
+    else:
+        contents.insert(0, ReportSelection.FileInfo)  # benign filler
+        totalLoopCnt += 1
+    if heat_selected and any(w[0] == -1 for w in waferTuples):
+        totalLoopCnt += 1
     reportPath = str(tmp_path / "report.xlsx")
     reportInfo = (
-        [ReportSelection.Wafer],
+        contents,
         [],
         selectedFiles,
         [],
@@ -461,10 +481,19 @@ def build_wafer_report(
     gen = ModernReportGenerator(
         sig, QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, channel
     )
-    gen.waitForDataList = (
-        lambda heads, sites, fids, chartType, kargs: payloads[kargs["waferMapData"]]
-    )
+
+    def fetch(heads, sites, fids, chartType, kargs):
+        if fetch_log is not None:
+            fetch_log.append(kargs["waferMapData"])
+        return payloads[kargs["waferMapData"]]
+
+    gen.waitForDataList = fetch
     gen.waitForFileDates = lambda fids: file_dates
+    if not wafer_selected:
+        gen.waitForTableData = lambda isFileInfo: [
+            ["File Name", "demo.stdf"],
+            ["Yield: ", "98.50%"],
+        ]
     if hide_remeasured:
         monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
     gen.report_core()
@@ -577,12 +606,15 @@ class TestMergedWaferSheets:
         assert wb["Wafer W08"]["H5"].border.top.style is None
 
 
-class TestStackedWaferSheet:
-    """Issue #5: the stacked wafer tuple renders ONE sheet — 'Wafer
-    Stacked Map (All Wafers)' — LAST among the wafer sheets (2026-11-14
-    user ruling: extended engineering view, appended after the per-wafer
-    and merged sheets), whenever Wafer Map content is selected,
-    independent of hide_remeasured."""
+class TestWaferHeatMap:
+    """Issue #13 split: the stacked all-wafers sheet became the self-gated
+    WaferHeatMapMixin.writeWaferHeatMap — "Wafer Heat Map", appended last
+    after every wafer-dedicated sheet whenever the heat map content is
+    selected AND a stacked tuple exists. The roster rides writeWaferMap's
+    payload stash when both are selected (zero duplicate per-wafer
+    fetches) and fetches the missing payloads data-only alone;
+    writeWaferMap itself no longer fetches or writes anything stacked
+    (the stacked tuple's tick moved into this sheet's denominator)."""
 
     # getExportWaferTuples order: the stacked tuple always comes first
     TUPLES = [(-1, -1, "Stacked Wafer Map"), (0, 0, "W08")]
@@ -594,135 +626,248 @@ class TestStackedWaferSheet:
     }
     DATES = {0: (1, "2026-01-01", "")}
 
-    def test_stacked_sheet_last(self, tmp_path, qapp, monkeypatch):
-        _, reportPath = build_wafer_report(
+    def test_both_selected_heat_last_and_no_refetch(self, tmp_path, qapp, monkeypatch):
+        # pin 1: order, roster + total, zero duplicate per-wafer fetches
+        fetch_log = []
+        gen, reportPath = build_wafer_report(
             tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
-            hide_remeasured=False,
+            hide_remeasured=False, heat_selected=True, fetch_log=fetch_log,
         )
         wb = load_workbook(reportPath)
-        # extended engineering view: after every wafer-dedicated sheet
-        assert wb.sheetnames == ["Wafer W08", "Wafer Stacked Map (All Wafers)"]
+        assert wb.sheetnames == ["Wafer W08", "Wafer Heat Map"]
+        heat = wb["Wafer Heat Map"]
+        assert heat["A14"].value == "Stacked Wafers" and heat["A15"].value == "W08"
+        assert heat["B10"].value == "Total DUTs Tested"
+        # each payload fetched exactly once: writeWaferMap took W08, the heat
+        # mixin took the stacked tuple — the roster rode the stash
+        assert fetch_log == [(0, 0, "W08"), (-1, -1, "Stacked Wafer Map")]
+        assert gen.loopCount == gen.totalLoopCnt == 2
 
-    def test_stacked_sheet_rendered(self, tmp_path, qapp, monkeypatch):
-        _, reportPath = build_wafer_report(
+    def test_heat_alone_data_only_roster_fetches(self, tmp_path, qapp, monkeypatch):
+        # pin 2 (+ pin 5's name): only the heat sheet, roster + total present,
+        # per-wafer payloads fetched data-only (stacked first, then W08)
+        fetch_log = []
+        gen, reportPath = build_wafer_report(
             tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
-            hide_remeasured=False,
+            hide_remeasured=False, heat_selected=True, wafer_selected=False,
+            fetch_log=fetch_log,
         )
         wb = load_workbook(reportPath)
-        stacked = wb["Wafer Stacked Map (All Wafers)"]
+        assert wb.sheetnames == ["File Info", "Wafer Heat Map"]  # FileInfo = benign filler
+        heat = wb["Wafer Heat Map"]
+        assert heat["A14"].value == "Stacked Wafers" and heat["A15"].value == "W08"
+        assert heat["B10"].value == "Total DUTs Tested"
+        data_only = load_workbook(reportPath, data_only=True)["Wafer Heat Map"]
+        assert data_only["A5"].value == 6   # Total Failed DUTs
+        assert data_only["B11"].value == 5  # Total DUTs Tested
+        assert fetch_log == [(-1, -1, "Stacked Wafer Map"), (0, 0, "W08")]
+        # brief correction: the brief pinned `== 1`, but its own
+        # build_wafer_report denominator yields 2 (FileInfo filler +1,
+        # heat-with-stacked +1) and the tick side reaches 2 the same way
+        # (writeFileInfo ticks — pin 4 proves it counts; the heat sheet
+        # ticks exactly once — pin 1 proves it)
+        assert gen.loopCount == gen.totalLoopCnt == 2
+
+    def test_wafer_alone_never_fetches_stacked(self, tmp_path, qapp, monkeypatch):
+        # pin 3 + the stacked tick moved out (old denominator counted 2)
+        fetch_log = []
+        gen, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=False, fetch_log=fetch_log,
+        )
+        wb = load_workbook(reportPath)
+        assert wb.sheetnames == ["Wafer W08"]
+        assert fetch_log == [(0, 0, "W08")]  # no stacked-tuple fetch
+        assert gen.loopCount == gen.totalLoopCnt == 1
+
+    def test_unselected_wafer_never_fetches_or_writes(self, tmp_path, qapp, monkeypatch):
+        # pin 4: wafer data present, nothing wafer-ish selected — the guard fix
+        fetch_log = []
+        gen, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=False, wafer_selected=False, fetch_log=fetch_log,
+        )
+        wb = load_workbook(reportPath)
+        assert wb.sheetnames == ["File Info"]
+        assert fetch_log == []
+        assert gen.loopCount == gen.totalLoopCnt == 1
+
+    def test_heat_waferless_no_sheet_no_tick(self, tmp_path, qapp, monkeypatch):
+        # pin 6: heat checked, wafer-less database — no sheet, no fetches,
+        # progress reaches 100%
+        fetch_log = []
+        gen, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, [], {}, self.DATES,
+            hide_remeasured=False, heat_selected=True, wafer_selected=False,
+            selectedFiles=[0], fetch_log=fetch_log,
+        )
+        wb = load_workbook(reportPath)
+        assert wb.sheetnames == ["File Info"]
+        assert fetch_log == []
+        assert gen.loopCount == gen.totalLoopCnt == 1
+
+    def test_shape_identical_alone_and_both(self, tmp_path, qapp, monkeypatch):
+        # anti-goal pin: the heat sheet's shape never differs between modes
+        anchors = ("A1", "A2", "B10", "A14", "A15", "A17", "G4")
+
+        def probe(name, heat_selected, wafer_selected):
+            run_dir = tmp_path / name
+            run_dir.mkdir()
+            _, reportPath = build_wafer_report(
+                run_dir, qapp, monkeypatch, self.TUPLES,
+                self.PAYLOADS, self.DATES, hide_remeasured=False,
+                heat_selected=heat_selected, wafer_selected=wafer_selected,
+            )
+            ws = load_workbook(reportPath)["Wafer Heat Map"]
+            return (
+                [ws[a].value for a in anchors], ws.freeze_panes,
+                ws.max_row, ws.max_column, ws.print_title_rows,
+            )
+
+        both = probe("both", True, True)
+        alone = probe("alone", True, False)
+        assert both == alone
+
+    def test_heat_sheet_rendered(self, tmp_path, qapp, monkeypatch):
+        gen, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=False, heat_selected=True,
+        )
+        wb = load_workbook(reportPath)
+        heat = wb["Wafer Heat Map"]
         # title row 1, legend row 2, X headers row 3 (sbin anchor F3),
         # dies row 4 — the canned payload's fail counts as ints (x=1..3 →
         # 1, x=4 → 3), G-anchored; the count-0 die (probed, never failed)
         # renders as 0 at K4; total = 0*1 + 1*3 + 3*1 = 6, coords = 4
-        assert stacked["A1"].value == "Stacked Wafer Map – All Sites"
-        assert [stacked.cell(row=4, column=c).value for c in range(7, 12)] == [1, 1, 1, 3, 0]
+        assert heat["A1"].value == "Stacked Wafer Map – All Sites"
+        assert [heat.cell(row=4, column=c).value for c in range(7, 12)] == [1, 1, 1, 3, 0]
         # sbin-uniform KPI cards: cached =SUM headline + =COUNTIF coords;
         # slot 2: DUTs per Wafer (=COUNT over the 5 probed dies) + Total
         # DUTs Tested (Σ of the per-wafer totals — W08's "Total: 5")
-        assert stacked["A4"].value == "Total Failed DUTs"
-        assert stacked["B10"].value == "Total DUTs Tested"
-        data_only = load_workbook(reportPath, data_only=True)["Wafer Stacked Map (All Wafers)"]
+        assert heat["A4"].value == "Total Failed DUTs"
+        assert heat["B10"].value == "Total DUTs Tested"
+        data_only = load_workbook(reportPath, data_only=True)["Wafer Heat Map"]
         assert data_only["A5"].value == 6
         assert data_only["A8"].value == 4
         assert data_only["A11"].value == 5  # =COUNT: 5 probed dies
         assert data_only["B11"].value == 5  # Σ of the per-wafer DUT totals
         # the reading legend sits on row 2; freeze like the sbin sheets
         # (G4 = first die cell: title + legend + X-header row stay visible)
-        assert stacked["A2"].value == WAFER_STACKED_LEGEND
-        assert stacked.freeze_panes == "G4"
+        assert heat["A2"].value == WAFER_STACKED_LEGEND
+        assert heat.freeze_panes == "G4"
+        assert gen.loopCount == gen.totalLoopCnt == 2  # 1 wafer sheet + 1 heat sheet
 
-    def test_setting_independence(self, tmp_path, qapp, monkeypatch):
-        for hide in (False, True):
-            gen, reportPath = build_wafer_report(
-                tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS,
-                self.DATES, hide_remeasured=hide,
-            )
-            wb = load_workbook(reportPath)
-            assert wb.sheetnames[-1] == "Wafer Stacked Map (All Wafers)"
-            assert gen.loopCount == gen.totalLoopCnt
-
-    def test_progress_unchanged(self, tmp_path, qapp, monkeypatch):
-        # the stacked tuple already consumed one tick as a skip — it
-        # consumes exactly one as a rendered sheet too (totalLoopCnt's
-        # formula, len(waferTuples), is untouched)
-        gen, _ = build_wafer_report(
-            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
-            hide_remeasured=False,
-        )
-        assert gen.loopCount == gen.totalLoopCnt == 2
-
-    def test_print_setup_a4_landscape(self, tmp_path, qapp, monkeypatch):
-        # the stacked sheet prints like every wafer sheet (design
-        # 2026-11-14, approach A): A4 landscape, fit one page wide,
-        # rows 1-3 (title, legend, X-headers) repeated
-        _, reportPath = build_wafer_report(
-            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
-            hide_remeasured=False,
-        )
-        stacked = load_workbook(reportPath)["Wafer Stacked Map (All Wafers)"]
-        assert stacked.page_setup.paperSize == int(stacked.PAPERSIZE_A4)
-        assert stacked.page_setup.orientation == "landscape"
-        assert stacked.page_setup.fitToHeight == 0
-        assert stacked.sheet_properties.pageSetUpPr.fitToPage is True
-        assert stacked.print_title_rows == "$1:$3"
-
-    def test_stacked_wafer_roster(self, tmp_path, qapp, monkeypatch):
+    def test_heat_wafer_roster(self, tmp_path, qapp, monkeypatch):
         # 2026-11-16 ruling: names-only roster at the row-14 slot — label
         # line then one merged A:D line per wafer, no numbers
-        _, reportPath = build_wafer_report(
+        gen, reportPath = build_wafer_report(
             tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
-            hide_remeasured=False,
+            hide_remeasured=False, heat_selected=True,
         )
         wb = load_workbook(reportPath)
-        stacked = wb["Wafer Stacked Map (All Wafers)"]
-        assert stacked["A14"].value == "Stacked Wafers"
-        assert stacked["A15"].value == "W08"
-        assert stacked["B15"].value is None
+        heat = wb["Wafer Heat Map"]
+        assert heat["A14"].value == "Stacked Wafers"
+        assert heat["A15"].value == "W08"
+        assert heat["B15"].value is None
+        assert gen.loopCount == gen.totalLoopCnt == 2
 
     def test_fail_map_count_table(self, tmp_path, qapp, monkeypatch):
         # Fail Map Count below the roster (row 17): live COUNTIF
         # distribution of the fail-count values — the count-0 die (probed,
         # passed) is its own row, "Total" = probed coordinates
-        _, reportPath = build_wafer_report(
+        gen, reportPath = build_wafer_report(
             tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
-            hide_remeasured=False,
+            hide_remeasured=False, heat_selected=True,
         )
         wb = load_workbook(reportPath)
-        stacked = wb["Wafer Stacked Map (All Wafers)"]
-        assert stacked["A17"].value == "Fail Map Count — All Wafers"
-        assert [stacked.cell(row=18, column=c).value for c in range(1, 5)] == [
+        heat = wb["Wafer Heat Map"]
+        assert heat["A17"].value == "Fail Map Count — All Wafers"
+        assert [heat.cell(row=18, column=c).value for c in range(1, 5)] == [
             "Fails per Die", "Value", "Count", "Distribution",
         ]
-        assert stacked["A19"].value == "0 fails"
-        assert stacked["B19"].value == 0
-        assert stacked["A20"].value == "1 fail"
-        assert stacked["A21"].value == "3 fails"
-        data_only = load_workbook(reportPath, data_only=True)["Wafer Stacked Map (All Wafers)"]
+        assert heat["A19"].value == "0 fails"
+        assert heat["B19"].value == 0
+        assert heat["A20"].value == "1 fail"
+        assert heat["A21"].value == "3 fails"
+        data_only = load_workbook(reportPath, data_only=True)["Wafer Heat Map"]
         assert data_only["C19"].value == 1  # one probed-passed die
         assert data_only["C20"].value == 3  # three single-fail dies
         assert data_only["C21"].value == 1  # one triple-fail die
         assert data_only["C22"].value == 5  # Σ = probed coordinates
+        assert gen.loopCount == gen.totalLoopCnt == 2
 
-    def test_orange_border_absent_on_stacked(self, tmp_path, qapp, monkeypatch):
+    def test_print_setup_a4_landscape(self, tmp_path, qapp, monkeypatch):
+        # the heat sheet prints like every wafer sheet (design
+        # 2026-11-14, approach A): A4 landscape, fit one page wide,
+        # rows 1-3 (title, legend, X-headers) repeated
+        gen, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS, self.DATES,
+            hide_remeasured=False, heat_selected=True,
+        )
+        heat = load_workbook(reportPath)["Wafer Heat Map"]
+        assert heat.page_setup.paperSize == int(heat.PAPERSIZE_A4)
+        assert heat.page_setup.orientation == "landscape"
+        assert heat.page_setup.fitToHeight == 0
+        assert heat.sheet_properties.pageSetUpPr.fitToPage is True
+        assert heat.print_title_rows == "$1:$3"
+        assert gen.loopCount == gen.totalLoopCnt == 2
+
+    def test_orange_border_absent_on_heat(self, tmp_path, qapp, monkeypatch):
         # issue #4's superseded border exists in this export (merged W08
-        # group) but never reaches the stacked sheet — its CF rule defines
+        # group) but never reaches the heat sheet — its CF rule defines
         # no border and no die cell carries one (issue #4's tree assumed;
         # TestMergedWaferSheets in this module already requires it)
-        _, reportPath = build_wafer_report(
+        gen, reportPath = build_wafer_report(
             tmp_path, qapp, monkeypatch,
             [(-1, -1, "Stacked Wafer Map"), (0, 0, "W08"), (2, 1, "W08")],
             {**self.PAYLOADS, (2, 1, "W08"): wafer_payload({2: [(0, 0)]})},
-            self.DATES, hide_remeasured=True,
+            self.DATES, hide_remeasured=True, heat_selected=True,
         )
         wb = load_workbook(reportPath)
         with open(reportPath, "rb") as fh:
             styles = read_xml(fh.read(), "xl/styles.xml")
         assert "C55A11" in styles  # the merged sheet carries the border
-        stacked = wb["Wafer Stacked Map (All Wafers)"]
+        heat = wb["Wafer Heat Map"]
         for coord in ("G4", "H4", "I4", "J4"):
-            border = stacked[coord].border
+            border = heat[coord].border
             for side in (border.top, border.bottom, border.left, border.right):
                 assert side.style is None
+        # 2 per-file sheets + 1 merged sheet + 1 heat sheet
+        assert gen.loopCount == gen.totalLoopCnt == 4
+
+    def test_setting_independence(self, tmp_path, qapp, monkeypatch):
+        # hide_remeasured on/off never moves the heat sheet (the roster
+        # rides the stash or the data-only fetches either way); both
+        # selection modes (with and without the Wafer Map content) reach
+        # the same sheet with exact progress math
+        for hide in (False, True):
+            for wafer_selected in (True, False):
+                gen, reportPath = build_wafer_report(
+                    tmp_path, qapp, monkeypatch, self.TUPLES, self.PAYLOADS,
+                    self.DATES, hide_remeasured=hide, heat_selected=True,
+                    wafer_selected=wafer_selected,
+                )
+                wb = load_workbook(reportPath)
+                assert wb.sheetnames[-1] == "Wafer Heat Map"
+                assert gen.loopCount == gen.totalLoopCnt
+
+    def test_wafer_named_heat_map_collides(self, tmp_path, qapp, monkeypatch):
+        # Review Focus 1: a real wafer literally named "Heat Map" must not
+        # collide with the heat sheet — the real wafer's sheet is written
+        # first and takes the plain name, wafer_sheet_name dedupes the
+        # heat sheet (_2), still last
+        tuples = [(-1, -1, "Stacked Wafer Map"), (0, 0, "Heat Map")]
+        payloads = {
+            (-1, -1, "Stacked Wafer Map"): stacked_payload({1: [(1, 1)]}),
+            (0, 0, "Heat Map"): wafer_payload({1: [(0, 0)]}),
+        }
+        gen, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, tuples, payloads,
+            {0: (1, "2026-01-01", "")}, hide_remeasured=False, heat_selected=True,
+        )
+        wb = load_workbook(reportPath)
+        assert wb.sheetnames == ["Wafer Heat Map", "Wafer Heat Map_2"]
+        assert gen.loopCount == gen.totalLoopCnt == 2
 
 
 class TestWaferSheetDonuts:
@@ -761,15 +906,15 @@ class TestWaferSheetDonuts:
         }
         _, reportPath = build_wafer_report(
             tmp_path, qapp, monkeypatch, tuples, payloads,
-            {0: (1, "2026-01-01", "")}, hide_remeasured=False,
+            {0: (1, "2026-01-01", "")}, hide_remeasured=False, heat_selected=True,
         )
         import zipfile
 
         with zipfile.ZipFile(reportPath) as zf:
             charts = [n for n in zf.namelist() if n.startswith("xl/charts/chart")]
             joined = "".join(zf.read(n).decode() for n in charts)
-        assert len(charts) == 2  # per-wafer sheet + stacked sheet
-        assert "$C$19:$C$20" in joined  # stacked donut reads the fail table BELOW its roster
+        assert len(charts) == 2  # per-wafer sheet + heat sheet
+        assert "$C$19:$C$20" in joined  # heat donut reads the fail table BELOW its roster
 
 
 class TestPlainSheets:

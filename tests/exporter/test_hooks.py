@@ -84,6 +84,23 @@ def test_test_summary_round_trips():
     assert params.gen.test_summary is False
 
 
+def test_wafer_heat_map_default_true():
+    assert SettingParams().gen.wafer_heat_map is True
+
+
+def test_wafer_heat_map_alias_in_dump():
+    dumped = SettingParams().model_dump(by_alias=True)
+    assert dumped["General"]["Wafer Heat Map"] is True
+
+
+def test_wafer_heat_map_round_trips():
+    params = SettingParams()
+    params.gen.wafer_heat_map = False
+    dumped = params.model_dump(by_alias=True)
+    assert dumped["General"]["Wafer Heat Map"] is False
+    assert params.gen.wafer_heat_map is False
+
+
 def test_dut_block_loop_count_progress_denominator():
     # hook #5: 1 context tick + one tick per test tuple per selected sheet;
     # 0 when neither DUT-block sheet is selected (classic keeps its own

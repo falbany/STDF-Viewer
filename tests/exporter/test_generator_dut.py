@@ -298,6 +298,7 @@ def build_generated(
     with_per_dut=True,
     with_dut=True,
     wafer_tuples=None,
+    heat_selected=False,
     monkeypatch=None,
     file_dates=None,
     stat_dut_rows=None,
@@ -311,8 +312,10 @@ def build_generated(
     `hide_remeasured` flips the filter setting for the run (pass the test's
     `monkeypatch` fixture so it auto-restores). `wafer_tuples` overrides the
     wafer selection (e.g. [(-1, -1, "STACK")] for the stacked-wafer path).
-    `stat_dut_rows` overrides the stat-only `waitForDutInfo` stub — the
-    2026-11-17 parity pin feeds the same rows the heavy fetch serves."""
+    `heat_selected` adds the Wafer Heat Map content (issue #13: +1 tick
+    when a stacked tuple is present). `stat_dut_rows` overrides the
+    stat-only `waitForDutInfo` stub — the 2026-11-17 parity pin feeds the
+    same rows the heavy fetch serves."""
     testTuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
     selectedFiles = [1]
     selectedHeads = [1]
@@ -321,8 +324,9 @@ def build_generated(
     reportPath = str(tmp_path / "report.xlsx")
     # modern totalLoopCnt formula (hook #5, dut_block_loop_count):
     # Trend 2*1*1 + Bin 1*1 + DUT block (1 context + 2 Test Summary
-    # matrix + 2 DUT Summary per-DUT) + Wafer len(waferTuples)
-    totalLoopCnt = 2 + 1 + 5 + 1
+    # matrix + 2 DUT Summary per-DUT) + Wafer real tuples post-split
+    # (issue #13: the stacked tuple's tick moved to the heat denominator)
+    totalLoopCnt = 2 + 1 + 5 + sum(1 for w in waferTuples if w[0] != -1)
     selection = [
         ReportSelection.TestSummary,
         ReportSelection.DUT,
@@ -355,6 +359,12 @@ def build_generated(
         # classic sheet-creation order: FileInfo first (+1 loop tick)
         selection.insert(0, ReportSelection.FileInfo)
         totalLoopCnt += 1
+    if heat_selected:
+        # issue #13: the heat mixin's own denominator (+1 when a stacked
+        # tuple exists — no stacked tuple, no sheet, no tick)
+        selection.append(ReportSelection.WaferHeatMap)
+        if any(w[0] == -1 for w in waferTuples):
+            totalLoopCnt += 1
     reportInfo = (
         selection,
         testTuples,
@@ -1980,13 +1990,13 @@ class TestWaferCellMap:
 
     def test_stacked_wafer_no_png(self, tmp_path, qapp):
         # 2026-11-12 user ruling, still true: NO PNG on the wafer sheets —
-        # the trend anchors are the only pictures. Issue #5 (2026-11-13)
-        # replaces the old "stacked tuple skipped" ruling: the stacked
-        # fail-count map now renders its OWN sheet ("Wafer Stacked Map
-        # (All Wafers)") — even in a stacked-only tuple list — and the
-        # progress tick still fires
+        # the trend anchors are the only pictures. Issue #13 (2026-11-18)
+        # replaces the old "stacked tuple in writeWaferMap" ruling: the
+        # stacked fail-count map renders the self-gated heat mixin's OWN
+        # sheet ("Wafer Heat Map") — even in a stacked-only tuple list —
+        # and the progress tick still fires
         _, wb, report_path, _, _ = build_generated(
-            tmp_path, qapp, wafer_tuples=[(-1, -1, "STACK")]
+            tmp_path, qapp, wafer_tuples=[(-1, -1, "STACK")], heat_selected=True
         )
         with zipfile.ZipFile(report_path) as zf:
             pics = sum(
@@ -1995,10 +2005,11 @@ class TestWaferCellMap:
                 if n.startswith("xl/drawings/drawing") and n.endswith(".xml")
             )
         assert pics == 2  # 2 trend anchors only
-        # issue #5: the stacked tuple renders its own sheet — first among
-        # the wafer sheets (sheet order itself is pinned by the generator
+        # issue #13: the stacked tuple renders the heat mixin's sheet —
+        # appended last (sheet order itself is pinned by the generator
         # tests); the stub payload degrades through the stacked block
-        assert "Wafer Stacked Map (All Wafers)" in wb.sheetnames
+        # with an empty roster (no real tuples to fetch)
+        assert "Wafer Heat Map" in wb.sheetnames
 
     def test_one_worksheet_per_wafer(self, tmp_path, qapp):
         # 2026-11-13 ruling: one wafer per worksheet — sheets land in

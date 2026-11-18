@@ -1,7 +1,7 @@
 # Wafer Heat Map — dedicated worksheet module + checkbox (design)
 
 Date: 2026-11-18
-Status: approved pending doc review
+Status: approved — doc review done 2026-11-18 (one call folded in, below)
 Branch target: `feature/xlsxwriter-exporter`
 
 ## Intent and why
@@ -19,7 +19,9 @@ either view can be exported alone.
 - New `WaferHeatMapMixin` (`worksheets/wafer_heat_map.py`) owning the
   stacked tuple end to end: fetch, sheet write, cosmetics.
 - New `ReportSelection.WaferHeatMap = 11` + `WaferHeatMap_cb` checkbox
-  (grid slot 2,3, label **"Wafer Heat Map"**), persisted setting
+  (grid slot **2,1** — 2026-11-18 user ruling: directly below the Wafer
+  Map checkbox; the hidden `Correlation_cb` swapped to the freed 2,3 —
+  original slot was 2,3, label **"Wafer Heat Map"**), persisted setting
   `gen.wafer_heat_map` (default **True** — preserves today's output
   shape), modern-only enable via `_sync_option_checkboxes`, site-page
   routing, `start()` progress accounting.
@@ -48,7 +50,12 @@ either view can be exported alone.
 
 **A (picked).** No entry in the sheet-creation loop; the mixin
 self-gates on `ReportSelection.WaferHeatMap in self.selectedContents`
-and appends its sheet at write time, so tab order stays
+**and stacked-tuple presence** (`waferTuples` non-empty — the stacked
+tuple always survives the fid filter, so non-empty ⟺ stacked tuple
+exists; doc-review call, 2026-11-18: no wafer data → no sheet, no
+fetch, no tick, mirroring today's stacked-sheet gating on
+`stacked_payload is not None`) and appends its sheet at write time, so
+tab order stays
 …per-wafer sheets → merged → heat map last in every combination.
 `writeWaferMap()` gets the `base_sheet is None → return` guard, drops
 all stacked-tuple code, and stashes its fetched `(wafer, payload)` pairs
@@ -84,9 +91,11 @@ with no benefit over the current stacked-sheet mechanics.
 - Classic: unchanged (`len(waferTuples)` incl. the stacked tuple).
 - Modern, Wafer checked: real tuples only (`wafer[0] != -1`) + merged
   groups; the stacked tuple's tick moves out.
-- Modern, Heat checked: `+1` (one sheet, one tick — the established
-  tick-per-sheet cadence; roster fetches stay silent like pass-1
-  fetches today).
+- Modern, Heat checked: `+1` **only when a stacked tuple exists**
+  (`waferTuples` non-empty; heat checked on a wafer-less database books
+  no tick — doc-review call, keeps `loopCount == totalLoopCnt`).
+  One sheet, one tick — the established tick-per-sheet cadence; roster
+  fetches stay silent like pass-1 fetches today.
 
 ## Wire-up inventory
 
@@ -122,3 +131,5 @@ with no benefit over the current stacked-sheet mechanics.
 4. Neither, wafer data present → **no wafer sheets at all** (pins the
    guard fix), `loopCount == totalLoopCnt`.
 5. Sheet name pin: `"Wafer Heat Map"`.
+6. Heat checked, wafer-less database → no heat sheet, no wafer
+   fetches, `loopCount == totalLoopCnt` (progress reaches 100%).
