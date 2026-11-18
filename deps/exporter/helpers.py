@@ -721,6 +721,47 @@ def has_numeric(values) -> bool:
     return bool(numeric_values(values))
 
 
+def row_stat_caches(nums, lo, hi, mirror_cells) -> tuple:
+    """One-pass row statistics for a summary row: the 6-tuple
+    ``(mn, mx, avg, cp, cpk, fails)``.
+
+    ``nums`` is the ALREADY-filtered numeric list (a ``numeric_values``
+    output the caller builds once — never re-filtered here, so no
+    ``numeric_values`` pass over it). Gating copied verbatim from today's
+    helpers: MIN/MAX/AVG are None on an empty list (``stat_cached``);
+    Cp/Cpk share ONE ``statistics.stdev`` + ONE ``statistics.fmean`` and
+    are None when either limit is missing, ``len(nums) < 2`` or
+    sigma == 0 (the ``_ratio_cached`` cases the IFERROR wrappers blank).
+    FAILS is branch-selected inside: with a limit present on either side,
+    the one-sided count over ``nums`` (``fails_cached_limits_one_sided``
+    OR semantics — a missing side never fails); with BOTH limits absent,
+    the flag count ``sum(1 for f in numeric_values(mirror_cells)
+    if f == 1)`` (``fails_cached_flags``, the flag-mirror SUMPRODUCT —
+    only the small mirror list is filtered). Callers keep the MIN/MAX
+    faithful-0 and None->"" mapping.
+    """
+    mn = min(nums) if nums else None
+    mx = max(nums) if nums else None
+    avg = statistics.fmean(nums) if nums else None
+
+    cp = None
+    cpk = None
+    if lo is not None and hi is not None and len(nums) >= 2:
+        sigma = statistics.stdev(nums)
+        if sigma != 0:
+            cp = (hi - lo) / (6 * sigma)
+            cpk = min((hi - avg) / (3 * sigma), (avg - lo) / (3 * sigma))
+
+    if lo is not None or hi is not None:
+        fails = sum(
+            1 for v in nums
+            if (lo is not None and v < lo) or (hi is not None and v > hi)
+        )
+    else:
+        fails = sum(1 for f in numeric_values(mirror_cells) if f == 1)
+    return mn, mx, avg, cp, cpk, fails
+
+
 # Control characters Excel forbids inside sheet XML strings (copied out of
 # openpyxl when the package left that dependency behind — tab \011 and
 # newline \012 stay legal).

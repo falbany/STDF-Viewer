@@ -790,3 +790,30 @@ def test_sanitize_cell_nan_fast_paths():
     assert sanitize_cell(np.int64(3)) == np.int64(3)   # not float -> no isnan branch
     assert sanitize_cell(None) == ""
     assert sanitize_cell("a\x00b") == "ab"             # illegal-char strip unchanged
+
+
+# --------------------------------------------------------------------------
+# exporter perf (issue #11): row_stat_caches one-pass/sigma-once helper
+# --------------------------------------------------------------------------
+
+
+def test_row_stat_caches_full_gating():
+    from deps.exporter.helpers import row_stat_caches
+    nums = [1.0, 2.0, 3.0]
+    # both limits: Cp=(hi-lo)/(6σ), Cpk=min((hi-μ)/3σ,(μ-lo)/3σ), fails outside (lo,hi)
+    mn, mx, avg, cp, cpk, fails = row_stat_caches(nums, 0.5, 1.5, [])
+    assert (mn, mx, avg) == (1.0, 3.0, 2.0) and fails == 2  # 2.0 and 3.0 > 1.5
+    import statistics
+    sigma = statistics.stdev(nums); mu = statistics.fmean(nums)
+    assert cp == (1.5 - 0.5) / (6 * sigma)
+    assert cpk == min((1.5 - mu) / (3 * sigma), (mu - 0.5) / (3 * sigma))
+    # one-sided: only the PRESENT side can fail
+    assert row_stat_caches([0.0, 1.0], None, 0.5, [])[5] == 1  # 1.0 > hi
+    assert row_stat_caches([0.0, 1.0], 0.5, None, [])[5] == 1  # 0.0 < lo
+    # flag branch only when BOTH absent
+    assert row_stat_caches([1.0, 1.0], None, None, ["", 1, 0])[5] == 1
+    # empty / <2 / sigma==0
+    assert row_stat_caches([], 0.0, 1.0, []) == (None, None, None, None, None, 0)
+    assert row_stat_caches([1.0, 1.0], 0.0, 1.0, [])[3] is None  # sigma 0
+    st = row_stat_caches([2.0, 2.0, 4.0], 0.0, 8.0, [])
+    assert st[3] == 8.0 / (6 * statistics.stdev([2.0, 2.0, 4.0]))
