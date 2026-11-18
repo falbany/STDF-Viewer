@@ -232,6 +232,7 @@ class TestFormulas:
         assert cf["fails_max"] == pytest.approx(0.6)  # 0.2 x N
         assert cf["dut_flag_range"] == "O14:O16"
         assert cf["part_id_range"] == "C14:C16"
+        assert cf["wafer_range"] == "H14:H16"
 
     def test_freeze_filter_and_names(self):
         spec = built()[0]
@@ -487,7 +488,11 @@ class TestRenderer:
             'ISNUMBER(SEARCH("Pass",O14))',
         ]
         duplicate = cf_block(ws, "C14:C16")
-        assert len(duplicate) == 1 and duplicate[0].type == "duplicateValues"
+        assert len(duplicate) == 1 and duplicate[0].type == "expression"
+        # wafer-scoped pair rule (2026-11-18 ruling): the Wafer column (H)
+        # holds the pair partner; the fixture's wafer cells are blank, so
+        # every DUT shares the "" group — the PART-ID-only degradation
+        assert duplicate[0].formula[0].startswith('AND(C14<>"",COUNTIFS($H$14:$H$16,')
         scale = cf_block(ws, "P12:Q12")
         assert len(scale) == 1 and scale[0].colorScale is not None
 

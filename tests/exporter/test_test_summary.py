@@ -1065,9 +1065,11 @@ class TestStructure:
         # CELLS ONLY (row 15 = METADATA_START + the DUT Flag position in
         # METADATA_ROWS — computed, not hard-coded; base cells never styled)
         assert cf["dut_flag_range"] == "M15:O15"
-        # duplicate-highlight wave: same die-cells-only rule over the Part ID
-        # metadata row (row 3 = METADATA_START + the Part ID position)
+        # duplicate-highlight wave: wafer-scoped pair rule over the Part ID
+        # metadata row (row 3 = METADATA_START + the Part ID position); the
+        # Wafer row (row 8) rides along as the pair partner
         assert cf["part_id_range"] == "M3:O3"
+        assert cf["wafer_range"] == "M8:O8"
 
     def test_resolve_dut_temperature_parity(self):
         # tag wins over the file temperature; 0.0 is a value, not a

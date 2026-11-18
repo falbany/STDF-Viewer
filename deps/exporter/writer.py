@@ -542,18 +542,73 @@ def _add_dut_flag_status_rules(ws, cell_range, theme):
         _add_rule(ws, cell_range, f'ISNUMBER(SEARCH("{needle}",{cell}))', theme.cf_fill(hex6))
 
 
-def _add_duplicate_part_id_rules(ws, cell_range, theme):
-    """One Excel duplicate-value rule over the Part ID metadata row's DIE
-    cells — always on (no option flag), styled with the builtin yellow
-    preset. Excel does the detecting: its duplicate rule ignores blank
-    cells and is case-insensitive (spec §8 — `sn001`/`SN001` highlights
-    though the filter never drops it). The range carries die cells only:
-    the Part ID row holds raw IDs (the "DUT #n" fallback is header-only,
-    outside the range), so no false positives."""
-    ws.conditional_format(
-        cell_range,
-        {"type": "duplicate", "format": theme.cf_duplicate_preset()},
+def _range_edges(cell_range: str):
+    """(first, last) (col0, row0) pairs of an A1:B2 range, 0-based
+    (xl_cell_to_rowcol returns row-first)."""
+    first, last = cell_range.split(":")
+    f_row, f_col = xlutil.xl_cell_to_rowcol(first)
+    l_row, l_col = xlutil.xl_cell_to_rowcol(last)
+    return (f_col, f_row), (l_col, l_row)
+
+
+def _abs_range(first, last):
+    """Absolute $A$1:$B$2 form of a (col0, row0) edge pair."""
+    return (
+        f"${xlutil.xl_col_to_name(first[0])}${first[1] + 1}:"
+        f"${xlutil.xl_col_to_name(last[0])}${last[1] + 1}"
     )
+
+
+def _countifs_criteria(cell: str) -> str:
+    """COUNTIFS criteria matching one cell's value: text-coerced first
+    (&"") so blank cells match blanks and numeric wafer IDs match their
+    text forms, then wildcard-escaped — the native duplicate rule matched
+    part IDs literally, and COUNTIFS would expand * ? ~ into patterns."""
+    escaped = f'{cell}&""'
+    for needle, replacement in (("~", "~~"), ("*", "~*"), ("?", "~?")):
+        escaped = f'SUBSTITUTE({escaped},"{needle}","{replacement}")'
+    return escaped
+
+
+def _add_duplicate_part_id_rules(ws, cell_range, theme, wafer_range=None):
+    """Duplicate-Part-ID highlight over the Part ID metadata row/column's
+    DIE cells — always on (no option flag), styled with the builtin yellow
+    preset. Wafer-scoped (2026-11-18 ruling): a COUNTIFS formula counts the
+    die positions sharing the anchor cell's (Wafer, Part ID) pair, so the
+    same part across different wafers stays dark and only in-wafer repeats
+    highlight. Blank wafer cells all meet the "" criteria — one group — so
+    a no-wafer dataset degrades to the PART-ID-only match. The <>"" guard
+    keeps blank Part-ID cells dark (the native rule ignored blanks) and the
+    counting is case-insensitive (COUNTIFS-native; spec §8 — `sn001`/
+    `SN001` highlights though the filter never drops it). The range carries
+    die cells only: the Part ID row holds raw IDs (the "DUT #n" fallback is
+    header-only / lives outside the data cells), so no false positives.
+    Without a wafer_range the old Excel-native duplicate rule remains."""
+    if not wafer_range:
+        ws.conditional_format(
+            cell_range,
+            {"type": "duplicate", "format": theme.cf_duplicate_preset()},
+        )
+        return
+    p_first, p_last = _range_edges(cell_range)
+    w_first, w_last = _range_edges(wafer_range)
+    anchor = f"{xlutil.xl_col_to_name(p_first[0])}{p_first[1] + 1}"
+    # the anchor's wafer counterpart sits at the same die position in the
+    # wafer range: same column's Wafer-row cell (Test Summary's horizontal
+    # row pair) or same row's Wafer-column cell (DUT Summary's vertical one)
+    if p_first[1] == p_last[1]:
+        wafer_cell = f"{xlutil.xl_col_to_name(p_first[0])}{w_first[1] + 1}"
+    else:
+        wafer_cell = f"{xlutil.xl_col_to_name(w_first[0])}{p_first[1] + 1}"
+    formula = (
+        f'AND({anchor}<>"",COUNTIFS('
+        f"{_abs_range(w_first, w_last)},"
+        f"{_countifs_criteria(wafer_cell)},"
+        f"{_abs_range(p_first, p_last)},"
+        f"{_countifs_criteria(anchor)}"
+        ")>1)"
+    )
+    _add_rule(ws, cell_range, formula, theme.cf_duplicate_preset(), stop=False)
 
 
 # --------------------------------------------------------------------------
@@ -865,7 +920,7 @@ def render_dut_summary_sheet(ws, spec: dict, theme) -> None:
     if cf.get("dut_flag_range"):
         _add_dut_flag_status_rules(ws, cf["dut_flag_range"], theme)
     if cf.get("part_id_range"):
-        _add_duplicate_part_id_rules(ws, cf["part_id_range"], theme)
+        _add_duplicate_part_id_rules(ws, cf["part_id_range"], theme, cf.get("wafer_range"))
 
     # hidden mask columns ride their width (see _set_dut_summary_column_widths
     # — Review Focus: hidden columns keep their data, only the dropdown is
@@ -919,8 +974,9 @@ def render_matrix_sheet(ws, spec: dict, theme) -> None:
         _add_dut_flag_status_rules(ws, dut_flag_range, theme)
     part_id_range = cf.get("part_id_range")
     if part_id_range:
-        # duplicate-highlight wave: always-on Excel-native duplicate CF
-        _add_duplicate_part_id_rules(ws, part_id_range, theme)
+        # duplicate-highlight wave: always-on wafer-scoped (Wafer, Part ID)
+        # pair CF
+        _add_duplicate_part_id_rules(ws, part_id_range, theme, cf.get("wafer_range"))
 
     _hide_mirror_columns(ws, spec, theme)
     _add_sparklines(ws, spec)

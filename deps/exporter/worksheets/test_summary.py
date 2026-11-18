@@ -287,11 +287,21 @@ DUT_FLAG_ROW = METADATA_START + next(
 )
 
 # Absolute Excel row of the Part ID metadata row (duplicate-highlight
-# wave): computed the same way — the Excel duplicate-value CF range lives
-# over THIS row's die cells only (blanks never highlight; the "DUT #n"
-# fallback is header-only).
+# wave): computed the same way — the duplicate CF range lives over THIS
+# row's die cells only (blanks never highlight; the "DUT #n" fallback is
+# header-only).
 PART_ID_ROW = METADATA_START + next(
     index for index, meta in enumerate(METADATA_ROWS) if meta["name"] == "Part ID"
+)
+
+# Absolute Excel row of the Wafer metadata row — the duplicate highlight's
+# pair partner (2026-11-18 ruling): the rule counts (Wafer, Part ID) pairs
+# over the same die columns, so only in-wafer part-ID repeats highlight.
+# Blank wafer cells all share the "" group, degrading to a PART-ID-only
+# match; the row keeps its values when MASK_BLANK hides it, and hidden
+# blanks still count.
+WAFER_ROW = METADATA_START + next(
+    index for index, meta in enumerate(METADATA_ROWS) if meta["name"] == "Wafer"
 )
 
 # First two integers inside a preformatted "(X, Y)" string.
@@ -999,9 +1009,11 @@ def _build_chunk(
             # (never the base cells; the writer adds Superseded/Fail/Pass
             # SEARCH rules on this range)
             "dut_flag_range": f"{first_die}{DUT_FLAG_ROW}:{last_die}{DUT_FLAG_ROW}",
-            # duplicate-highlight wave: Excel's own duplicate-value CF over
-            # the Part ID row's DIE CELLS ONLY (always on — no option flag)
+            # duplicate-highlight wave: wafer-scoped (Wafer, Part ID) pair
+            # rule over the Part ID row's DIE CELLS ONLY (always on — no
+            # option flag; blank wafer cells form one "" group)
             "part_id_range": f"{first_die}{PART_ID_ROW}:{last_die}{PART_ID_ROW}",
+            "wafer_range": f"{first_die}{WAFER_ROW}:{last_die}{WAFER_ROW}",
         },
     }
     if rows:

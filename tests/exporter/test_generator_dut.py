@@ -1205,25 +1205,32 @@ def cf_block(ws, ref):
 
 
 class TestDuplicatePartIdHighlight:
-    """Always-on Excel duplicate-value CF over the Part ID metadata row's
-    DIE CELLS ONLY (row 3) — builtin yellow preset, no option flag."""
+    """Always-on wafer-scoped duplicate CF over the Part ID metadata row's
+    DIE CELLS ONLY (row 3) — a (Wafer, Part ID) pair COUNTIFS with the
+    Wafer row (row 8) as pair partner; builtin soft-yellow preset, no
+    option flag."""
 
     @pytest.fixture
     def generated(self, tmp_path, qapp):
         return build_generated(tmp_path, qapp)
 
-    def test_one_duplicate_rule_on_part_id_die_cells(self, generated):
+    def test_one_pair_rule_on_part_id_die_cells(self, generated):
         _, wb, _, _, _ = generated
         rules = cf_block(wb["Test Summary"], "M3:O3")
         assert len(rules) == 1
-        # xlsxwriter emits type "duplicate"; openpyxl reads its expanded
-        # form "duplicateValues"
-        assert rules[0].type == "duplicateValues"
+        # xlsxwriter emits type "formula"; openpyxl reads it as "expression"
+        assert rules[0].type == "expression"
+        # wafer-scoped pair count (2026-11-18 ruling): row 8 (Wafer) is the
+        # pair partner; the fixture's wafer cells are blank, so every DUT
+        # shares the "" group — the PART-ID-only degradation
+        formula = rules[0].formula[0]
+        assert formula.startswith('AND(M3<>"",COUNTIFS($M$8:$O$8,')
+        assert "$M$3:$O$3," in formula
 
-    def test_rule_uses_builtin_yellow(self, generated):
+    def test_rule_uses_builtin_soft_yellow(self, generated):
         _, wb, _, _, _ = generated
         rules = cf_block(wb["Test Summary"], "M3:O3")
-        assert str(rules[0].dxf.fill.bgColor.rgb).endswith("FFFF00")
+        assert str(rules[0].dxf.fill.bgColor.rgb).endswith("FFEB9C")
 
     def test_base_cells_not_covered(self, generated):
         _, wb, _, _, _ = generated

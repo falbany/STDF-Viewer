@@ -262,10 +262,12 @@ class ModernTheme:  # pylint: disable=too-many-public-methods
         return self._format({"bg_color": f"#{bg_hex}", "font_color": font_hex})
 
     def cf_duplicate_preset(self):
-        """Excel's builtin "Yellow Fill with Dark Yellow Text" preset for
-        the duplicate-Part-ID highlight — hardcoded (like
-        SCIENTIFIC_FORMAT), not theme-derived; cached like every format."""
-        return self._format({"bg_color": "#FFFF00", "font_color": "#9C6500"})
+        """Excel's builtin soft yellow for the duplicate-Part-ID highlight —
+        #FFEB9C fill (the builtin "Neutral" yellow; softened from pure
+        #FFFF00 on the 2026-11-18 user ruling) + the classic dark-yellow
+        text; hardcoded (like SCIENTIFIC_FORMAT), not theme-derived; cached
+        like every format."""
+        return self._format({"bg_color": "#FFEB9C", "font_color": "#9C6500"})
 
     def lookalike(self, key: str, wrap: bool = False):
         """Built-in named style lookalike (Title / Headline 1 / Headline 2 —

@@ -103,6 +103,9 @@ _DUT_FLAG_COL = get_column_letter(
 _PART_ID_COL = get_column_letter(
     2 + next(i for i, meta in enumerate(METADATA_ROWS) if meta["name"] == "Part ID")
 )
+_WAFER_COL = get_column_letter(
+    2 + next(i for i, meta in enumerate(METADATA_ROWS) if meta["name"] == "Wafer")
+)
 
 
 def test_col(index: int) -> str:
@@ -326,11 +329,13 @@ def _build_chunk(
     conditional_formatting = {
         # Fails heat across the Fails attribute row: 0 -> green, 0.2 x N -> red
         "fails_max": 0.2 * dut_count,
-        # status CF over the DUT Flag column's DUT cells; duplicate-value CF
-        # over the Part ID column's DUT cells (raw IDs only — the "DUT #n"
-        # fallback lives nowhere in the data cells)
+        # status CF over the DUT Flag column's DUT cells; wafer-scoped
+        # (Wafer, Part ID) pair CF over the Part ID column's DUT cells
+        # (raw IDs only — the "DUT #n" fallback lives nowhere in the data
+        # cells; blank wafer cells form one "" group)
         "dut_flag_range": f"{_DUT_FLAG_COL}{DATA_START}:{_DUT_FLAG_COL}{last_data_row}",
         "part_id_range": f"{_PART_ID_COL}{DATA_START}:{_PART_ID_COL}{last_data_row}",
+        "wafer_range": f"{_WAFER_COL}{DATA_START}:{_WAFER_COL}{last_data_row}",
     }
     if tests:
         conditional_formatting["die_rules"] = {

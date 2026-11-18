@@ -641,6 +641,62 @@ class TestMatrixConditionalFormatting:
         ]
 
 
+class TestDuplicatePartIdPairRule:
+    """Wafer-scoped (Wafer, Part ID) duplicate highlight (2026-11-18
+    ruling): the Excel-native duplicate rule is replaced by a COUNTIFS pair
+    formula counting die positions that share the cell's wafer AND part ID
+    — cross-wafer repeats stay dark; blank wafer cells all meet the ""
+    criteria (one group), degrading a no-wafer dataset to the PART-ID-only
+    match."""
+
+    @staticmethod
+    def spec_with(**cf_overrides):
+        cf = dict(make_matrix_spec()["conditional_formatting"])
+        cf.update(cf_overrides)
+        return make_matrix_spec(conditional_formatting=cf)
+
+    def test_pair_formula_counts_wafer_row_and_part_row(self):
+        book = roundtrip(render(self.spec_with(part_id_range="M3:O3", wafer_range="M8:O8")))
+        rules = cf_block(book["Test Summary"], "M3:O3")
+        assert len(rules) == 1
+        # xlsxwriter emits type "formula"; openpyxl reads it as "expression"
+        assert rules[0].type == "expression"
+        # anchor = the applied range's first die cell; its wafer counterpart
+        # sits in the same column's Wafer-row cell (M8). Criteria are
+        # text-coerced (&"") and wildcard-escaped; counting is native-
+        # case-insensitive; the <>"" guard keeps blank part IDs dark.
+        assert rules[0].formula[0] == (
+            'AND(M3<>"",COUNTIFS($M$8:$O$8,'
+            'SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(M8&"","~","~~"),"*","~*"),"?","~?"),'
+            "$M$3:$O$3,"
+            'SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(M3&"","~","~~"),"*","~*"),"?","~?"))>1)'
+        )
+        assert not rules[0].stopIfTrue  # sole rule on the range, like the native one
+
+    def test_vertical_pair_counts_wafer_column(self):
+        # DUT Summary orientation: DUTs down rows, Part ID + Wafer columns
+        # (C and H); the anchor's wafer counterpart is the same row's
+        # Wafer-column cell
+        book = roundtrip(render(self.spec_with(part_id_range="C14:C16", wafer_range="H14:H16")))
+        rules = cf_block(book["Test Summary"], "C14:C16")
+        assert rules[0].formula[0].startswith('AND(C14<>"",COUNTIFS($H$14:$H$16,')
+        assert "$C$14:$C$16," in rules[0].formula[0]
+
+    def test_no_wafer_range_keeps_native_duplicate_rule(self):
+        # defensive fallback (no caller today): part_id_range alone gives
+        # the old Excel-native duplicate rule
+        book = roundtrip(render(self.spec_with(part_id_range="M3:O3")))
+        rules = cf_block(book["Test Summary"], "M3:O3")
+        assert len(rules) == 1
+        assert rules[0].type == "duplicateValues"
+
+    def test_rule_uses_builtin_soft_yellow(self):
+        # 2026-11-18 ruling: builtin "Neutral" #FFEB9C instead of #FFFF00
+        book = roundtrip(render(self.spec_with(part_id_range="M3:O3", wafer_range="M8:O8")))
+        rule = cf_block(book["Test Summary"], "M3:O3")[0]
+        assert str(rule.dxf.fill.bgColor.rgb).endswith("FFEB9C")
+
+
 # --------------------------------------------------------------------------
 # Matrix sheet: row groups
 # --------------------------------------------------------------------------
