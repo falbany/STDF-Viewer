@@ -25,6 +25,7 @@ from deps.SharedSrc import REC, getSetting, tab
 from deps.exporter.charts import BIN_TABLE_HEADERS
 from deps.exporter.generator import ModernReportGenerator
 from deps.exporter.worksheets.file_info import bin_banner_from_file_info
+from deps.exporter.worksheets.test_summary import build_test_summary_spec
 from deps.exporter.theme import number_format_from_settings
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
 from tests.exporter.test_writer import col_dim
@@ -1628,6 +1629,142 @@ class TestTemperatureSplit:
         }
 
 
+class TestSplitConsumesSharedTable:
+    """Task 10 (finding 4): the temperature-split loop consumes the SAME
+    shared per-test table as the base sheet. Cells slice through ``pos``
+    (every kept pair lives in the context order — the groups are built
+    FROM it), while the six stat caches stay subset-local: a split's
+    ``sub_order`` is a strict subset of the table's order, so its single
+    chunk must NOT take the whole-order caches (its stat ranges cover the
+    kept DUTs only). The split specs stay byte-identical to the inline
+    builds."""
+
+    # tagged / untagged mixed roster: SN543 has no _T<n>C tag and resolves
+    # through the file's recorded Test Temperature (the MIR fallback)
+    MIXED_IDS = ["SN541_T25C", "SN542_T-55C", "SN543"]
+
+    @classmethod
+    def _split_run(cls, tmp_path, qapp, monkeypatch):
+        """One split-ON export with build_test_summary_spec spied: returns
+        (gen, calls, real_build) — `calls` records every (args, kwargs)
+        the writer passed (base sheet first, then the ascending splits)."""
+        real_build = build_test_summary_spec
+        calls = []
+
+        def spy(*args, **kwargs):
+            calls.append((args, dict(kwargs)))
+            return real_build(*args, **kwargs)
+
+        monkeypatch.setattr(
+            "deps.exporter.worksheets.test_summary.build_test_summary_spec", spy
+        )
+        gen, wb, _, _, _ = build_generated(
+            tmp_path, qapp,
+            part_ids=list(cls.MIXED_IDS),
+            file_temperature="125.5C",
+            split_temperature=True, monkeypatch=monkeypatch,
+        )
+        return gen, calls, real_build
+
+    @classmethod
+    def _split_calls(cls, calls):
+        """The writer's split builder calls (the base call passed the
+        shared table since Task 9; split sheet names carry " - T...")."""
+        return [
+            (args, kwargs)
+            for args, kwargs in calls
+            if kwargs.get("sheet_name", "").startswith("Test Summary - T")
+        ]
+
+    def test_split_calls_pass_shared_context_table(self, tmp_path, qapp, monkeypatch):
+        gen, calls, _ = self._split_run(tmp_path, qapp, monkeypatch)
+        # 1 base build + 3 splits (25 / -55 / 125.5 via the file fallback)
+        assert len(calls) == 4
+        split_calls = self._split_calls(calls)
+        assert len(split_calls) == 3
+        # the base sheet consumes the context table (Task 9 state)
+        base_shared = calls[0][1]["shared_stats"]
+        assert base_shared["entries"] is gen._dut_ctx_stats
+        assert base_shared["pos"] is gen._dut_ctx_pos
+        for args, kwargs in split_calls:
+            # the Task-10 pin: each split passes the SAME table
+            shared = kwargs["shared_stats"]
+            assert shared["entries"] is gen._dut_ctx_stats
+            assert shared["pos"] is gen._dut_ctx_pos
+            # every kept pair is in pos — sub_order is an order-preserving
+            # subset of the context order (no slicing machinery needed)
+            sub_order = args[2]
+            assert sub_order
+            assert all(pair in shared["pos"] for pair in sub_order)
+
+    def test_split_specs_equal_inline_builds(self, tmp_path, qapp, monkeypatch):
+        """The captured split builds, rebuilt inline vs with the context
+        table, must be DEEP-equal — names, rows, formula_values (the six
+        caches stay subset-local) and sparklines included."""
+        gen, calls, real_build = self._split_run(tmp_path, qapp, monkeypatch)
+        for args, kwargs in self._split_calls(calls):
+            inline = real_build(
+                *args, **{k: v for k, v in kwargs.items() if k != "shared_stats"}
+            )
+            via_shared = real_build(
+                *args,
+                **{
+                    **kwargs,
+                    "shared_stats": {
+                        "entries": gen._dut_ctx_stats,
+                        "pos": gen._dut_ctx_pos,
+                    },
+                },
+            )
+            assert via_shared == inline
+            assert via_shared[0]["name"] == inline[0]["name"]
+            assert via_shared[0]["rows"] == inline[0]["rows"]
+            assert via_shared[0]["formula_values"] == inline[0]["formula_values"]
+            assert via_shared[0]["sparklines"] == inline[0]["sparklines"]
+
+    def test_split_ignores_poisoned_shared_caches(self, tmp_path, qapp, monkeypatch):
+        # teeth for the subset gate: poison every entry's whole-order caches6
+        # — the split specs must STILL equal the inline builds (a split's
+        # single chunk spans a strict subset, never the table's order)
+        gen, calls, real_build = self._split_run(tmp_path, qapp, monkeypatch)
+        poisoned = {
+            "pos": gen._dut_ctx_pos,
+            "entries": {
+                tup: (die, mirror, (None, None, None, None, None, 999), has)
+                for tup, (die, mirror, _caches, has) in gen._dut_ctx_stats.items()
+            },
+        }
+        for args, kwargs in self._split_calls(calls):
+            inline = real_build(
+                *args, **{k: v for k, v in kwargs.items() if k != "shared_stats"}
+            )
+            via_poisoned = real_build(*args, **{**kwargs, "shared_stats": poisoned})
+            assert via_poisoned == inline
+            assert via_poisoned[0]["formula_values"] == inline[0]["formula_values"]
+
+    def test_split_slices_the_poisoned_shared_cells(self, tmp_path, qapp, monkeypatch):
+        # teeth for the cell path: poison every entry's die cells — the
+        # split specs must DIFFER in their die columns (the splits really
+        # consume the shared table through pos, not a silent recompute)
+        gen, calls, real_build = self._split_run(tmp_path, qapp, monkeypatch)
+        poisoned = {
+            "pos": gen._dut_ctx_pos,
+            "entries": {
+                tup: (["X"] * len(die), mirror, caches, has)
+                for tup, (die, mirror, caches, has) in gen._dut_ctx_stats.items()
+            },
+        }
+        for args, kwargs in self._split_calls(calls):
+            inline = real_build(
+                *args, **{k: v for k, v in kwargs.items() if k != "shared_stats"}
+            )
+            via_poisoned = real_build(*args, **{**kwargs, "shared_stats": poisoned})
+            assert via_poisoned != inline
+            # the poison lands in the die columns (after the 12 base
+            # columns); the mirrors and spacer/Trend tail stay untouched
+            assert via_poisoned[0]["rows"][0][12:] != inline[0]["rows"][0][12:]
+
+
 class TestDutBlockTabOrder:
     """§7.4 placement ruling: the DUT-derived block (base + chunk overflow +
     temperature splits) sits ADJACENT to the base sheet, ahead of Bin /
@@ -2079,3 +2216,26 @@ class TestDutBlockSelectionCombos:
         assert gen._remeasure_drops is not None
         assert gen._dut_summary_fetch_count == 1
         assert gen.loopCount == gen.totalLoopCnt
+
+
+class TestDutContextSharedStats:
+    """Task 9 (finding 4): _prepare_dut_context builds the shared per-test
+    table (`_dut_ctx_stats`/`_dut_ctx_pos`) alongside the rest of the
+    context; the writers pass it to their builders as ``shared_stats``.
+    The builders' spec identity is pinned by the equality tests in
+    test_test_summary.py::TestSharedStatsContext — here the wiring is."""
+
+    def test_shared_table_built_with_context(self, tmp_path, qapp):
+        gen, _, _, closed, errors = build_generated(tmp_path, qapp)
+        assert closed == [True] and errors == []
+        test_tuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
+        assert gen._dut_ctx_pos == {(1, 0): 0, (1, 1): 1, (1, 2): 2}
+        assert set(gen._dut_ctx_stats) == set(test_tuples)
+        # parametric row: real die cells with the NaN DUT blank; FTR row:
+        # the flag cells (0/1) land in the die column
+        assert gen._dut_ctx_stats[test_tuples[0]][0] == [1.0, 1.2, ""]
+        assert gen._dut_ctx_stats[test_tuples[1]][0] == [0, 1, 0]
+        for die, mirror, caches, has_num in gen._dut_ctx_stats.values():
+            assert len(die) == len(mirror) == 3
+            assert len(caches) == 6
+            assert isinstance(has_num, bool)

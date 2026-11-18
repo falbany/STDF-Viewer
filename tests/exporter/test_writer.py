@@ -17,8 +17,13 @@ from tests.exporter.conftest import (
 )
 from deps.exporter.theme import ModernTheme
 from deps.exporter.writer import (
+    _render_data_rows,
+    _write_cell,
+    _write_cell_fast,
+    apply_autofit,
     render_matrix_sheet,
     render_plain_table,
+    reset_widths,
     write_plain_row,
 )
 
@@ -1395,3 +1400,276 @@ class TestMatrixSparklines:
         book = render_matrix_bytes(spec, "Test Summary (2)")
         xml = read_xml(book, "xl/worksheets/sheet1.xml")
         assert "'Test Summary (2)'!M17:O17" in xml
+
+
+# --------------------------------------------------------------------------
+# _write_cell_fast: prebuilt-format write path (exporter perf task 2)
+# --------------------------------------------------------------------------
+
+
+class TestWriteCellFast:
+    """_write_cell_fast receives a PREBUILT Format (no theme lookup) and
+    never notes column widths (pinned-width sheets only); every input shape
+    must land in the sheet IDENTICALLY to _write_cell — parity is the
+    perf contract."""
+
+    # (value, cached, expected after round-trip) — the five dispatch shapes
+    SHAPES = [
+        ('=IFERROR(A2/A3,"")', 2.5, '=IFERROR(A2/A3,"")'),  # formula + cache
+        (1.25, None, 1.25),  # float
+        (float("nan"), None, None),  # NaN -> sanitize -> blank
+        ("", None, None),  # empty string -> blank
+        ("plain", None, "plain"),  # string
+    ]
+
+    def write_both_paths(self):
+        """Row 2 through _write_cell (theme kwargs), row 3 through
+        _write_cell_fast (the SAME theme format prebuilt) -> the reloaded
+        sheet twice (formulas / cached values)."""
+
+        def build(wb, ws_by_name):
+            ws = ws_by_name["Sheet"]
+            theme = ModernTheme(wb)
+            fmt = theme.cell_format(font="body", align="center", border=True)
+            for offset, (value, cached, _expected) in enumerate(self.SHAPES):
+                column = offset + 1
+                _write_cell(
+                    ws,
+                    2,
+                    column,
+                    value,
+                    theme,
+                    font="body",
+                    align="center",
+                    border=True,
+                    cached=cached,
+                )
+                _write_cell_fast(ws, 3, column, value, fmt, cached=cached)
+
+        book = render_workbook(["Sheet"], build)
+        return (
+            load_workbook_bytes(book)["Sheet"],
+            load_workbook_bytes(book, data_only=True)["Sheet"],
+        )
+
+    def test_parity_with_write_cell_per_shape(self):
+        ws, ws_cached = self.write_both_paths()
+        for offset, (value, cached, expected) in enumerate(self.SHAPES):
+            column = offset + 1
+            slow = ws.cell(row=2, column=column)
+            fast = ws.cell(row=3, column=column)
+            assert fast.value == expected, column
+            assert fast.value == slow.value, column
+            assert type(fast.value) is type(slow.value), column
+            # one shared workbook-scoped Format -> identical styling
+            assert fast.border.left.style == slow.border.left.style == "thin", column
+            # formulas carry their explicit cache (never the default 0)
+            if isinstance(value, str) and value.startswith("="):
+                assert ws_cached.cell(row=2, column=column).value == cached, column
+                assert ws_cached.cell(row=3, column=column).value == cached, column
+
+    def test_fast_path_never_notes_width(self):
+        # pinned-width sheets only: nothing may reach the autofit ledger,
+        # so apply_autofit after a fast-path write must leave all widths unset
+
+        def build(wb, ws_by_name):
+            ws = ws_by_name["Sheet"]
+            theme = ModernTheme(wb)
+            fmt = theme.cell_format(font="body", align="center", border=True)
+            reset_widths()
+            _write_cell_fast(ws, 1, 1, "a very wide value", fmt)
+            apply_autofit(ws)
+
+        book = render_workbook(["Sheet"], build)
+        ws = load_workbook_bytes(book)["Sheet"]
+        assert not ws.column_dimensions
+
+
+# --------------------------------------------------------------------------
+# _render_data_rows format hoisting (exporter perf task 3)
+# --------------------------------------------------------------------------
+
+
+def make_hoist_rows():
+    """20 data rows x 21 cells (12 base + 6 die + 3 flags); one P/F row so
+    the die "0" number-format variant occurs too."""
+    rows = []
+    for i in range(20):
+        is_pf = i == 19
+        rows.append(
+            [
+                100 + i,
+                f"{i}_TEST",
+                "PARAM",
+                "P/F" if is_pf else "V",
+                0.5,
+                1.5,
+                '=IFERROR(MIN(M17:R17),"")',
+                '=IFERROR(MAX(M17:R17),"")',
+                '=IFERROR(AVERAGE(M17:R17),"")',
+                f"=CP{17 + i}",
+                f"=CPK{17 + i}",
+                f"=FAILS{17 + i}",
+                *([0] * 6 if is_pf else [1.0 + d for d in range(6)]),
+                0,
+                1,
+                0,
+            ]
+        )
+    return rows
+
+
+class TestMatrixFormatHoist:
+    """Perf task 3: _render_data_rows resolves each cell's Format from a
+    per-render memo keyed by every argument variation in the loop
+    (column, fill, num_fmt, boundary) instead of composing theme kwargs
+    per cell — theme.cell_format calls must track the static variant set,
+    not rows x cells."""
+
+    def hoist_spec(self):
+        """20-row x 6-die variant of make_matrix_spec; row_groups [0, 10]
+        put the boundary row INSIDE the banded odd group."""
+        return make_matrix_spec(
+            rows=make_hoist_rows(),
+            die_columns=["M", "N", "O", "P", "Q", "R"],
+            row_groups=[0, 10],
+            number_formats={
+                "M": SCIENTIFIC,
+                "N": SCIENTIFIC,
+                "O": SCIENTIFIC,
+                "P": SCIENTIFIC,
+                "Q": SCIENTIFIC,
+                "R": SCIENTIFIC,
+                "SpecMin": SCIENTIFIC,
+                "SpecMax": SCIENTIFIC,
+                "Min": SCIENTIFIC,
+                "Max": SCIENTIFIC,
+                "Mean": SCIENTIFIC,
+                "Fails": "0",
+                "Cp": "0.00",
+                "Cpk": "0.00",
+                "Test#": "0",
+            },
+        )
+
+    def test_data_rows_cell_format_calls_bounded_by_variants(self, monkeypatch):
+        # before the hoist: one theme.cell_format composition per cell =
+        # 20 rows x 21 cells = 420 calls; after: bounded by the static
+        # variant set (~49 for this spec — fixed columns by fill x boundary,
+        # E/F neutral pair, die columns by P/F-ness) — far below 60.
+        spec = self.hoist_spec()
+        original = ModernTheme.cell_format
+        calls = []
+
+        def counting(theme_self, **kwargs):
+            calls.append(kwargs)
+            return original(theme_self, **kwargs)
+
+        monkeypatch.setattr(ModernTheme, "cell_format", counting)
+
+        def build(wb, ws_by_name):
+            _render_data_rows(ws_by_name["Sheet"], spec, ModernTheme(wb))
+
+        render_workbook(["Sheet"], build)
+        assert len(calls) < 60
+
+
+# --------------------------------------------------------------------------
+# Matrix die/tail/mirror bulk segments (exporter perf task 5)
+# --------------------------------------------------------------------------
+
+
+class TestMatrixBulkSegments:
+    """Perf task 5: the die segment (values[12:12+D]) and the tail+mirror
+    segment (values[12+D:]) go through ONE ws.write_row call each per data
+    row — only the static 12 stay on the per-cell fast path. Output identity
+    is the contract: the openpyxl oracle below must hold unchanged (the CF
+    rules anchor the mirror ranges)."""
+
+    def test_bulk_segments_read_back_identical(self):
+        # openpyxl oracle on the REAL mixed PTR+FTR spec (D=3, builder-built):
+        # die values survive (NaN -> blank), the scientific die format and the
+        # P/F-row "0" die format hold, mirror flags and blanks survive, the
+        # tail spacers stay blank, and the uniform body styling (thin border,
+        # no fill — banding stops at column L) reaches every bulk cell.
+        from tests.exporter.test_test_summary import base_duts, base_tests, build
+
+        spec = build(base_tests(), base_duts())[0]
+        ws = roundtrip(render(spec))["Test Summary"]
+        # parametric die cells (row 17): numbers survive, the NaN DUT is blank
+        assert ws["M17"].value == 1.0
+        assert ws["N17"].value == 1.2
+        assert ws["O17"].value is None
+        for cell in ("M17", "N17", "O17"):
+            assert ws[cell].number_format == SCIENTIFIC, cell
+        # P/F row (row 19): die flags 0/1/0 under the "0" die format
+        assert ws["M19"].value == 0
+        assert ws["N19"].value == 1
+        assert ws["O19"].value == 0
+        for cell in ("M19", "N19", "O19"):
+            assert ws[cell].number_format == "0", cell
+        # mirror flags (hidden columns S..U): pass/fail/blank survive
+        assert ws["S17"].value == 0
+        assert ws["T17"].value == 0
+        assert ws["U17"].value is None  # flag -1 (not tested) -> blank
+        assert (ws["S18"].value, ws["T18"].value, ws["U18"].value) == (0, 1, 0)
+        assert (ws["S19"].value, ws["T19"].value, ws["U19"].value) == (0, 1, 0)
+        # tail spacers P/R and the Trend cell Q stay blank on every data row
+        for row in (17, 18, 19):
+            for letter in ("P", "Q", "R"):
+                assert ws[f"{letter}{row}"].value is None, f"{letter}{row}"
+        # the bulk body Format keeps the uniform styling: thin border, no
+        # fill on die/tail/mirror cells even on the banded boundary row 18
+        for cell in ("M18", "S18", "R18", "Q17"):
+            assert ws[cell].border.top.style == "thin", cell
+            assert ws[cell].fill.patternType is None, cell
+
+    def test_bulk_die_segment_nan_written_blank(self):
+        # writer-side guard: a raw NaN reaching the die segment lands as a
+        # blank cell exactly like the per-cell path did (sanitize_cell),
+        # never as an invalid number in the sheet XML
+        spec = make_matrix_spec()
+        spec["rows"][0][14] = float("nan")  # die cell O17
+        ws = roundtrip(render(spec))["Test Summary"]
+        assert ws["O17"].value is None
+
+    def test_bulk_write_row_call_bounds(self, monkeypatch):
+        # counter bound: matrix data rows now add at most 12 fast-path
+        # wrapper calls per row (the static A..L cells — was 21/row) plus
+        # exactly two write_row calls (die segment at 0-based col 12,
+        # tail+mirror at col 12 + D).
+        import xlsxwriter.worksheet as xlworksheet
+
+        import deps.exporter.writer as writer_module
+
+        spec = TestMatrixFormatHoist().hoist_spec()
+        rows = spec["rows"]
+        die_count = len(spec["die_columns"])
+        original_fast = writer_module._write_cell_fast
+        original_write_row = xlworksheet.Worksheet.write_row
+        fast_calls = []
+        bulk_calls = []
+
+        def counting_fast(ws, row, column, value, fmt, cached=None):
+            fast_calls.append((row, column))
+            return original_fast(ws, row, column, value, fmt, cached=cached)
+
+        def counting_write_row(ws_self, row, col, data, cell_format=None):
+            bulk_calls.append((row, col, len(data)))
+            return original_write_row(ws_self, row, col, data, cell_format)
+
+        monkeypatch.setattr(writer_module, "_write_cell_fast", counting_fast)
+        monkeypatch.setattr(xlworksheet.Worksheet, "write_row", counting_write_row)
+
+        def build(wb, ws_by_name):
+            _render_data_rows(ws_by_name["Sheet"], spec, ModernTheme(wb))
+
+        render_workbook(["Sheet"], build)
+
+        assert len(fast_calls) <= 12 * len(rows)
+        assert len(bulk_calls) == 2 * len(rows)
+        # geometry of the first data row (0-based): die segment starts at
+        # col 12, tail+mirror right after it and runs to the row's end
+        row0 = 2 + len(spec["metadata_rows"])
+        assert bulk_calls[0] == (row0, 12, die_count)
+        assert bulk_calls[1] == (row0, 12 + die_count, len(rows[0]) - 12 - die_count)

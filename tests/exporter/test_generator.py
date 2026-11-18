@@ -1446,6 +1446,92 @@ class TestStatRowIsFtr:
         )
         assert stat_row_is_ftr(row, info, set()) is False
 
+    def test_pattern_col_precomputed_hit(self):
+        # the sheet-level producer precomputes the Pattern Name index into
+        # header_info["pattern_col"]; stat_row_is_ftr honors it — the same
+        # normalized first match the per-row scan used to find
+        header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
+        info = self.info(header)
+        assert info["pattern_col"] == 6  # right of the inserted Param column
+        row = transform_stat_row(
+            [
+                "12 / Head1 / All Sites",
+                "2_F/scanchain",
+                "PAT_TOP",
+                "P/F",
+                "N/A",
+                "N/A",
+                "0",
+            ],
+            info,
+        )
+        assert stat_row_is_ftr(row, info, set()) is True
+
+    def test_pattern_col_present_but_no_match(self):
+        # key present with None (no Pattern Name column in the header):
+        # no signal fires, the row stays PTR/MPR
+        info = self.info()
+        assert info["pattern_col"] is None
+        row = transform_stat_row(
+            ["10 / Head1 / All Sites", "T/vcc", "", "V", "0.5", "1.5", "1"], info
+        )
+        assert stat_row_is_ftr(row, info, set()) is False
+
+    def test_pattern_col_key_absent_scans_header(self):
+        # direct-call producers that never set pattern_col keep the
+        # header scan: hit and blank cells behave exactly as before
+        header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
+        info = self.info(header)
+        del info["pattern_col"]
+        hit = transform_stat_row(
+            [
+                "12 / Head1 / All Sites",
+                "2_F/scanchain",
+                "PAT_TOP",
+                "P/F",
+                "N/A",
+                "N/A",
+                "0",
+            ],
+            info,
+        )
+        assert stat_row_is_ftr(hit, info, set()) is True
+        blank = transform_stat_row(
+            ["10 / Head1 / All Sites", "T/vcc", "", "V", "0.5", "1.5", "1"], info
+        )
+        assert stat_row_is_ftr(blank, info, set()) is False
+
+    def test_pattern_col_fallback_on_bare_header_info(self):
+        # a hand-built header_info without the precomputed key (no
+        # transform_stat_header at all): the scan still fires
+        bare = {
+            "enabled": True,
+            "header": ["Test#", "Test Name", "Pattern Name", "Fail Num"],
+            "param_inserted": False,
+        }
+        assert stat_row_is_ftr(["12", "name", "PAT_TOP", "0"], bare, set()) is True
+        assert stat_row_is_ftr(["12", "name", "", "0"], bare, set()) is False
+
+    def test_pattern_col_matches_scan_result(self):
+        # parity: the precomputed index and the scan fallback must agree
+        # on every row shape (same normalized first-match semantics)
+        header = [""] + STAT_HHEADER[:1] + ["Pattern Name"] + STAT_HHEADER[1:]
+        with_key = self.info(header)
+        without_key = dict(with_key)
+        del without_key["pattern_col"]
+        raw_rows = [
+            ["12 / Head1 / All Sites", "2_F/scanchain", "PAT_TOP", "P/F", "N/A", "N/A", "0"],
+            ["10 / Head1 / All Sites", "T/vcc", "", "V", "0.5", "1.5", "1"],
+            ["garbage", "2_F/scan", "PAT_BOT", "P/F"],
+            ["10 / Head1 / All Sites", "T/vcc", 0, "V", "0.5", "1.5", "1"],
+        ]
+        for raw in raw_rows:
+            precomputed = stat_row_is_ftr(transform_stat_row(raw, with_key), with_key, set())
+            scanned = stat_row_is_ftr(
+                transform_stat_row(raw, without_key), without_key, set()
+            )
+            assert precomputed == scanned
+
     def test_disabled_transform_never_ftr(self):
         info = transform_stat_header(["VHeader", "Test Name", "Pattern Name"])
         row = ["raw", "name", "PAT"]

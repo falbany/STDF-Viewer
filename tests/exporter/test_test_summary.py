@@ -14,10 +14,12 @@ from deps.exporter.helpers import (
     resolve_dut_temperature,
     sanitize_cell,
 )
+from deps.exporter.worksheets.dut_summary import build_dut_summary_spec
 from deps.exporter.worksheets.test_summary import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
     METADATA_ROWS,
+    _build_shared_stats,
     build_test_summary_spec,
     group_order_by_temperature,
 )
@@ -640,6 +642,174 @@ class TestMetadataBlock:
         assert 12 not in spec["masked_rows"]  # Site (constant, differs)
         assert 14 in spec["masked_rows"]  # Test Time (always)
         assert 15 not in spec["masked_rows"]  # DUT Flag (never)
+
+
+class TestMetadataPerDutIdentity:
+    """Equality pin for the per-DUT metadata precompute (perf task 11):
+    resolving the dutInfo chain + Temperature once per (fid, dutIndex) and
+    deriving all 14 values from that cached pair must render EXACTLY what
+    the old per-(field, DUT) `_metadata_cell` resolution rendered. The
+    expected literals below were captured from the pre-change behavior on
+    this fixture, which stacks every semantics trap: tagged IDs, untagged
+    IDs (the MIR `file_temperatures` fallback, per file), a MISSING
+    dutInfo entry (temperature still falls back to the file value — the
+    resolver runs with part_id None), a truncated info tuple (index guards
+    degrade the later fields to blanks while the Part-ID tag still
+    parses), and a tag that beats its file's recorded value."""
+
+    ORDER = [(1, 0), (1, 1), (1, 2), (2, 0), (2, 1)]
+    DUT_IDS = ["SN541_T25C", "SN542", "SN543_T85C", "SN544", "SN545_T25C"]
+    FILE_TEMPERATURES = {1: 85.0, 2: -40.0}
+
+    EXPECTED_METADATA_ROWS = [
+        [
+            10000, "METADATA", "File ID", "INT", "-", "-",
+            '=IFERROR(MIN(M2:Q2),"")', '=IFERROR(MAX(M2:Q2),"")', "-", "-", "-", "-",
+            1, 1, "", 2, 2,
+        ],
+        [
+            10001, "METADATA", "Part ID", "TEXT", "-", "-",
+            "-", "-", "-", "-", "-", "-",
+            "SN541_T25C", "SN542", "", "SN544", "SN545_T25C",
+        ],
+        [
+            10002, "METADATA", "Part TXT", "TEXT", "-", "-",
+            "-", "-", "-", "-", "-", "-", "", "", "", "", "",
+        ],
+        [
+            10003, "METADATA", "Temperature", "CELSIUS", "-", "-",
+            '=IFERROR(MIN(M5:Q5),"")', '=IFERROR(MAX(M5:Q5),"")',
+            '=IFERROR(AVERAGE(M5:Q5),"")', "-", "-", "-",
+            25.0, 85.0, 85.0, -40.0, 25.0,
+        ],
+        [
+            10004, "METADATA", "HW Bin", "BIN", "-", "-",
+            '=IFERROR(MIN(M6:Q6),"")', '=IFERROR(MAX(M6:Q6),"")', "-", "-", "-", "-",
+            1, 1, "", 1, "",
+        ],
+        [
+            10005, "METADATA", "SW Bin", "BIN", "-", "-",
+            '=IFERROR(MIN(M7:Q7),"")', '=IFERROR(MAX(M7:Q7),"")', "-", "-", "-", "-",
+            2, 2, "", 2, "",
+        ],
+        [
+            10006, "METADATA", "Wafer", "INT", "-", "-",
+            '=IFERROR(MIN(M8:Q8),"")', '=IFERROR(MAX(M8:Q8),"")', "-", "-", "-", "-",
+            "", "", "", "", "",
+        ],
+        [
+            10007, "METADATA", "X", "INT", "-", "-",
+            '=IFERROR(MIN(M9:Q9),"")', '=IFERROR(MAX(M9:Q9),"")', "-", "-", "-", "-",
+            3, 3, "", 3, "",
+        ],
+        [
+            10008, "METADATA", "Y", "INT", "-", "-",
+            '=IFERROR(MIN(M10:Q10),"")', '=IFERROR(MAX(M10:Q10),"")', "-", "-", "-", "-",
+            -5, -5, "", -5, "",
+        ],
+        [
+            10009, "METADATA", "Head", "INT", "-", "-",
+            '=IFERROR(MIN(M11:Q11),"")', '=IFERROR(MAX(M11:Q11),"")', "-", "-", "-", "-",
+            1, 1, "", 1, "",
+        ],
+        [
+            10010, "METADATA", "Site", "INT", "-", "-",
+            '=IFERROR(MIN(M12:Q12),"")', '=IFERROR(MAX(M12:Q12),"")', "-", "-", "-", "-",
+            1, 1, "", 1, "",
+        ],
+        [
+            10011, "METADATA", "Tests Executed", "INT", "-", "-",
+            '=IFERROR(MIN(M13:Q13),"")', '=IFERROR(MAX(M13:Q13),"")', "-", "-", "-", "-",
+            42, 42, "", 42, "",
+        ],
+        [
+            10012, "METADATA", "Test Time", "ms", "-", "-",
+            '=IFERROR(MIN(M14:Q14),"")', '=IFERROR(MAX(M14:Q14),"")',
+            '=IFERROR(AVERAGE(M14:Q14),"")', '=IFERROR(STDEV(M14:Q14),"")', "-", "-",
+            123, 123, "", 123, "",
+        ],
+        [
+            10013, "METADATA", "DUT Flag", "TEXT", "-", "-",
+            "-", "-", "-", "-", "-", "-",
+            "Passed", "Passed", "", "Passed", "",
+        ],
+    ]
+    EXPECTED_MASKED_ROWS = [8, 9, 10, 11, 12, 14]
+    EXPECTED_SECONDARY_HEADER = BASE_HEADERS + ["SN541", "SN542", "SN543", "SN544", "SN545", "", "Trend"]
+    EXPECTED_DUT_META_COLUMNS = [
+        [1, "SN541_T25C", "", 25.0, 1, 2, "", 3, -5, 1, 1, 42, 123, "Passed"],
+        [1, "SN542", "", 85.0, 1, 2, "", 3, -5, 1, 1, 42, 123, "Passed"],
+        ["", "", "", 85.0, "", "", "", "", "", "", "", "", "", ""],
+        [2, "SN544", "", -40.0, 1, 2, "", 3, -5, 1, 1, 42, 123, "Passed"],
+        [2, "SN545_T25C", "", 25.0, "", "", "", "", "", "", "", "", "", ""],
+    ]
+    EXPECTED_MASKED_COLUMNS = [6, 7, 8, 9, 10, 12]
+
+    @staticmethod
+    def _summary():
+        duts = [
+            (1, 0, make_dut_info(fid=1, part_id="SN541_T25C")),  # tagged
+            (1, 1, make_dut_info(fid=1, part_id="SN542")),  # untagged -> file 1's MIR value
+            (
+                1,
+                2,
+                make_dut_info(
+                    fid=1,
+                    part_id="SN543_T85C",
+                    part_txt="txt3",
+                    head_site="Head 2 - Site 3",
+                    tests_executed=7,
+                    test_time="250 ms",
+                    hw_bin="Bin 3",
+                    sw_bin="Bin 4",
+                    wafer="W9",
+                    xy=(7, 8),
+                    dut_flag="Failed",
+                ),
+            ),
+            (2, 0, make_dut_info(fid=2, part_id="SN544")),  # untagged -> file 2's MIR value
+            (2, 1, make_dut_info(fid=2, part_id="SN545_T25C")),  # tag beats file 2's value
+        ]
+        summary = make_summary(base_tests(), duts)
+        # (1, 2): the dutInfo entry is missing entirely; (2, 1): truncated
+        # to indices 0..1 (the order/ids lists keep the full tuples)
+        del summary["dutInfo"][1][2]
+        summary["dutInfo"][2][1] = (2, "SN545_T25C")
+        return summary
+
+    def test_matrix_metadata_rows_identical(self):
+        spec = build_test_summary_spec(
+            self._summary(),
+            [(t["num"], 0, t["name"]) for t in base_tests()],
+            self.ORDER,
+            self.DUT_IDS,
+            "Test Summary",
+            file_temperatures=self.FILE_TEMPERATURES,
+        )[0]
+        assert spec["metadata_rows"] == self.EXPECTED_METADATA_ROWS
+        assert spec["masked_rows"] == self.EXPECTED_MASKED_ROWS
+
+    def test_matrix_secondary_header_identical(self):
+        spec = build_test_summary_spec(
+            self._summary(),
+            [(t["num"], 0, t["name"]) for t in base_tests()],
+            self.ORDER,
+            self.DUT_IDS,
+            "Test Summary",
+            file_temperatures=self.FILE_TEMPERATURES,
+        )[0]
+        assert spec["secondary_header"] == self.EXPECTED_SECONDARY_HEADER
+
+    def test_dut_summary_metadata_columns_identical(self):
+        spec = build_dut_summary_spec(
+            self._summary(),
+            [(t["num"], 0, t["name"]) for t in base_tests()],
+            self.ORDER,
+            sheet_name="DUT Summary",
+            file_temperatures=self.FILE_TEMPERATURES,
+        )[0]
+        assert [row[1:15] for row in spec["dut_rows"]] == self.EXPECTED_DUT_META_COLUMNS
+        assert spec["masked_columns"] == self.EXPECTED_MASKED_COLUMNS
 
 
 # --------------------------------------------------------------------------
@@ -1511,6 +1681,29 @@ class TestOneSidedLimitRow:
         fv = spec["formula_values"]
         assert fv[(17, 12)] == 1  # flags alone would say 0 — cache matches formula
 
+    def test_low_limit_only_fails_cache_equals_manual_count(self):
+        # equality pin (perf overhaul): the FAILS cache for a one-sided
+        # lo-only row equals the manually-computed one-sided count —
+        # below a PRESENT lo, the blank hi side never fails (exclusive
+        # comparison: a die value exactly at lo passes)
+        dies = [0.5, 2.0, 0.9, 1.0, 1.5]
+        tests = [
+            dict(
+                name="0_T/v",
+                num=10,
+                unit="V",
+                llimit=1.0,
+                hlimit=np.nan,  # one-sided: no high limit
+                rec=REC.PTR,
+                data={1: (dies, [0] * len(dies))},  # flags all pass
+            )
+        ]
+        duts = [(1, i, make_dut_info(fid=1, part_id=f"D{i}")) for i in range(len(dies))]
+        spec = build(tests, duts)[0]
+        expected = sum(1 for v in dies if v < 1.0)  # manual count, no helpers
+        assert expected == 2  # fixture sanity: 0.5 and 0.9 sit below LL
+        assert spec["formula_values"][(17, 12)] == expected
+
 
 # --------------------------------------------------------------------------
 # temperature split grouping (split §7.4)
@@ -1561,3 +1754,223 @@ class TestGroupOrderByTemperature:
         groups = group_order_by_temperature([(1, 0), (1, 1), (1, 2)], info, {})
         assert groups[25.0] == [(1, 0), (1, 1)]
         assert groups[-5.0] == [(1, 2)]
+
+
+# --------------------------------------------------------------------------
+# shared per-test table (perf overhaul finding 4, Task 9)
+# --------------------------------------------------------------------------
+
+
+def shared_stats_tests():
+    """Fixture tests: both-limits, one-sided, NaN-heavy no-limits, FTR and
+    a test fid 2 lacks entirely (the blank-pair branch)."""
+    return [
+        # both limits (fid 2's 4-value list covers its DUT indexes 0..3,
+        # including the order-absent pair (2, 3))
+        dict(
+            name="0_TXCC/VCCC_ASIC",
+            num=10,
+            unit="V",
+            llimit=0.5,
+            hlimit=1.5,
+            rec=REC.PTR,
+            data={1: ([1.0, 1.2], [0, 0]), 2: ([0.4, 1.6, 1.0, 2.0], [0, 0, 0, 0])},
+        ),
+        # one-sided: LL only, HL NaN
+        dict(
+            name="1_RX/Margin",
+            num=11,
+            unit="dB",
+            llimit=0.25,
+            hlimit=np.nan,
+            rec=REC.PTR,
+            data={1: ([0.1, 0.3], [0, 0]), 2: ([np.nan, 0.9, 0.2, 0.5], [0, 0, 0, 0])},
+        ),
+        # NaN-heavy, no limits (flag-mirror FAILS branch)
+        dict(
+            name="2_NAN/Heavy",
+            num=13,
+            unit="V",
+            llimit=np.nan,
+            hlimit=np.nan,
+            rec=REC.PTR,
+            data={1: ([np.nan, np.nan], [0, 0x80]), 2: ([np.nan, np.nan, 3.0, np.nan], [0x80, 0, 0, 0])},
+        ),
+        # FTR (die cells from the flag list)
+        dict(
+            name="3_Func/scanchain",
+            num=14,
+            unit="",
+            llimit=np.nan,
+            hlimit=np.nan,
+            rec=REC.FTR,
+            vect_nam="PAT_TOP",
+            data={1: ([0.0, 1.0], [0, 0x80]), 2: ([1.0, 0.0, 0.0, 1.0], [0x80, 0, 0, 0x80])},
+        ),
+        # one fid lacking a test: fid 2 never carried it -> blank pairs there
+        dict(
+            name="4_ONLY_FILE1",
+            num=15,
+            unit="A",
+            llimit=-1.0,
+            hlimit=1.0,
+            rec=REC.PTR,
+            data={1: ([0.5, -0.5], [0, 0])},
+        ),
+    ]
+
+
+def shared_stats_duts():
+    """Two files; fid 2 also carries dutIndex 3, which the display order
+    deliberately OMITS (the order-absent pair pin)."""
+    return [
+        (1, 0, make_dut_info(fid=1, part_id="SN541_T25C")),
+        (1, 1, make_dut_info(fid=1, part_id="SN542_T85C")),
+        (2, 0, make_dut_info(fid=2, part_id="SN601_T25C")),
+        (2, 1, make_dut_info(fid=2, part_id="SN602_T25C")),
+        (2, 2, make_dut_info(fid=2, part_id="SN603_T25C")),
+        (2, 3, make_dut_info(fid=2, part_id="SN604_T25C")),
+    ]
+
+
+SHARED_ORDER = [(1, 0), (1, 1), (2, 0), (2, 1), (2, 2)]  # (2, 3) stays out
+SHARED_DUT_IDS = ["SN541_T25C", "SN542_T85C", "SN601_T25C", "SN602_T25C", "SN603_T25C"]
+
+
+class TestSharedStatsContext:
+    """The shared per-test table (`_build_shared_stats`, consumed through
+    ``shared_stats=``) must build specs deep-equal to the inline
+    computation — both builders, fixture covering the branch zoo."""
+
+    @staticmethod
+    def _fixture():
+        tests = shared_stats_tests()
+        summary = make_summary(tests, shared_stats_duts())
+        test_tuples = [(t["num"], 0, t["name"]) for t in tests]
+        return summary, test_tuples
+
+    def test_shared_table_shape(self):
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        assert shared["pos"] == {pair: i for i, pair in enumerate(SHARED_ORDER)}
+        entries = shared["entries"]
+        assert set(entries) == set(test_tuples)
+        for die, mirror, caches, has_num in entries.values():
+            assert len(die) == len(mirror) == len(SHARED_ORDER)
+            assert len(caches) == 6
+            assert isinstance(has_num, bool)
+        # the fid-2-lacking test: fid 1's positions carry its values, fid
+        # 2's positions are blank pairs
+        only1 = entries[(15, 0, "4_ONLY_FILE1")]
+        assert only1[0] == [0.5, -0.5, "", "", ""]
+        assert only1[1] == [0, 0, "", "", ""]
+        assert only1[3] is True
+
+    def test_test_summary_shared_spec_equality(self):
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        inline = build_test_summary_spec(
+            summary, test_tuples, SHARED_ORDER, SHARED_DUT_IDS, "Test Summary"
+        )
+        via_shared = build_test_summary_spec(
+            summary,
+            test_tuples,
+            SHARED_ORDER,
+            SHARED_DUT_IDS,
+            "Test Summary",
+            shared_stats=shared,
+        )
+        assert via_shared == inline
+
+    def test_dut_summary_shared_spec_equality(self):
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        inline = build_dut_summary_spec(summary, test_tuples, SHARED_ORDER, "DUT Summary")
+        via_shared = build_dut_summary_spec(
+            summary, test_tuples, SHARED_ORDER, "DUT Summary", shared_stats=shared
+        )
+        assert via_shared == inline
+
+    def test_multi_chunk_shared_spec_equality(self):
+        # die-chunk overflow: chunking is PLACEMENT-only — every partial
+        # chunk slices the shared die/mirror cells through pos, while its
+        # six caches and sparkline gate stay chunk-local (they span the
+        # chunk's own die range, the entry's cover the whole order). The
+        # specs — formula_values and sparklines included — must equal the
+        # inline build either way.
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        inline = build_test_summary_spec(
+            summary, test_tuples, SHARED_ORDER, SHARED_DUT_IDS, "Test Summary", die_cap=2
+        )
+        via_shared = build_test_summary_spec(
+            summary,
+            test_tuples,
+            SHARED_ORDER,
+            SHARED_DUT_IDS,
+            "Test Summary",
+            die_cap=2,
+            shared_stats=shared,
+        )
+        assert via_shared == inline
+        # explicit partial-chunk pins: the overflow sheet's caches stay
+        # chunk-local (the inline path) and so does its sparkline gate
+        assert via_shared[1]["formula_values"] == inline[1]["formula_values"]
+        assert via_shared[1]["sparklines"] == inline[1]["sparklines"]
+
+    def test_partial_chunk_ignores_poisoned_shared_caches(self):
+        # teeth for the cache gate: poison every entry's caches6 and the
+        # PARTIAL-chunk spec must STILL equal the inline build — overflow
+        # sheets never consume the whole-order caches
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        poisoned = {
+            "pos": shared["pos"],
+            "entries": {
+                tup: (die, mirror, (None, None, None, None, None, 999), has)
+                for tup, (die, mirror, _caches, has) in shared["entries"].items()
+            },
+        }
+        inline = build_test_summary_spec(
+            summary, test_tuples, SHARED_ORDER, SHARED_DUT_IDS, "Test Summary", die_cap=2
+        )
+        via_poisoned = build_test_summary_spec(
+            summary,
+            test_tuples,
+            SHARED_ORDER,
+            SHARED_DUT_IDS,
+            "Test Summary",
+            die_cap=2,
+            shared_stats=poisoned,
+        )
+        assert via_poisoned == inline
+
+    def test_partial_chunk_slices_poisoned_shared_cells(self):
+        # teeth for the cell path: poison every entry's die cells and the
+        # PARTIAL-chunk spec's die cells change — overflow sheets really
+        # do slice the shared table through pos (placement-only chunking),
+        # they do not silently fall back to a full inline recomputation
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        poisoned = {
+            "pos": shared["pos"],
+            "entries": {
+                tup: (["X"] * len(die), mirror, caches, has)
+                for tup, (die, mirror, caches, has) in shared["entries"].items()
+            },
+        }
+        inline = build_test_summary_spec(
+            summary, test_tuples, SHARED_ORDER, SHARED_DUT_IDS, "Test Summary", die_cap=2
+        )
+        via_poisoned = build_test_summary_spec(
+            summary,
+            test_tuples,
+            SHARED_ORDER,
+            SHARED_DUT_IDS,
+            "Test Summary",
+            die_cap=2,
+            shared_stats=poisoned,
+        )
+        assert via_poisoned != inline
+        # the poison lands exactly in the partial chunk's die columns
+        assert via_poisoned[1]["rows"][0][12:] != inline[1]["rows"][0][12:]

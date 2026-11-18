@@ -51,11 +51,14 @@ class ReportHost:  # pylint: disable=too-few-public-methods
 
     # -- DUT-block shared context (_prepare_dut_context, generator level:
     #    fetched ONCE when either DUT-block sheet is selected; both
-    #    writeTest_Summary and writeDUT_Summary consume it) --
+    #    writeTest_Summary and writeDUT_Summary consume it, including the
+    #    shared per-test table passed to the builders as shared_stats) --
     _dut_ctx_summary: dict  # the PRUNED summaryTable
     _dut_ctx_order: list  # classic (fid, dutIndex) display order
     _dut_ctx_dut_ids: list  # per-column part IDs, "DUT #n" fallback
     _dut_ctx_temps: dict  # per-file MIR temperatures (File Info fetch)
+    _dut_ctx_stats: dict  # test_tuple -> (die, mirror, caches6, has_num), aligned to _dut_ctx_order
+    _dut_ctx_pos: dict  # (fid, dutIndex) -> index into _dut_ctx_order (dut2ind hoist)
     _prepare_dut_context: Callable[[], None]
 
     # -- progress/threading plumbing (reportGenerator.__init__) --

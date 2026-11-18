@@ -181,7 +181,9 @@ def _write_cell(
     """Write one cell: formula strings verbatim (with their cached result —
     EVERY write_formula passes an explicit value=; xlsxwriter's default
     cached 0 would regress previews), everything else sanitized. All
-    styling composes into one workbook-scoped Format at write time."""
+    styling composes into one workbook-scoped Format at write time. The
+    write dispatch itself lives in _write_cell_fast (one implementation
+    for both paths)."""
     fmt = theme.cell_format(
         font=font,
         align=align,
@@ -191,6 +193,16 @@ def _write_cell(
         extra=extra,
     )
     _note_width(ws, column, value)
+    _write_cell_fast(ws, row, column, value, fmt, cached=cached)
+
+
+def _write_cell_fast(ws, row: int, column: int, value, fmt, cached=None) -> None:
+    """The shared write dispatch of _write_cell minus its theme lookup and
+    width note: formula strings verbatim with their explicit cached result
+    (never xlsxwriter's default cached 0), everything else sanitized into
+    blank or written. ``fmt`` is a PREBUILT workbook-scoped Format — the
+    pinned-width renderers hoist the theme.cell_format call out of the
+    per-cell hot path, so this must never touch theme or ledger."""
     row0, col0 = row - 1, column - 1
     if isinstance(value, str) and value.startswith("="):
         ws.write_formula(row0, col0, value, fmt, "" if cached is None else cached)
@@ -295,7 +307,27 @@ def _render_data_rows(ws, spec, theme):
 
     SpecMin/SpecMax (E/F) carry a static neutral yellow fill on every data
     row (2026-11-10), overriding the group banding there; Test/Param keep
-    the right/left column alignment."""
+    the right/left column alignment.
+
+    Row layout is [12 static | D die | 3 tail | D mirrors] (test_summary.py
+    _build_chunk). The static A..L cells keep the per-cell fast path —
+    their formats/fills/cached formulas vary — and their Format resolves
+    through a per-render memo keyed by (column, fill, num_fmt, boundary):
+    within the static block the band/boundary gating is unconditional (the
+    columns are fixed by construction), so the memo variant set is bounded.
+    The two uniform segments BULK-write through one ws.write_row each per
+    row: the die segment under body/center/border + the die number format
+    (the builder gives every die column the same SCIENTIFIC_FORMAT entry —
+    the first die column is the representative) or + "0" on P/F rows
+    (values[3] == "P/F", detection preserved verbatim); the tail+mirror
+    segment under plain body/center/border. Neither segment can carry a
+    fill or the boundary extra — banding and the boundary are gated on
+    fixed_column (column <= 12) — and the builder never puts formulas or
+    cached results there (dies are floats/flags, tail "" and flag values),
+    so write_row's plain write dispatch produces identical XML; the values
+    still pass through sanitize_cell so NaN/None land blank like before.
+    All three segment Formats build once per render (the matrix pins its
+    widths — nothing may reach the autofit ledger)."""
     die_columns = spec["die_columns"]
     formats = spec.get("number_formats") or {}
     fixed_formats = {
@@ -307,6 +339,18 @@ def _render_data_rows(ws, spec, theme):
     banded_offsets = _odd_group_offsets(spec)
     neutral = NEUTRAL_FILL_HEX
     group = GROUP_FILL_HEX
+    boundary_extra = {"top": 2, "top_color": f"#{GROUP_BORDER_HEX}"}
+    fmt_cache: dict = {}
+
+    # Segment Formats (once per render; theme._format memoizes the kwargs).
+    die_fmt = pf_die_fmt = None
+    if die_columns:
+        die_fmt = theme.cell_format(
+            font="body", align="center", border=True, num_fmt=formats.get(die_columns[0])
+        )
+        pf_die_fmt = theme.cell_format(font="body", align="center", border=True, num_fmt="0")
+    tail_fmt = theme.cell_format(font="body", align="center", border=True)
+    die_end = BASE_COLUMN_COUNT + len(die_columns)
 
     data_start = _data_start(spec)
     for offset, values in enumerate(spec["rows"]):
@@ -314,38 +358,47 @@ def _render_data_rows(ws, spec, theme):
         is_pf = len(values) > 3 and values[3] == "P/F"
         band = offset in banded_offsets
         boundary = offset in boundaries
-        for column, value in enumerate(values, start=1):
+        for column, value in zip(range(1, BASE_COLUMN_COUNT + 1), values, strict=False):
             number_format = fixed_formats.get(column)
-            if number_format is None:
-                die_index = column - 1 - BASE_COLUMN_COUNT
-                if 0 <= die_index < len(die_columns):
-                    number_format = "0" if is_pf else formats.get(die_columns[die_index])
-            fixed_column = column <= BASE_COLUMN_COUNT
             if column in (SPEC_MIN_COLUMN, SPEC_MAX_COLUMN):
                 fill = neutral
-            elif band and fixed_column:
+            elif band:
                 fill = group
             else:
                 fill = None
-            extra = (
-                {"top": 2, "top_color": f"#{GROUP_BORDER_HEX}"}
-                if boundary and fixed_column
-                else None
-            )
-            _write_cell(
+            key = (column, fill, number_format, boundary)
+            fmt = fmt_cache.get(key)
+            if fmt is None:
+                fmt = theme.cell_format(
+                    font="body",
+                    align=_body_align_key(column),
+                    border=True,
+                    fill_hex=fill,
+                    num_fmt=number_format,
+                    extra=boundary_extra if boundary else None,
+                )
+                fmt_cache[key] = fmt
+            _write_cell_fast(
                 ws,
                 row,
                 column,
                 value,
-                theme,
-                font="body",
-                align=_body_align_key(column),
-                border=True,
-                fill_hex=fill,
-                num_fmt=number_format,
+                fmt,
                 cached=formula_values.get((row, column)),
-                extra=extra,
             )
+        if die_columns:
+            ws.write_row(
+                row - 1,
+                BASE_COLUMN_COUNT,
+                [sanitize_cell(value) for value in values[BASE_COLUMN_COUNT:die_end]],
+                pf_die_fmt if is_pf else die_fmt,
+            )
+        ws.write_row(
+            row - 1,
+            die_end,
+            [sanitize_cell(value) for value in values[die_end:]],
+            tail_fmt,
+        )
 
 
 def _group_boundary_offsets(spec):
@@ -699,6 +752,67 @@ def _set_dut_summary_column_widths(ws, spec):
         ws.set_column(_col0(letter), _col0(letter), DIE_COLUMN_WIDTH)
 
 
+def _render_dut_summary_dut_rows(ws, spec, theme):
+    """The DUT rows (first at ``data_start``): body cells throughout —
+    DUT # "0", integer metadata columns via the spec's formats, test
+    columns per their FTR/parametric format; the spacer+flag-mirror tail
+    bulk-writes through one ws.write_row per DUT row (uniform ""/flag
+    ints, no num_fmt). No group banding: DUT rows carry no workflow
+    groups.
+
+    The per-column num_fmt list is precomputed ONCE per sheet: the spec's
+    letter-keyed format dicts placed at their 1-based columns (unknown
+    letters stay None, the DUT # column pins "0" last so it wins the
+    column-1 priority the old per-cell branch had). Every cell's Format
+    then resolves through a memo keyed by num_fmt alone — font/body,
+    centered, bordered, no fill are loop constants, identical for every
+    DUT cell — so the per-cell hot path is a list index, a memo lookup
+    and _write_cell_fast: no per-cell xl_col_to_name, no per-cell theme
+    composition, nothing reaches the autofit ledger (the sheet pins its
+    widths). The tail (row_values[15+T:]: 1 blank spacer + T flag mirrors,
+    0-based start column 15+T) is uniform — "" and flag ints, never a
+    formula or a per-column num_fmt — so it writes through ONE ws.write_row
+    per DUT row under the memo's None Format; write_row's plain dispatch
+    blanks "" and numbers the flags exactly like the fast path (the values
+    still pass through sanitize_cell). Rows with no tail (no tests /
+    shorter layouts) have an empty slice and keep the pure per-cell path."""
+    data_start = spec["data_start"]
+    dut_rows = spec["dut_rows"]
+    expected_columns = max(map(len, dut_rows), default=0)
+    # 1-based: index 0 unused; num_fmt strings placed per column, None = plain body
+    column_formats: list[str | None] = [None] * (expected_columns + 1)
+    for letter, num_fmt in (spec.get("metadata_formats") or {}).items():
+        column = _col0(letter) + 1
+        if column <= expected_columns:
+            column_formats[column] = num_fmt
+    for letter, num_fmt in (spec.get("test_column_formats") or {}).items():
+        column = _col0(letter) + 1
+        if column <= expected_columns:
+            column_formats[column] = num_fmt
+    if expected_columns:
+        column_formats[1] = "0"  # the DUT # column
+    fmt_cache: dict = {}
+    # the tail's body/center/border Format IS the memo's None entry, seeded
+    # once per render so the bulk write and any None-num_fmt column share it
+    body_fmt = theme.cell_format(font="body", align="center", border=True, fill_hex=None, num_fmt=None)
+    fmt_cache[None] = body_fmt
+    tail_col0 = 1 + spec["metadata_column_count"] + len(spec.get("test_columns") or [])
+    for offset, row_values in enumerate(dut_rows):
+        row = data_start + offset
+        for column, value in zip(range(1, tail_col0 + 1), row_values, strict=False):
+            num_fmt = column_formats[column]
+            fmt = fmt_cache.get(num_fmt)
+            if fmt is None:
+                fmt = theme.cell_format(
+                    font="body", align="center", border=True, fill_hex=None, num_fmt=num_fmt
+                )
+                fmt_cache[num_fmt] = fmt
+            _write_cell_fast(ws, row, column, value, fmt)
+        tail = row_values[tail_col0:]
+        if tail:
+            ws.write_row(row - 1, tail_col0, [sanitize_cell(value) for value in tail], body_fmt)
+
+
 def render_dut_summary_sheet(ws, spec: dict, theme) -> None:
     """Render one DUT Summary spec dict onto ``ws`` (attribute block, filter
     header, DUT rows, transposed conditional formatting, hidden mask and
@@ -713,26 +827,9 @@ def render_dut_summary_sheet(ws, spec: dict, theme) -> None:
         )
     ws.set_row(filter_row - 1, ROW_HEIGHT)
 
-    # DUT rows: body cells throughout — DUT # "0", integer metadata columns
-    # via the spec's formats, test columns per their FTR/parametric format.
-    # No group banding: DUT rows carry no workflow groups.
-    data_start = spec["data_start"]
-    meta_count = spec["metadata_column_count"]
-    metadata_formats = spec.get("metadata_formats") or {}
-    test_formats = spec.get("test_column_formats") or {}
-    for offset, row_values in enumerate(spec["dut_rows"]):
-        row = data_start + offset
-        for column, value in enumerate(row_values, start=1):
-            letter = xlutil.xl_col_to_name(column - 1)
-            if column == 1:
-                num_fmt = "0"
-            elif column <= 1 + meta_count:
-                num_fmt = metadata_formats.get(letter)
-            else:
-                num_fmt = test_formats.get(letter)
-            _write_cell(
-                ws, row, column, value, theme, font="body", align="center", border=True, num_fmt=num_fmt
-            )
+    # DUT rows: body cells throughout — prebuilt per-column Formats, no
+    # per-cell col names (see _render_dut_summary_dut_rows)
+    _render_dut_summary_dut_rows(ws, spec, theme)
 
     # Total row (ruling 2026-11-16): banner footer below the AutoFilter ref;
     # SUBTOTAL cells track the filter, masked columns hide their cell with

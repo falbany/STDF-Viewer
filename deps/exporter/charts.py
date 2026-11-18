@@ -62,6 +62,7 @@ import os
 import re
 import tempfile
 import zipfile
+from collections import Counter
 
 import xlsxwriter.utility as xlutil
 
@@ -1149,8 +1150,12 @@ def write_wafer_map_block(  # pylint: disable=too-many-locals, too-many-branches
     # formulas — Total Parts counts the die map, Yield/Fails reference
     # the SW table's own COUNTIF cells (pass/fail rows selected via the
     # shared PF classifier) — so the whole sheet recalculates on edits
-    bins_present = sorted(set(grid.values()))
-    counts = {sbin: sum(1 for v in grid.values() if v == sbin) for sbin in bins_present}
+    # one pass over the die values: the Counter feeds both the sorted
+    # distinct-bin list and the per-bin counts (the old shape re-walked
+    # the grid once per bin)
+    bin_counter = Counter(grid.values())
+    bins_present = sorted(bin_counter)
+    counts = {sbin: bin_counter.get(sbin, 0) for sbin in bins_present}
     pf_map = wafer_bin_pf_map(grid, map_data.get("BinPF") or {}, map_data.get("Palette"))
     kpi = wafer_kpi_from_grid(grid, map_data.get("BinPF") or {}, map_data.get("Palette"))
     cards_start = start_row + len(identity_cells) + 2  # rows 4-6 / 7-9

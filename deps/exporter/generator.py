@@ -194,10 +194,15 @@ class ModernReportGenerator(
         # temperature splits + the DUT Summary per-DUT sheets, base first)
         # for the close-time tab-order reorder (§7.4)
         self._dut_sheet_block: list = []
-        # the DUT-block shared context (_dut_ctx_summary/_order/_dut_ids/
-        # _temps) binds in _prepare_dut_context, like the other per-run
-        # state — it runs whenever either DUT-block sheet is selected, and
-        # the writers gate on sheetDict before reading it
+        # the shared per-test table of the DUT-block context (finding 4):
+        # empty until _prepare_dut_context rebuilds it — it runs whenever
+        # either DUT-block sheet is selected, before the writers that
+        # consume it (they gate on sheetDict first)
+        self._dut_ctx_stats: dict = {}
+        self._dut_ctx_pos: dict = {}
+        # the rest of the DUT-block shared context (_dut_ctx_summary/
+        # _order/_dut_ids/_temps) binds in _prepare_dut_context, like the
+        # other per-run state
 
         # the try/finally mirrors the classic `with Workbook(...)` block:
         # the (partial) workbook is saved on forceQuit early-returns and on

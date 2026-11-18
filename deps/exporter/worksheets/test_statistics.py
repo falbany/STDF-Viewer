@@ -162,16 +162,17 @@ def transform_stat_header(header_row) -> dict:
 
     Returns ``{"header": [...], "enabled": bool, "param_inserted": bool,
     "spec_cols": (i, j) | None, "avg_col": int | None, "std_col": int | None,
-    "cp_col": int | None, "cpk_col": int | None}`` where ``spec_cols`` is
-    the 0-based (SpecMin, SpecMax) column pair in the TRANSFORMED header
-    (None when either limit anchor was missing — translated UIs degrade to
-    untransformed columns), the fifth-wave keys carry the 0-based Average /
-    St. Dev. / Cpk anchors and the ninth-wave ``cp_col`` the inserted Cp
-    column (all normalized matching, None when missing). Every anchor scan
-    runs AFTER the Cp insertion, so ``cpk_col`` points at the real Cpk
-    column; the spec columns sit LEFT of the insertion and keep their
-    indices. An unexpected non-blank first cell disables the whole
-    transform (header returned untouched, all anchors None).
+    "cp_col": int | None, "cpk_col": int | None, "pattern_col": int | None}``
+    where ``spec_cols`` is the 0-based (SpecMin, SpecMax) column pair in the
+    TRANSFORMED header (None when either limit anchor was missing —
+    translated UIs degrade to untransformed columns), the fifth-wave keys
+    carry the 0-based Average / St. Dev. / Cpk anchors, the ninth-wave
+    ``cp_col`` the inserted Cp column and ``pattern_col`` the FTR
+    "Pattern Name" column (all normalized matching, None when missing).
+    Every anchor scan runs AFTER the Cp insertion, so ``cpk_col`` points
+    at the real Cpk column; the spec columns sit LEFT of the insertion and
+    keep their indices. An unexpected non-blank first cell disables the
+    whole transform (header returned untouched, all anchors None).
     """
     cells = [str(cell) if cell is not None else "" for cell in header_row]
     if not cells or _norm_header_text(cells[0]) != "":
@@ -184,6 +185,7 @@ def transform_stat_header(header_row) -> dict:
             "std_col": None,
             "cp_col": None,
             "cpk_col": None,
+            "pattern_col": None,
         }
     body = [str(cell) for cell in cells[1:]]
     normalized = [_norm_header_text(cell) for cell in body]
@@ -218,6 +220,7 @@ def transform_stat_header(header_row) -> dict:
         "std_col": _anchor(_STAT_STD),
         "cp_col": cp_col,
         "cpk_col": _anchor(_STAT_CPK),
+        "pattern_col": _anchor(_STAT_PATTERN_NAME),
     }
 
 
@@ -309,7 +312,11 @@ def stat_row_is_ftr(transformed_row, header_info, ftr_tests) -> bool:
     carries a "Pattern Name" column (normalized match) and the row's cell
     there is a non-empty string — upstream sets VECT_NAM only for FTR rows
     and "" otherwise (DataInterface.py:540), so PTR/MPR never misfire.
-    Disabled transforms are never FTR.
+    The column index is precomputed ONCE per sheet into
+    ``header_info["pattern_col"]`` (transform_stat_header) — the header
+    never changes between rows; header_info dicts without the key
+    (direct-call tests) keep the per-call header scan, which finds the
+    same first normalized match. Disabled transforms are never FTR.
     """
     if not header_info.get("enabled"):
         return False
@@ -319,14 +326,24 @@ def stat_row_is_ftr(transformed_row, header_info, ftr_tests) -> bool:
         full_name = _stat_full_test_name(cells, header_info)
         if (test_num, full_name) in ftr_tests:
             return True
-    header = header_info.get("header") or []
-    for index, cell in enumerate(header):
-        if _norm_header_text(cell) == _STAT_PATTERN_NAME:
-            if len(cells) > index:
-                value = cells[index]
-                if isinstance(value, str) and value != "":
-                    return True
-            break
+    pattern_col = header_info.get("pattern_col")
+    if pattern_col is None and "pattern_col" not in header_info:
+        # producer didn't precompute the index: scan the header for the
+        # first normalized "Pattern Name" cell (same match the sheet-level
+        # anchor scan finds)
+        header = header_info.get("header") or []
+        pattern_col = next(
+            (
+                index
+                for index, cell in enumerate(header)
+                if _norm_header_text(cell) == _STAT_PATTERN_NAME
+            ),
+            None,
+        )
+    if pattern_col is not None and len(cells) > pattern_col:
+        value = cells[pattern_col]
+        if isinstance(value, str) and value != "":
+            return True
     return False
 
 

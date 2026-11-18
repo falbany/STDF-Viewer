@@ -41,23 +41,20 @@ from deps.exporter.contract import ReportHost
 from deps.exporter.dedup import compute_remeasure_drops
 from deps.exporter.helpers import (
     DUT_CHUNK_CAP,
-    cp_cached,
     cp_formula,
-    cpk_cached,
     cpk_formula,
     die_col,
-    fails_cached_flags,
-    fails_cached_limits_one_sided,
     fails_formula_flags,
     fails_formula_limits,
     flag_value,
     format_temperature_label,
-    has_numeric,
     metadata_stat_formulas,
+    numeric_values,
     parse_bin,
     parse_test_time,
     part_id_base,
     resolve_dut_temperature,
+    row_stat_caches,
     split_dut_chunks,
     split_test_name,
     stat_cached,
@@ -315,6 +312,8 @@ def build_test_summary_spec(
     die_cap=DUT_CHUNK_CAP,
     tr=lambda s: s,
     file_temperatures=None,
+    *,
+    shared_stats=None,
 ):
     """Build one spec dict per die chunk of the Test Summary sheet.
 
@@ -325,6 +324,17 @@ def build_test_summary_spec(
     selected fid -> the file's recorded Test Temperature (MIR TST_TEMP via
     the File Info table) — the Temperature metadata row's fallback when a
     part ID carries no _T<n>C tag; ``None``/absent fids leave blank cells.
+
+    `shared_stats` ({"entries", "pos"}, the DUT-block shared per-test
+    table from `_build_shared_stats`) supplies the per-test die/mirror
+    cells to every chunk — chunking is placement-only, cells slice
+    through ``pos``. The six stat caches and the sparkline gate are
+    whole-order-scoped, so only the single-chunk export consumes them;
+    a chunk smaller than the order recomputes its chunk-local caches
+    inline — and so does an order smaller than the TABLE's (a
+    temperature split's subset ``sub_order``: its stats cover the kept
+    DUTs only, `_is_table_order` refuses). None (direct calls) computes
+    everything inline.
 
     Since 2026-11-10 the banner row carries plain numeric DUT indices
     (global numbering, fix wave 2) and the numeric cell formats are
@@ -354,6 +364,7 @@ def build_test_summary_spec(
                 trend_label=trend_label,
                 chunk_index=chunk_index,
                 file_temperatures=file_temperatures,
+                shared_stats=shared_stats,
             )
         )
         chunk_start += len(chunk_ids)
@@ -433,6 +444,35 @@ def _limit_cell(limit):
         return ""
 
 
+def _display_limits(test):
+    """(spec_min, spec_max) DISPLAY cells of one resolved test — the third
+    wave branch logic in one place: FTR rows carry the synthetic
+    ±0.999999 cells, limit rows carry their (possibly one-sided, `""`
+    where missing) limit cells, no-limit rows blank both.
+
+    `_test_rows` and dut_summary._test_column render exactly these cells;
+    `_effective_lo_hi` derives the cache inputs from the same branch, so
+    the matrix, the per-DUT sheet and the shared context can never
+    diverge."""
+    if test["is_ftr"]:
+        return FTR_SPEC_MIN, FTR_SPEC_MAX
+    if test["has_limits"]:
+        return _limit_cell(test["llimit"]), _limit_cell(test["hlimit"])
+    return "", ""
+
+
+def _effective_lo_hi(test):
+    """(lo, hi) cache-input limits from the same branch as
+    `_display_limits`: a blank side guards its formula half off, so the
+    cache mirrors it with ``None`` (row_stat_caches' one-sided OR
+    semantics key on exactly these)."""
+    lo, hi = _display_limits(test)
+    return (
+        None if lo == "" else lo,
+        None if hi == "" else hi,
+    )
+
+
 # --------------------------------------------------------------------------
 # per-cell data lookup
 # --------------------------------------------------------------------------
@@ -469,26 +509,86 @@ def _flag_cell(flag):
     return "" if mapped is None else mapped
 
 
+def _pair_cells(summaryTable, test, fid, dut_index):
+    """(die, mirror) cells of ONE (fid, dutIndex) position — the inline
+    per-pair lookup shared by the matrix's `_test_rows`, the DUT Summary
+    column and the shared-context build: FTR rows put the flag cell in
+    the die column, parametric rows the real value (blank for NaN), the
+    mirror always carries the flag, a missing result blanks both."""
+    found = _lookup_value_flag(summaryTable, test["test_tuple"], fid, dut_index)
+    if found is None:
+        return "", ""
+    value, flag = found
+    mirror = _flag_cell(flag)
+    return (_flag_cell(flag) if test["is_ftr"] else _die_cell(value)), mirror
+
+
+def _test_cells(summaryTable, test, pairs, shared_stats=None):
+    """(die_cells, mirror_cells, entry) of ONE test across ``pairs``.
+
+    The shared-context fast path maps each pair through
+    ``shared_stats["pos"]`` into the precomputed entry lists; a pair the
+    table misses (degraded) falls back to the inline `_pair_cells`
+    computation with identical blank semantics. ``entry`` is the shared
+    entry that was used (``None`` without a context or when it misses
+    this test) — callers reuse its caches instead of recomputing."""
+    entry = None
+    pos = None
+    if shared_stats is not None:
+        entry = shared_stats["entries"].get(test["test_tuple"])
+        pos = shared_stats["pos"]
+    die_cells, mirror_cells = [], []
+    for fid, dut_index in pairs:
+        index = pos.get((fid, dut_index)) if pos is not None else None
+        if entry is not None and index is not None:
+            die_cells.append(entry[0][index])
+            mirror_cells.append(entry[1][index])
+        else:
+            die, mirror = _pair_cells(summaryTable, test, fid, dut_index)
+            die_cells.append(die)
+            mirror_cells.append(mirror)
+    return die_cells, mirror_cells, entry
+
+
 # --------------------------------------------------------------------------
 # metadata block
 # --------------------------------------------------------------------------
 
 
-def _metadata_cell(meta, summaryTable, fid, dut_index, file_temperatures=None):
-    name = meta["name"]
+def _dut_meta_info(summaryTable, fid, dut_index, file_temperatures=None):
+    """(info, temperature) of ONE (fid, dutIndex), resolved ONCE (perf
+    overhaul): the dutInfo chain and the Temperature resolution used to run
+    per metadata FIELD (14x per DUT) — both now happen here and every field
+    of the DUT reads the cached pair.
+
+    `info` degrades exactly like the old per-cell lookup (`.get(fid,
+    {}).get(dut_index) or ()` — missing entries become the empty tuple);
+    `temperature` resolves with the same arguments the Temperature row
+    always passed — the Part-ID tag first, the file's recorded MIR value
+    (§7.4 one shared resolver, so the row and the split group never
+    diverge) as the fallback. A missing info carries no tag, so it falls
+    back to the file value too, unchanged."""
     info = summaryTable.get("dutInfo", {}).get(fid, {}).get(dut_index) or ()
+    part_id = info[1] if len(info) > 1 else None
+    temperature = resolve_dut_temperature(
+        part_id if isinstance(part_id, str) else None,
+        file_temperatures.get(fid) if file_temperatures else None,
+    )
+    return info, temperature
+
+
+def _metadata_value(meta, info, temperature):
+    """One metadata field's cell for a DUT whose `(info, temperature)`
+    `_dut_meta_info` already resolved — pure: no summaryTable access, the
+    Temperature branch reads the precomputed value, every other branch
+    reads `info` exactly like the old per-cell resolution (index guards
+    identical)."""
+    name = meta["name"]
 
     def raw(index):
         return info[index] if len(info) > index else None
 
     if name == "Temperature":
-        part_id = raw(1)
-        # one shared resolver (§7.4): the split groups by this same value,
-        # so the row and the grouping can never diverge
-        temperature = resolve_dut_temperature(
-            part_id if isinstance(part_id, str) else None,
-            file_temperatures.get(fid) if file_temperatures else None,
-        )
         return "" if temperature is None else float(temperature)
     if name in ("HW Bin", "SW Bin"):
         # DB shape "Bin N" -> bare int N
@@ -578,12 +678,16 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die, file_tempera
     rows = []
     masked_rows = []
     formula_values = {}
+    # per-DUT precompute (perf overhaul): the dutInfo chain + Temperature
+    # resolution run ONCE per die column, all 14 field rows read the cached
+    # pairs
+    per_dut = [
+        _dut_meta_info(summaryTable, fid, dut_index, file_temperatures)
+        for _global_index, fid, dut_index in chunk_cells
+    ]
     for position, meta in enumerate(METADATA_ROWS):
         excel_row = METADATA_START + position
-        values = [
-            _metadata_cell(meta, summaryTable, fid, dut_index, file_temperatures)
-            for global_index, fid, dut_index in chunk_cells
-        ]
+        values = [_metadata_value(meta, info, temperature) for info, temperature in per_dut]
         prefix = [
             METADATA_TEST_NUM_BASE + position,
             "METADATA",
@@ -627,61 +731,77 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die, file_tempera
 # --------------------------------------------------------------------------
 
 
-def _test_rows(summaryTable, tests, chunk_cells, first_die, last_die, mirror_first, mirror_last):
+def _test_rows(
+    summaryTable,
+    tests,
+    chunk_cells,
+    first_die,
+    last_die,
+    mirror_first,
+    mirror_last,
+    shared_stats=None,
+    shared_caches=False,
+):
+    """The test rows of one die chunk, plus their cached formula results
+    and sparklines.
+
+    `shared_stats` (the DUT-block shared per-test table) supplies the
+    die/mirror cells for EVERY chunk — chunking is placement-only (spec
+    Wave 3.2), cells slice through ``pos`` with the inline fallback for
+    degraded pairs. `shared_caches` (True only for a chunk covering the
+    whole TABLE order — `_build_chunk` sets it via `_is_table_order`,
+    since the six caches and the sparkline gate span the chunk's own die
+    range while the entry's cover the FULL table order) additionally lets
+    those come from the entry; partial chunks — and subset orders like a
+    temperature split's — recompute them chunk-locally inline.
+    shared_stats=None (direct calls) computes everything inline exactly
+    as before."""
     rows = []
     formula_values = {}
     sparklines = []
+    pairs = [(fid, dut_index) for _global_index, fid, dut_index in chunk_cells]
     for offset, test in enumerate(tests):
         row_index = DATA_START + offset
-        die_cells = []
-        mirror_cells = []
-        for _global_index, fid, dut_index in chunk_cells:
-            found = _lookup_value_flag(summaryTable, test["test_tuple"], fid, dut_index)
-            if found is None:
-                die_cells.append("")
-                mirror_cells.append("")
-                continue
-            value, flag = found
-            mirror_cells.append(_flag_cell(flag))
-            if test["is_ftr"]:
-                die_cells.append(_flag_cell(flag))
-            else:
-                die_cells.append(_die_cell(value))
-        if test["is_ftr"]:
-            # third wave: FTR rows always take the limits path with the
-            # synthetic ±0.999999 cells — the limit CF rules and the
-            # limit-variant FAILS formula fire like on parametric rows
-            # (die cell 1 fails high, 0 passes, blank neutral)
-            spec_min, spec_max = FTR_SPEC_MIN, FTR_SPEC_MAX
-            fails = fails_formula_limits(row_index, first_die, last_die)
-        elif test["has_limits"]:
-            spec_min = _limit_cell(test["llimit"])
-            spec_max = _limit_cell(test["hlimit"])
+        die_cells, mirror_cells, entry = _test_cells(summaryTable, test, pairs, shared_stats)
+        if not shared_caches:
+            # partial chunk: the six caches + sparkline gate span THIS
+            # chunk's die range — drop the entry (its caches cover the
+            # whole order) and recompute chunk-locally below
+            entry = None
+        # third wave: FTR rows always take the limits path with the
+        # synthetic ±0.999999 cells — the limit CF rules and the
+        # limit-variant FAILS formula fire like on parametric rows
+        # (die cell 1 fails high, 0 passes, blank neutral). The display
+        # cells and the cache inputs derive from the ONE branch
+        # (_display_limits / _effective_lo_hi).
+        if test["is_ftr"] or test["has_limits"]:
             fails = fails_formula_limits(row_index, first_die, last_die)
         else:
-            spec_min = spec_max = ""
             fails = fails_formula_flags(row_index, mirror_first, mirror_last)
+        spec_min, spec_max = _display_limits(test)
 
         # cached formula results (xlsxwriter migration, spec §7.5): the same
         # values the formulas compute, keyed (absolute row, 1-based col) —
-        # None caches as "" so previews never show a stray 0. The FAILS
-        # cache follows the same branch selection as the formula.
-        lo = spec_min if spec_min != "" else None
-        hi = spec_max if spec_max != "" else None
-        # has_limits is OR semantics: the limits-path SUMPRODUCT guards each
-        # side with (E<>"")/(F<>"") — the cache mirrors that per-side
-        # behavior for one-sided rows; the flag cache applies only when
-        # BOTH sides are missing (the formula switches to the mirror there)
-        if lo is not None or hi is not None:
-            fails_cache = fails_cached_limits_one_sided(die_cells, lo, hi)
+        # None caches as "" so previews never show a stray 0. Inline: ONE
+        # numeric_values pass over the die cells, then row_stat_caches
+        # (sigma/fmean once for Cp+Cpk; the FAILS branch selection lives
+        # inside: one-sided OR semantics when a limit is present, the
+        # flag-mirror count when BOTH sides are missing). The shared entry
+        # supplies the same six values when the chunk spans the whole order.
+        if entry is not None:
+            mn, mx, avg, cp, cpk, fails_cache = entry[2]
+            has_num = entry[3]
         else:
-            fails_cache = fails_cached_flags(mirror_cells)
+            nums = numeric_values(die_cells)
+            lo, hi = _effective_lo_hi(test)
+            mn, mx, avg, cp, cpk, fails_cache = row_stat_caches(nums, lo, hi, mirror_cells)
+            has_num = bool(nums)
         for col, cached in (
-            (7, stat_cached("MIN", die_cells)),
-            (8, stat_cached("MAX", die_cells)),
-            (9, stat_cached("AVERAGE", die_cells)),
-            (10, cp_cached(lo, hi, die_cells)),
-            (11, cpk_cached(lo, hi, die_cells)),
+            (7, mn),
+            (8, mx),
+            (9, avg),
+            (10, cp),
+            (11, cpk),
             (12, fails_cache),
         ):
             if cached is None and col in (7, 8):
@@ -693,8 +813,10 @@ def _test_rows(summaryTable, tests, chunk_cells, first_die, last_die, mirror_fir
         # Trend sparkline per data row with numeric die values (FTR rows
         # spark as columns — the 0=pass encoding would render passes as
         # win/loss "losses"); local unqualified die range, the writer
-        # qualifies it with the sheet name
-        if has_numeric(die_cells):
+        # qualifies it with the sheet name. The gate is the entry's
+        # has-numeric flag (== bool(numeric_values(die_cells))) on the
+        # shared path, the one-pass nums list inline.
+        if has_num:
             sparklines.append(
                 {
                     "row": row_index,
@@ -742,6 +864,19 @@ def _row_groups(tests):
     return groups
 
 
+def _is_table_order(order, pos):
+    """True when ``order`` IS the order the shared table was built from:
+    ``pos`` maps every pair to its exact position and covers nothing else.
+
+    The table's six stat caches span that order only, so a chunk may
+    consume them only under it (the base sheet passes the context order);
+    a temperature split's ``sub_order`` is a strict subset and must keep
+    its chunk-local caches (Task 10)."""
+    return len(pos) == len(order) and all(
+        pos.get(pair) == index for index, pair in enumerate(order)
+    )
+
+
 def _build_chunk(
     summaryTable,
     tests,
@@ -754,6 +889,7 @@ def _build_chunk(
     trend_label,
     chunk_index,
     file_temperatures=None,
+    shared_stats=None,
 ):
     die_count = len(chunk_ids)
     # (global DUT position, fid, dutIndex) per die column of this chunk;
@@ -763,6 +899,19 @@ def _build_chunk(
         global_index = chunk_start + i
         pair = order[global_index] if global_index < len(order) else (None, None)
         chunk_cells.append((global_index, pair[0], pair[1]))
+
+    # chunking is PLACEMENT-only (spec Wave 3.2): every chunk slices the
+    # shared die/mirror cells through pos. The six caches + the sparkline
+    # gate span the chunk's own die range, so ONLY a chunk covering every
+    # ordered DUT from its start (the single-chunk export) may take the
+    # entry's whole-order caches verbatim; partial chunks recompute them
+    # chunk-locally inline (their formula ranges differ). The caches span
+    # the TABLE's order (pos's domain), not merely the order argument — a
+    # temperature split's sub_order is a strict subset of it, so its
+    # single chunk recomputes too (Task 10; _is_table_order refuses).
+    whole_order = chunk_start == 0 and die_count == len(order) and (
+        shared_stats is None or _is_table_order(order, shared_stats["pos"])
+    )
 
     first_die = die_col(0)
     last_die = die_col(die_count - 1) if die_count > 0 else first_die
@@ -785,7 +934,15 @@ def _build_chunk(
         summaryTable, chunk_cells, first_die, last_die, file_temperatures
     )
     rows, formula_values, sparklines = _test_rows(
-        summaryTable, tests, chunk_cells, first_die, last_die, mirror_first, mirror_last
+        summaryTable,
+        tests,
+        chunk_cells,
+        first_die,
+        last_die,
+        mirror_first,
+        mirror_last,
+        shared_stats,
+        whole_order,
     )
     formula_values.update(metadata_formula_values)
     last_data_row = DATA_START + len(rows) - 1 if rows else DATA_START
@@ -930,6 +1087,47 @@ def order_dut_block(worksheets: list, block: list) -> list:
     return without_derived[: base_at + 1] + derived + without_derived[base_at + 1 :]
 
 
+# --------------------------------------------------------------------------
+# DUT-block shared per-test table (perf overhaul finding 4)
+# --------------------------------------------------------------------------
+
+
+def _build_shared_stats(summaryTable, testTuples, order):
+    """The shared per-test table for the DUT block: die/mirror cells and
+    the six stat caches computed ONCE per test over ``order``, consumed
+    by BOTH the Test Summary matrix and the DUT Summary column (finding
+    4 — today both builders independently recompute identical data from
+    the same summaryTable + order).
+
+    Returns ``{"entries", "pos"}``:
+    - ``entries``: test_tuple -> (die_cells, mirror_cells, caches6,
+      has_num) with the cell lists aligned to ``order`` — the blank/
+      mapping semantics are exactly the builders' inline ones
+      (`_pair_cells` is the shared implementation);
+    - ``pos``: (fid, dutIndex) -> index into ``order`` — the dut2ind
+      hoist, resolved once per order position, never per test.
+
+    Consumers map their chunk pairs through ``pos`` (``_test_cells``) and
+    fall back to the inline per-pair computation for a pair the table
+    misses, so a degraded pair renders blanks exactly as today. Callers
+    pass the dict as the builders' ``shared_stats=`` argument."""
+    pos = {pair: index for index, pair in enumerate(order)}
+    entries = {}
+    for test_tuple in testTuples:
+        test = _resolve_test(summaryTable, test_tuple)
+        die_cells = []
+        mirror_cells = []
+        for fid, dut_index in order:
+            die, mirror = _pair_cells(summaryTable, test, fid, dut_index)
+            die_cells.append(die)
+            mirror_cells.append(mirror)
+        nums = numeric_values(die_cells)
+        lo, hi = _effective_lo_hi(test)
+        caches6 = row_stat_caches(nums, lo, hi, mirror_cells)
+        entries[test_tuple] = (die_cells, mirror_cells, caches6, bool(nums))
+    return {"entries": entries, "pos": pos}
+
+
 class TestSummaryMixin(ReportHost):
     """Test Summary worksheet writer (moved verbatim from generator.py)."""
 
@@ -986,8 +1184,13 @@ class TestSummaryMixin(ReportHost):
         instead of producing it.
 
         Sets `_dut_ctx_summary` (the PRUNED summaryTable),
-        `_dut_ctx_order`, `_dut_ctx_dut_ids`, `_dut_ctx_temps`; also
-        fills `_ftr_tests` (FTR pseudo-limit signal, consumed by
+        `_dut_ctx_order`, `_dut_ctx_dut_ids`, `_dut_ctx_temps`, plus the
+        shared per-test table (finding 4): `_dut_ctx_stats` (test_tuple
+        -> (die_cells, mirror_cells, caches6, has_num), aligned to the
+        final order) and `_dut_ctx_pos` ((fid, dutIndex) -> order index)
+        — both writers' builders consume them via ``shared_stats=``
+        instead of recomputing identical per-test data. Also fills
+        `_ftr_tests` (FTR pseudo-limit signal, consumed by
         writeStatistic) and stores `_remeasure_drops` (the §7.2 hand-off
         — an empty set means "ran, nothing to drop"; None means this
         method never ran, the stat-only fallback signal). Emits the
@@ -1050,10 +1253,19 @@ class TestSummaryMixin(ReportHost):
             return
         file_temperatures = file_temperatures_from_file_info(file_info_rows, self.selectedFiles)
 
+        # shared per-test table (finding 4): die/mirror cells + the six
+        # stat caches per test, aligned to the FINAL pruned summaryTable/
+        # order actually rendered — the builders consume it instead of
+        # recomputing identical per-test data (one _resolve_test per
+        # tuple; the per-pair lookups were already paid for here)
+        shared_stats = _build_shared_stats(summaryTable, self.testTuples, order)
+
         self._dut_ctx_summary = summaryTable
         self._dut_ctx_order = order
         self._dut_ctx_dut_ids = dut_ids
         self._dut_ctx_temps = file_temperatures
+        self._dut_ctx_stats = shared_stats["entries"]
+        self._dut_ctx_pos = shared_stats["pos"]
 
     def writeTest_Summary(self):
         """The Test Summary sheet: the die-part matrix (spec-built), the
@@ -1081,6 +1293,11 @@ class TestSummaryMixin(ReportHost):
             # builder (2026-11-10) — no settings-derived float format anymore
             tr=self.tr,
             file_temperatures=file_temperatures,
+            # finding 4: the per-test die/mirror cells and stat caches
+            # were computed ONCE in _prepare_dut_context — consume them
+            # (the temperature splits below pass the same table; their
+            # subset stat caches stay chunk-local, see the split loop)
+            shared_stats={"entries": self._dut_ctx_stats, "pos": self._dut_ctx_pos},
         )
 
         # chunk 0 renders on the existing Test Summary sheet; chunks 1+
@@ -1119,6 +1336,13 @@ class TestSummaryMixin(ReportHost):
                         sheet_name=f"{self.tr('Test Summary')} - T{format_temperature_label(temp)}°C",
                         tr=self.tr,
                         file_temperatures=file_temperatures,
+                        # finding 4: the splits consume the SAME table as
+                        # the base sheet — cells slice through pos (every
+                        # kept pair is in the context order, the groups
+                        # are built FROM it); the whole-order cache gate
+                        # keeps the six caches subset-local (sub_order is
+                        # a strict subset of the table's order)
+                        shared_stats={"entries": self._dut_ctx_stats, "pos": self._dut_ctx_pos},
                     )
                     for spec in split_specs:
                         ws = wb.add_worksheet(spec["name"])
