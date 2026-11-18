@@ -947,7 +947,7 @@ def _pf_from_palette(hex6: str) -> str:
         return ""
     if 100 <= g > r and g >= b:
         return "P"
-    if 100 <= r > g and g < 100:
+    if g < 100 <= r:
         return "F"
     return ""
 
