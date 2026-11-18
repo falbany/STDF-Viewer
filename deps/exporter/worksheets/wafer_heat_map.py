@@ -25,8 +25,10 @@
 Stacked cross-wafer renderer, moved verbatim from ``charts.py``
 (2026-11-18, issue #13: single consumer) — the stacked wafer sheet's
 reading-legend constants, the per-wafer roster and the ONE-sheet stacked
-block writer. The ``WaferHeatMapMixin`` lands with the split (next
-commit); ``charts.py`` keeps the shared wafer-grid machinery.
+block writer, plus the ``WaferHeatMapMixin`` that composes it into
+``ModernReportGenerator`` as a self-gated sheet writer (the split:
+``writeWaferMap`` no longer writes anything stacked). ``charts.py``
+keeps the shared wafer-grid machinery.
 """
 
 import xlsxwriter.utility as xlutil
@@ -47,10 +49,15 @@ from deps.exporter.charts import (
     bin_table_ranges,
     build_bin_donut,
     build_wafer_grid,
+    wafer_sheet_name,
+    wafer_table_name,
     write_bin_table,
     write_kpi_cards,
 )
+from deps.exporter.contract import ReportHost
 from deps.exporter.helpers import sanitize_cell
+from deps.SharedSrc import tab
+from deps.uic_stdExporter import ReportSelection
 
 # issue #5 reading legend (2026-11-13 user ask; 2026-11-14 sbin-uniform
 # layout: ONE line on row 2, the identity slot — the map anchor at F3
@@ -378,3 +385,92 @@ def write_stacked_wafer_block(  # pylint: disable=too-many-locals
                 val_range,
             )
     return next_free
+
+
+class WaferHeatMapMixin(ReportHost):
+    """The stacked all-wafers heat map sheet (issue #13): self-gated on
+    selection AND stacked-tuple presence; appends "Wafer Heat Map" last,
+    after every wafer-dedicated sheet. The roster rides writeWaferMap's
+    payload stash when both are selected (zero extra round-trips) and
+    fetches the missing tuples data-only (no sheets, no ticks) alone."""
+
+    def writeWaferHeatMap(self) -> None:
+        """The "Wafer Heat Map" sheet: the stacked tuple's cross-wafer
+        fail-count heatmap, rendered by write_stacked_wafer_block exactly
+        as writeWaferMap used to (argument-for-argument call, issue #13).
+        Gated on the WaferHeatMap selection AND a stacked tuple
+        (`waferIndex == -1`) actually existing — no wafer data means no
+        sheet, no fetch, no tick. Called by report_core right after
+        writeWaferMap; per-wafer payloads come from its ``_wafer_fetched``
+        stash when it ran, else data-only fetches here."""
+        # gate 1 — the selection (the sheet is NOT pre-created in
+        # report_core's fixed loop; it must never appear unselected)
+        if ReportSelection.WaferHeatMap not in self.selectedContents:
+            return
+        # gate 2 — presence (doc-review call): no stacked tuple in the
+        # database → no sheet, no fetch, no tick
+        stacked_index = next(
+            (i for i, w in enumerate(self.waferTuples) if w[0] == -1), None
+        )
+        if stacked_index is None:
+            return
+        # report_core binds workbook and theme before any write* runs
+        wb = self._wb
+        theme = self._theme
+        assert wb is not None and theme is not None
+        # stacked fetch — no tick here: the tick is the sheet write below
+        stacked = self.waferTuples[stacked_index]
+        stacked_payload = self.waitForDataList(
+            [],
+            self.selectedSites,
+            self.selectedFiles,
+            tab.Wafer,
+            {"testTuples": [stacked], "waferMapData": stacked},
+        )
+        # roster pairs — ride writeWaferMap's stash (both selected: zero
+        # extra round-trips); alone, fetch the missing per-wafer payloads
+        # data-only (no sheets, no ticks). A partial stash is consumed
+        # defensively: only the uncovered real tuples fetch.
+        stash = list(self._wafer_fetched)
+        covered = {index for index, _w, _p in stash}
+        fetched = []
+        for index, wafer in enumerate(self.waferTuples):
+            if self.forceQuit:
+                return
+            if wafer[0] == -1 or index in covered:
+                continue
+            payload = self.waitForDataList(
+                [],
+                self.selectedSites,
+                self.selectedFiles,
+                tab.Wafer,
+                {"testTuples": [wafer], "waferMapData": wafer},
+            )
+            fetched.append((index, wafer, payload))
+        self._wafer_fetched = stash + fetched
+        # per-wafer roster: every payload is now in hand — no new fetch
+        # round-trip for the names-only roster, and the Total DUTs Tested
+        # card sums the per-wafer DUT totals
+        wafer_ids, total_duts = stacked_wafer_ids(
+            [(w[2], p) for _i, w, p in stash + fetched]
+        )
+        taken = {ws.get_name() for ws in wb.worksheets_objs}
+        name = wafer_sheet_name(stacked_index, "Heat Map", taken)
+        taken.add(name)
+        HeatSheet = wb.add_worksheet(name)
+        write_stacked_wafer_block(
+            HeatSheet,
+            theme,
+            stacked_payload["rows"],
+            stacked_payload["map"],
+            1,
+            freeze_panes=True,  # same grid freeze as the sbin sheets
+            wafer_ids=wafer_ids,
+            total_duts=total_duts,
+            fail_table_name=wafer_table_name(stacked_index, "FailMapCount"),
+            wb=wb,  # issue #7: the Fail Map Count table gets its donut
+        )
+        # per-wafer cosmetics (cross-mixin by convention, contract-declared)
+        self._style_wafer_sheet(HeatSheet)
+        self.loopCount += 1
+        self.sendProgress()

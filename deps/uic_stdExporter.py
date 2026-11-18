@@ -1327,12 +1327,26 @@ class stdfExporter(QtWidgets.QDialog):
                 dut_selected=ReportSelection.DUT in selectedContents,
             )
         if ReportSelection.Wafer in selectedContents:
-            totalLoopCnt += len(waferTuples)
+            if getSetting().gen.modern_export:
+                # fork(falbany): the stacked tuple's tick moved to the Wafer
+                # Heat Map denominator below — the modern Wafer Map writes
+                # real tuples + merged groups only (issue #13)
+                totalLoopCnt += sum(1 for w in waferTuples if w[0] != -1)
+            else:
+                totalLoopCnt += len(waferTuples)
             if getSetting().gen.hide_remeasured:
                 # 2026-11-13 wafer merge: one extra (Merged) sheet per
                 # real wafer ID spanning 2+ tuples (one progress tick each)
                 from .exporter.wafer_merge import merged_wafer_groups  # lazy, like the generator import below
                 totalLoopCnt += len(merged_wafer_groups(waferTuples))
+        # fork(falbany): Wafer Heat Map denominator (issue #13) — one sheet,
+        # one tick, only when a stacked tuple exists; classic never counts it
+        if (
+            getSetting().gen.modern_export
+            and ReportSelection.WaferHeatMap in selectedContents
+            and any(w[0] == -1 for w in waferTuples)
+        ):
+            totalLoopCnt += 1
         if ReportSelection.GDR_DTR in selectedContents:
             totalLoopCnt += 1
                     
