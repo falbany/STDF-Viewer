@@ -609,3 +609,105 @@ class TestDutRowFormatHoist:
         )
         assert format_calls <= 4
         assert col_calls <= self.COLUMNS + 5
+
+
+# --------------------------------------------------------------------------
+# DUT-row mirror-tail bulk write (exporter perf task 6)
+# --------------------------------------------------------------------------
+
+
+class TestDutRowTailBulkWrite:
+    """Perf task 6: the spacer+flag-mirror tail of every DUT row
+    (row_values[15+T:] — 1 blank spacer + T mirrors, all ""/flag ints, no
+    num_fmt) bulk-writes through ONE ws.write_row per DUT row under the
+    memo's None Format; the 1+14+T cells with per-column formats stay on
+    the task 4 fast path. Read-back must stay byte-identical."""
+
+    # T=3 spec: the 2 standard tests + the data-less no-limit one — its
+    # mirrors resolve blank, so the bulk segment carries real blanks too
+    THREE_TEST_TUPLES = TEST_TUPLES + [(15, 0, "3_nolimit/x")]
+
+    def counting_loop_render(self, monkeypatch, spec):
+        """Render ONLY the DUT-row loop with counting proxies around
+        writer._write_cell_fast and ws.write_row; return (fast_calls,
+        write_row_calls) — each fast call its 1-based column, each
+        write_row call its (row0, col0, data, fmt) args."""
+        import deps.exporter.writer as writer_module
+        from deps.exporter.writer import _render_dut_summary_dut_rows
+
+        original_fast = writer_module._write_cell_fast
+        fast_calls = []
+
+        def counting_fast(ws_, row, column, value, fmt, cached=None):
+            fast_calls.append(column)
+            return original_fast(ws_, row, column, value, fmt, cached=cached)
+
+        monkeypatch.setattr(writer_module, "_write_cell_fast", counting_fast)
+
+        out = io.BytesIO()
+        wb = xlsxwriter_Workbook(out)
+        ws = wb.add_worksheet("DUT Summary")
+        original_write_row = ws.write_row
+        write_row_calls = []
+
+        def counting_write_row(*args, **kwargs):
+            write_row_calls.append(args)
+            return original_write_row(*args, **kwargs)
+
+        ws.write_row = counting_write_row
+        _render_dut_summary_dut_rows(ws, spec, ModernTheme(wb))
+        wb.close()
+        return fast_calls, write_row_calls
+
+    def test_bulk_tail_cells_read_back_identical(self):
+        # T=3: the spacer (S) + mirrors (T:U:V) of every DUT row read back
+        # exactly the spec's values — flags as ints, "" as blank — and the
+        # hidden state is untouched (mirrors hidden, spacer visible)
+        T = 3
+        spec = build_dut_summary_spec(
+            make_summary(), self.THREE_TEST_TUPLES, ORDER, sheet_name="DUT Summary"
+        )[0]
+        assert len(spec["test_columns"]) == T
+        ws = load_workbook_bytes(rendered(spec))["DUT Summary"]
+        tail0 = 15 + T  # row_values[15+T:] = spacer + mirrors (1-based S..V)
+        tails = []
+        for offset, row_values in enumerate(spec["dut_rows"]):
+            excel_row = DATA_START + offset
+            expected = [None if v == "" else v for v in row_values[tail0:]]
+            actual = [
+                ws.cell(row=excel_row, column=1 + tail0 + k).value for k in range(len(expected))
+            ]
+            assert actual == expected, excel_row
+            tails.append((expected, actual))
+        # the read-back carries both shapes: written flag ints AND blank
+        # mirrors (the NaN DUT / the data-less third test), not only the
+        # all-blank spacer
+        assert any(expected[0] is None for expected, _ in tails)
+        assert any(0 in expected[1:] for expected, _ in tails)
+        assert any(None in expected[1:] for expected, _ in tails)
+        assert col_dim(ws, "T").hidden is True
+        assert col_dim(ws, "U").hidden is True
+        assert col_dim(ws, "V").hidden is True
+        spacer_dim = col_dim(ws, "S")  # no width call covers the spacer
+        assert spacer_dim is None or spacer_dim.hidden is not True
+
+    def test_bulk_write_call_counts(self, monkeypatch):
+        # the 1+14+T per-row cells with per-column formats stay on the fast
+        # path (bound: <= 16+T calls per DUT row, all within the first 15+T
+        # columns) and the tail bulk-writes through exactly ONE ws.write_row
+        # per DUT row starting at 0-based column 15+T; a no-tests spec has
+        # no tail at all — zero write_row calls, the 15 fixed cells per row
+        # alone on the fast path.
+        T = 2
+        spec = built()[0]
+        rows = len(spec["dut_rows"])
+        fast_calls, write_row_calls = self.counting_loop_render(monkeypatch, spec)
+        assert len(fast_calls) <= rows * (16 + T)
+        assert set(fast_calls) <= set(range(1, 15 + T + 1))  # tail stays off the fast path
+        assert len(write_row_calls) == rows
+        assert {call[1] for call in write_row_calls} == {15 + T}
+
+        no_tail = build_dut_summary_spec(make_summary(), [], ORDER, sheet_name="DUT Summary")[0]
+        fast_calls, write_row_calls = self.counting_loop_render(monkeypatch, no_tail)
+        assert write_row_calls == []
+        assert len(fast_calls) == rows * 15

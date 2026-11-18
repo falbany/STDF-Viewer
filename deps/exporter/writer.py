@@ -755,9 +755,10 @@ def _set_dut_summary_column_widths(ws, spec):
 def _render_dut_summary_dut_rows(ws, spec, theme):
     """The DUT rows (first at ``data_start``): body cells throughout —
     DUT # "0", integer metadata columns via the spec's formats, test
-    columns per their FTR/parametric format; the spacer and flag mirrors
-    stay plain body (no num_fmt — Task 6 bulk-writes the mirrors). No
-    group banding: DUT rows carry no workflow groups.
+    columns per their FTR/parametric format; the spacer+flag-mirror tail
+    bulk-writes through one ws.write_row per DUT row (uniform ""/flag
+    ints, no num_fmt). No group banding: DUT rows carry no workflow
+    groups.
 
     The per-column num_fmt list is precomputed ONCE per sheet: the spec's
     letter-keyed format dicts placed at their 1-based columns (unknown
@@ -768,7 +769,13 @@ def _render_dut_summary_dut_rows(ws, spec, theme):
     DUT cell — so the per-cell hot path is a list index, a memo lookup
     and _write_cell_fast: no per-cell xl_col_to_name, no per-cell theme
     composition, nothing reaches the autofit ledger (the sheet pins its
-    widths)."""
+    widths). The tail (row_values[15+T:]: 1 blank spacer + T flag mirrors,
+    0-based start column 15+T) is uniform — "" and flag ints, never a
+    formula or a per-column num_fmt — so it writes through ONE ws.write_row
+    per DUT row under the memo's None Format; write_row's plain dispatch
+    blanks "" and numbers the flags exactly like the fast path (the values
+    still pass through sanitize_cell). Rows with no tail (no tests /
+    shorter layouts) have an empty slice and keep the pure per-cell path."""
     data_start = spec["data_start"]
     dut_rows = spec["dut_rows"]
     expected_columns = max(map(len, dut_rows), default=0)
@@ -785,9 +792,14 @@ def _render_dut_summary_dut_rows(ws, spec, theme):
     if expected_columns:
         column_formats[1] = "0"  # the DUT # column
     fmt_cache: dict = {}
+    # the tail's body/center/border Format IS the memo's None entry, seeded
+    # once per render so the bulk write and any None-num_fmt column share it
+    body_fmt = theme.cell_format(font="body", align="center", border=True, fill_hex=None, num_fmt=None)
+    fmt_cache[None] = body_fmt
+    tail_col0 = 1 + spec["metadata_column_count"] + len(spec.get("test_columns") or [])
     for offset, row_values in enumerate(dut_rows):
         row = data_start + offset
-        for column, value in enumerate(row_values, start=1):
+        for column, value in zip(range(1, tail_col0 + 1), row_values, strict=False):
             num_fmt = column_formats[column]
             fmt = fmt_cache.get(num_fmt)
             if fmt is None:
@@ -796,6 +808,9 @@ def _render_dut_summary_dut_rows(ws, spec, theme):
                 )
                 fmt_cache[num_fmt] = fmt
             _write_cell_fast(ws, row, column, value, fmt)
+        tail = row_values[tail_col0:]
+        if tail:
+            ws.write_row(row - 1, tail_col0, [sanitize_cell(value) for value in tail], body_fmt)
 
 
 def render_dut_summary_sheet(ws, spec: dict, theme) -> None:
