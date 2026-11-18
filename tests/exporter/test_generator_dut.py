@@ -2079,3 +2079,26 @@ class TestDutBlockSelectionCombos:
         assert gen._remeasure_drops is not None
         assert gen._dut_summary_fetch_count == 1
         assert gen.loopCount == gen.totalLoopCnt
+
+
+class TestDutContextSharedStats:
+    """Task 9 (finding 4): _prepare_dut_context builds the shared per-test
+    table (`_dut_ctx_stats`/`_dut_ctx_pos`) alongside the rest of the
+    context; the writers pass it to their builders as ``shared_stats``.
+    The builders' spec identity is pinned by the equality tests in
+    test_test_summary.py::TestSharedStatsContext — here the wiring is."""
+
+    def test_shared_table_built_with_context(self, tmp_path, qapp):
+        gen, _, _, closed, errors = build_generated(tmp_path, qapp)
+        assert closed == [True] and errors == []
+        test_tuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
+        assert gen._dut_ctx_pos == {(1, 0): 0, (1, 1): 1, (1, 2): 2}
+        assert set(gen._dut_ctx_stats) == set(test_tuples)
+        # parametric row: real die cells with the NaN DUT blank; FTR row:
+        # the flag cells (0/1) land in the die column
+        assert gen._dut_ctx_stats[test_tuples[0]][0] == [1.0, 1.2, ""]
+        assert gen._dut_ctx_stats[test_tuples[1]][0] == [0, 1, 0]
+        for die, mirror, caches, has_num in gen._dut_ctx_stats.values():
+            assert len(die) == len(mirror) == 3
+            assert len(caches) == 6
+            assert isinstance(has_num, bool)

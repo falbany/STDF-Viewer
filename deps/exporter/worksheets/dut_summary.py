@@ -52,17 +52,14 @@ from deps.exporter.helpers import (
 )
 from deps.exporter.worksheets.test_summary import (
     BASE_HEADERS,
-    FTR_SPEC_MAX,
-    FTR_SPEC_MIN,
     METADATA_ROWS,
     SCIENTIFIC_FORMAT,
-    _die_cell,
-    _flag_cell,
+    _display_limits,
+    _effective_lo_hi,
     _is_masked,
-    _limit_cell,
-    _lookup_value_flag,
     _metadata_cell,
     _resolve_test,
+    _test_cells,
 )
 from deps.exporter.writer import render_dut_summary_sheet
 from deps.uic_stdExporter import ReportSelection
@@ -117,28 +114,16 @@ def _metadata_col(index: int) -> str:
     return get_column_letter(2 + index)
 
 
-def _dut_cells_of_test(summaryTable, test, order):
-    """(die cells, mirror cells) of ONE test across every DUT of ``order`` —
-    the column the attribute block's formulas run over.
-
-    Same branch logic as test_summary._test_rows: FTR rows put the flag cell
-    in the die column; parametric rows put the real value (blank for NaN);
-    the mirror always carries the flag; a missing result blanks both."""
-    die_cells, mirror_cells = [], []
-    for fid, dut_index in order:
-        found = _lookup_value_flag(summaryTable, test["test_tuple"], fid, dut_index)
-        if found is None:
-            die_cells.append("")
-            mirror_cells.append("")
-            continue
-        value, flag = found
-        mirror_cells.append(_flag_cell(flag))
-        die_cells.append(_flag_cell(flag) if test["is_ftr"] else _die_cell(value))
-    return die_cells, mirror_cells
-
-
-def _test_column(summaryTable, test, offset, order, last_data_row, flag_col_offset):
+def _test_column(
+    summaryTable, test, offset, order, last_data_row, flag_col_offset, shared_stats=None
+):
     """One test column's spec pieces.
+
+    `shared_stats` (the DUT-block shared per-test table) supplies the
+    die/mirror cells and the six stat caches instead of recomputing them;
+    None (direct calls) computes everything inline. The column always
+    spans the FULL order (DUTs never chunk), so the shared entry's caches
+    are valid for every chunk here.
 
     Returns ``(die_cells, mirror_cells, static_cells, formula_cells,
     cache_entries, number_format)`` — the attribute block's 12 cells (6
@@ -148,17 +133,12 @@ def _test_column(summaryTable, test, offset, order, last_data_row, flag_col_offs
     faithful 0)."""
     col = test_col(offset)
     col1 = FIRST_TEST_COL_INDEX + offset  # 1-based
-    die_cells, mirror_cells = _dut_cells_of_test(summaryTable, test, order)
+    die_cells, mirror_cells, entry = _test_cells(summaryTable, test, order, shared_stats)
 
     # third wave branch logic (test_summary._test_rows): FTR rows always
-    # take the limits path with the synthetic ±0.999999 window
-    if test["is_ftr"]:
-        spec_min, spec_max = FTR_SPEC_MIN, FTR_SPEC_MAX
-    elif test["has_limits"]:
-        spec_min = _limit_cell(test["llimit"])
-        spec_max = _limit_cell(test["hlimit"])
-    else:
-        spec_min = spec_max = ""
+    # take the limits path with the synthetic ±0.999999 window; the
+    # display cells come from the ONE branch (_display_limits, mirrored
+    # by _effective_lo_hi for the cache inputs)
     if test["is_ftr"] or test["has_limits"]:
         fails = fails_formula_limits_col(col, DATA_START, last_data_row, SPEC_MIN_ROW, SPEC_MAX_ROW)
     else:
@@ -168,6 +148,7 @@ def _test_column(summaryTable, test, offset, order, last_data_row, flag_col_offs
         # every test's flags)
         mirror = test_col(flag_col_offset + offset)
         fails = fails_formula_flags_col(mirror, mirror, DATA_START, last_data_row)
+    spec_min, spec_max = _display_limits(test)
 
     static = [
         test["num"],
@@ -187,17 +168,20 @@ def _test_column(summaryTable, test, offset, order, last_data_row, flag_col_offs
     ]
 
     # cached formula results keyed (1-based row, 1-based col) — the same
-    # gating as test_summary._test_rows: ONE numeric_values pass over the
-    # die cells, then row_stat_caches (sigma/fmean once for Cp+Cpk; the
-    # FAILS branch selection lives inside: one-sided OR semantics when a
-    # limit is present, the flag-mirror count when BOTH sides are
-    # missing). None caches "" so previews never show a stray 0, except
-    # MIN/MAX cache the faithful 0 (their guarded formulas compute 0 on
-    # an empty range, never the error branch)
-    lo = spec_min if spec_min != "" else None
-    hi = spec_max if spec_max != "" else None
-    nums = numeric_values(die_cells)
-    mn, mx, avg, cp, cpk, fails_cache = row_stat_caches(nums, lo, hi, mirror_cells)
+    # gating as test_summary._test_rows: inline, ONE numeric_values pass
+    # over the die cells then row_stat_caches (sigma/fmean once for
+    # Cp+Cpk; the FAILS branch selection lives inside: one-sided OR
+    # semantics when a limit is present, the flag-mirror count when BOTH
+    # sides are missing); the shared entry supplies the same six values.
+    # None caches "" so previews never show a stray 0, except MIN/MAX
+    # cache the faithful 0 (their guarded formulas compute 0 on an empty
+    # range, never the error branch)
+    if entry is not None:
+        mn, mx, avg, cp, cpk, fails_cache = entry[2]
+    else:
+        nums = numeric_values(die_cells)
+        lo, hi = _effective_lo_hi(test)
+        mn, mx, avg, cp, cpk, fails_cache = row_stat_caches(nums, lo, hi, mirror_cells)
     cache_rows = (
         (MIN_ROW, mn),
         (MAX_ROW, mx),
@@ -222,6 +206,8 @@ def build_dut_summary_spec(
     sheet_name,
     tr=lambda s: s,
     file_temperatures=None,
+    *,
+    shared_stats=None,
 ):
     """Build one spec dict per test chunk of the DUT Summary sheet.
 
@@ -233,6 +219,13 @@ def build_dut_summary_spec(
     (the 16,384-column cap flips axis vs. the matrix) — overflow specs carry
     the same DUT rows / frozen columns with the next tests, and every chunk
     restarts at column P.
+
+    `shared_stats` ({"entries", "pos"}, the DUT-block shared per-test
+    table from test_summary._build_shared_stats) supplies the per-test
+    die/mirror cells and stat caches instead of recomputing them; None
+    (direct calls) computes everything inline. Every test column spans
+    the full unchunked DUT axis, so the shared caches are valid for
+    every chunk.
     """
     tests = [_resolve_test(summaryTable, test_tuple) for test_tuple in testTuples]
     chunks = split_dut_chunks(tests, TEST_CHUNK_CAP)
@@ -265,12 +258,24 @@ def build_dut_summary_spec(
             sheet_name=sheet_name,
             tr=tr,
             chunk_index=chunk_index,
+            shared_stats=shared_stats,
         )
         for chunk_index, chunk_tests in enumerate(chunks)
     ]
 
 
-def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metadata_formats, sheet_name, tr, chunk_index):
+def _build_chunk(
+    summaryTable,
+    tests,
+    order,
+    meta_columns,
+    masked_columns,
+    metadata_formats,
+    sheet_name,
+    tr,
+    chunk_index,
+    shared_stats=None,
+):
     dut_count = len(order)
     test_count = len(tests)
     first_test = test_col(0)
@@ -293,7 +298,7 @@ def _build_chunk(summaryTable, tests, order, meta_columns, masked_columns, metad
 
     for offset, test in enumerate(tests):
         die_cells, mirror_cells, static, formulas, cache_entries, number_format = _test_column(
-            summaryTable, test, offset, order, last_data_row, flag_col_offset
+            summaryTable, test, offset, order, last_data_row, flag_col_offset, shared_stats
         )
         per_test_die.append(die_cells)
         per_test_mirror.append(mirror_cells)
@@ -470,6 +475,9 @@ class DUTSummaryMixin(ReportHost):
             sheet_name=self.tr("DUT Summary"),
             tr=self.tr,
             file_temperatures=self._dut_ctx_temps,
+            # finding 4: the per-test die/mirror cells and stat caches
+            # were computed ONCE in _prepare_dut_context — consume them
+            shared_stats={"entries": self._dut_ctx_stats, "pos": self._dut_ctx_pos},
         )
         for chunk_index, spec in enumerate(specs):
             ws = DutSheet if chunk_index == 0 else wb.add_worksheet(spec["name"])

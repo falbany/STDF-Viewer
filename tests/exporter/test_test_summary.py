@@ -14,10 +14,12 @@ from deps.exporter.helpers import (
     resolve_dut_temperature,
     sanitize_cell,
 )
+from deps.exporter.worksheets.dut_summary import build_dut_summary_spec
 from deps.exporter.worksheets.test_summary import (
     FTR_SPEC_MAX,
     FTR_SPEC_MIN,
     METADATA_ROWS,
+    _build_shared_stats,
     build_test_summary_spec,
     group_order_by_temperature,
 )
@@ -1584,3 +1586,160 @@ class TestGroupOrderByTemperature:
         groups = group_order_by_temperature([(1, 0), (1, 1), (1, 2)], info, {})
         assert groups[25.0] == [(1, 0), (1, 1)]
         assert groups[-5.0] == [(1, 2)]
+
+
+# --------------------------------------------------------------------------
+# shared per-test table (perf overhaul finding 4, Task 9)
+# --------------------------------------------------------------------------
+
+
+def shared_stats_tests():
+    """Fixture tests: both-limits, one-sided, NaN-heavy no-limits, FTR and
+    a test fid 2 lacks entirely (the blank-pair branch)."""
+    return [
+        # both limits (fid 2's 4-value list covers its DUT indexes 0..3,
+        # including the order-absent pair (2, 3))
+        dict(
+            name="0_TXCC/VCCC_ASIC",
+            num=10,
+            unit="V",
+            llimit=0.5,
+            hlimit=1.5,
+            rec=REC.PTR,
+            data={1: ([1.0, 1.2], [0, 0]), 2: ([0.4, 1.6, 1.0, 2.0], [0, 0, 0, 0])},
+        ),
+        # one-sided: LL only, HL NaN
+        dict(
+            name="1_RX/Margin",
+            num=11,
+            unit="dB",
+            llimit=0.25,
+            hlimit=np.nan,
+            rec=REC.PTR,
+            data={1: ([0.1, 0.3], [0, 0]), 2: ([np.nan, 0.9, 0.2, 0.5], [0, 0, 0, 0])},
+        ),
+        # NaN-heavy, no limits (flag-mirror FAILS branch)
+        dict(
+            name="2_NAN/Heavy",
+            num=13,
+            unit="V",
+            llimit=np.nan,
+            hlimit=np.nan,
+            rec=REC.PTR,
+            data={1: ([np.nan, np.nan], [0, 0x80]), 2: ([np.nan, np.nan, 3.0, np.nan], [0x80, 0, 0, 0])},
+        ),
+        # FTR (die cells from the flag list)
+        dict(
+            name="3_Func/scanchain",
+            num=14,
+            unit="",
+            llimit=np.nan,
+            hlimit=np.nan,
+            rec=REC.FTR,
+            vect_nam="PAT_TOP",
+            data={1: ([0.0, 1.0], [0, 0x80]), 2: ([1.0, 0.0, 0.0, 1.0], [0x80, 0, 0, 0x80])},
+        ),
+        # one fid lacking a test: fid 2 never carried it -> blank pairs there
+        dict(
+            name="4_ONLY_FILE1",
+            num=15,
+            unit="A",
+            llimit=-1.0,
+            hlimit=1.0,
+            rec=REC.PTR,
+            data={1: ([0.5, -0.5], [0, 0])},
+        ),
+    ]
+
+
+def shared_stats_duts():
+    """Two files; fid 2 also carries dutIndex 3, which the display order
+    deliberately OMITS (the order-absent pair pin)."""
+    return [
+        (1, 0, make_dut_info(fid=1, part_id="SN541_T25C")),
+        (1, 1, make_dut_info(fid=1, part_id="SN542_T85C")),
+        (2, 0, make_dut_info(fid=2, part_id="SN601_T25C")),
+        (2, 1, make_dut_info(fid=2, part_id="SN602_T25C")),
+        (2, 2, make_dut_info(fid=2, part_id="SN603_T25C")),
+        (2, 3, make_dut_info(fid=2, part_id="SN604_T25C")),
+    ]
+
+
+SHARED_ORDER = [(1, 0), (1, 1), (2, 0), (2, 1), (2, 2)]  # (2, 3) stays out
+SHARED_DUT_IDS = ["SN541_T25C", "SN542_T85C", "SN601_T25C", "SN602_T25C", "SN603_T25C"]
+
+
+class TestSharedStatsContext:
+    """The shared per-test table (`_build_shared_stats`, consumed through
+    ``shared_stats=``) must build specs deep-equal to the inline
+    computation — both builders, fixture covering the branch zoo."""
+
+    @staticmethod
+    def _fixture():
+        tests = shared_stats_tests()
+        summary = make_summary(tests, shared_stats_duts())
+        test_tuples = [(t["num"], 0, t["name"]) for t in tests]
+        return summary, test_tuples
+
+    def test_shared_table_shape(self):
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        assert shared["pos"] == {pair: i for i, pair in enumerate(SHARED_ORDER)}
+        entries = shared["entries"]
+        assert set(entries) == set(test_tuples)
+        for die, mirror, caches, has_num in entries.values():
+            assert len(die) == len(mirror) == len(SHARED_ORDER)
+            assert len(caches) == 6
+            assert isinstance(has_num, bool)
+        # the fid-2-lacking test: fid 1's positions carry its values, fid
+        # 2's positions are blank pairs
+        only1 = entries[(15, 0, "4_ONLY_FILE1")]
+        assert only1[0] == [0.5, -0.5, "", "", ""]
+        assert only1[1] == [0, 0, "", "", ""]
+        assert only1[3] is True
+
+    def test_test_summary_shared_spec_equality(self):
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        inline = build_test_summary_spec(
+            summary, test_tuples, SHARED_ORDER, SHARED_DUT_IDS, "Test Summary"
+        )
+        via_shared = build_test_summary_spec(
+            summary,
+            test_tuples,
+            SHARED_ORDER,
+            SHARED_DUT_IDS,
+            "Test Summary",
+            shared_stats=shared,
+        )
+        assert via_shared == inline
+
+    def test_dut_summary_shared_spec_equality(self):
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        inline = build_dut_summary_spec(summary, test_tuples, SHARED_ORDER, "DUT Summary")
+        via_shared = build_dut_summary_spec(
+            summary, test_tuples, SHARED_ORDER, "DUT Summary", shared_stats=shared
+        )
+        assert via_shared == inline
+
+    def test_multi_chunk_shared_spec_equality(self):
+        # die-chunk overflow: the shared caches are computed over the WHOLE
+        # order, so a chunk smaller than the order must recompute its own
+        # slice inline (chunk-local stat ranges + sparkline gate) — the
+        # specs stay identical to the inline build either way
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        inline = build_test_summary_spec(
+            summary, test_tuples, SHARED_ORDER, SHARED_DUT_IDS, "Test Summary", die_cap=2
+        )
+        via_shared = build_test_summary_spec(
+            summary,
+            test_tuples,
+            SHARED_ORDER,
+            SHARED_DUT_IDS,
+            "Test Summary",
+            die_cap=2,
+            shared_stats=shared,
+        )
+        assert via_shared == inline
