@@ -19,7 +19,9 @@ either view can be exported alone.
 - New `WaferHeatMapMixin` (`worksheets/wafer_heat_map.py`) owning the
   stacked tuple end to end: fetch, sheet write, cosmetics.
 - New `ReportSelection.WaferHeatMap = 11` + `WaferHeatMap_cb` checkbox
-  (grid slot 2,3, label **"Wafer Heat Map"**), persisted setting
+  (grid slot **2,1** — 2026-11-18 user ruling: directly below the Wafer
+  Map checkbox; the hidden `Correlation_cb` swapped to the freed 2,3 —
+  original slot was 2,3, label **"Wafer Heat Map"**), persisted setting
   `gen.wafer_heat_map` (default **True** — preserves today's output
   shape), modern-only enable via `_sync_option_checkboxes`, site-page
   routing, `start()` progress accounting.
