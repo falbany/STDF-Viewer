@@ -851,6 +851,24 @@ class TestWaferHeatMap:
                 assert wb.sheetnames[-1] == "Wafer Heat Map"
                 assert gen.loopCount == gen.totalLoopCnt
 
+    def test_wafer_named_heat_map_collides(self, tmp_path, qapp, monkeypatch):
+        # Review Focus 1: a real wafer literally named "Heat Map" must not
+        # collide with the heat sheet — the real wafer's sheet is written
+        # first and takes the plain name, wafer_sheet_name dedupes the
+        # heat sheet (_2), still last
+        tuples = [(-1, -1, "Stacked Wafer Map"), (0, 0, "Heat Map")]
+        payloads = {
+            (-1, -1, "Stacked Wafer Map"): stacked_payload({1: [(1, 1)]}),
+            (0, 0, "Heat Map"): wafer_payload({1: [(0, 0)]}),
+        }
+        gen, reportPath = build_wafer_report(
+            tmp_path, qapp, monkeypatch, tuples, payloads,
+            {0: (1, "2026-01-01", "")}, hide_remeasured=False, heat_selected=True,
+        )
+        wb = load_workbook(reportPath)
+        assert wb.sheetnames == ["Wafer Heat Map", "Wafer Heat Map_2"]
+        assert gen.loopCount == gen.totalLoopCnt == 2
+
 
 class TestWaferSheetDonuts:
     """Issue #7 plumbing: every wafer-dedicated sheet ends with its donut

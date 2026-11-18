@@ -115,8 +115,7 @@ class WaferMapMixin(ReportHost):
         # one sheet per wafer is added — they land at the workbook end,
         # which is exactly the "Wafer Map" tab position of the classic
         # creation order
-        if base_sheet is not None:
-            wb.worksheets_objs = [ws for ws in wb.worksheets_objs if ws is not base_sheet]
+        wb.worksheets_objs = [ws for ws in wb.worksheets_objs if ws is not base_sheet]
         taken = {ws.get_name() for ws in wb.worksheets_objs}
         row = self._row.get(key, 0)
         # merged groups only exist when the filter is ON (2026-11-13

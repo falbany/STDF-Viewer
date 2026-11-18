@@ -447,16 +447,16 @@ class WaferHeatMapMixin(ReportHost):
                 {"testTuples": [wafer], "waferMapData": wafer},
             )
             fetched.append((index, wafer, payload))
-        self._wafer_fetched = stash + fetched
+        pairs_all = stash + fetched
+        self._wafer_fetched = pairs_all
         # per-wafer roster: every payload is now in hand — no new fetch
         # round-trip for the names-only roster, and the Total DUTs Tested
         # card sums the per-wafer DUT totals
         wafer_ids, total_duts = stacked_wafer_ids(
-            [(w[2], p) for _i, w, p in stash + fetched]
+            [(w[2], p) for _i, w, p in pairs_all]
         )
         taken = {ws.get_name() for ws in wb.worksheets_objs}
         name = wafer_sheet_name(stacked_index, "Heat Map", taken)
-        taken.add(name)
         HeatSheet = wb.add_worksheet(name)
         write_stacked_wafer_block(
             HeatSheet,
