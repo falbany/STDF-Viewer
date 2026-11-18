@@ -644,6 +644,174 @@ class TestMetadataBlock:
         assert 15 not in spec["masked_rows"]  # DUT Flag (never)
 
 
+class TestMetadataPerDutIdentity:
+    """Equality pin for the per-DUT metadata precompute (perf task 11):
+    resolving the dutInfo chain + Temperature once per (fid, dutIndex) and
+    deriving all 14 values from that cached pair must render EXACTLY what
+    the old per-(field, DUT) `_metadata_cell` resolution rendered. The
+    expected literals below were captured from the pre-change behavior on
+    this fixture, which stacks every semantics trap: tagged IDs, untagged
+    IDs (the MIR `file_temperatures` fallback, per file), a MISSING
+    dutInfo entry (temperature still falls back to the file value — the
+    resolver runs with part_id None), a truncated info tuple (index guards
+    degrade the later fields to blanks while the Part-ID tag still
+    parses), and a tag that beats its file's recorded value."""
+
+    ORDER = [(1, 0), (1, 1), (1, 2), (2, 0), (2, 1)]
+    DUT_IDS = ["SN541_T25C", "SN542", "SN543_T85C", "SN544", "SN545_T25C"]
+    FILE_TEMPERATURES = {1: 85.0, 2: -40.0}
+
+    EXPECTED_METADATA_ROWS = [
+        [
+            10000, "METADATA", "File ID", "INT", "-", "-",
+            '=IFERROR(MIN(M2:Q2),"")', '=IFERROR(MAX(M2:Q2),"")', "-", "-", "-", "-",
+            1, 1, "", 2, 2,
+        ],
+        [
+            10001, "METADATA", "Part ID", "TEXT", "-", "-",
+            "-", "-", "-", "-", "-", "-",
+            "SN541_T25C", "SN542", "", "SN544", "SN545_T25C",
+        ],
+        [
+            10002, "METADATA", "Part TXT", "TEXT", "-", "-",
+            "-", "-", "-", "-", "-", "-", "", "", "", "", "",
+        ],
+        [
+            10003, "METADATA", "Temperature", "CELSIUS", "-", "-",
+            '=IFERROR(MIN(M5:Q5),"")', '=IFERROR(MAX(M5:Q5),"")',
+            '=IFERROR(AVERAGE(M5:Q5),"")', "-", "-", "-",
+            25.0, 85.0, 85.0, -40.0, 25.0,
+        ],
+        [
+            10004, "METADATA", "HW Bin", "BIN", "-", "-",
+            '=IFERROR(MIN(M6:Q6),"")', '=IFERROR(MAX(M6:Q6),"")', "-", "-", "-", "-",
+            1, 1, "", 1, "",
+        ],
+        [
+            10005, "METADATA", "SW Bin", "BIN", "-", "-",
+            '=IFERROR(MIN(M7:Q7),"")', '=IFERROR(MAX(M7:Q7),"")', "-", "-", "-", "-",
+            2, 2, "", 2, "",
+        ],
+        [
+            10006, "METADATA", "Wafer", "INT", "-", "-",
+            '=IFERROR(MIN(M8:Q8),"")', '=IFERROR(MAX(M8:Q8),"")', "-", "-", "-", "-",
+            "", "", "", "", "",
+        ],
+        [
+            10007, "METADATA", "X", "INT", "-", "-",
+            '=IFERROR(MIN(M9:Q9),"")', '=IFERROR(MAX(M9:Q9),"")', "-", "-", "-", "-",
+            3, 3, "", 3, "",
+        ],
+        [
+            10008, "METADATA", "Y", "INT", "-", "-",
+            '=IFERROR(MIN(M10:Q10),"")', '=IFERROR(MAX(M10:Q10),"")', "-", "-", "-", "-",
+            -5, -5, "", -5, "",
+        ],
+        [
+            10009, "METADATA", "Head", "INT", "-", "-",
+            '=IFERROR(MIN(M11:Q11),"")', '=IFERROR(MAX(M11:Q11),"")', "-", "-", "-", "-",
+            1, 1, "", 1, "",
+        ],
+        [
+            10010, "METADATA", "Site", "INT", "-", "-",
+            '=IFERROR(MIN(M12:Q12),"")', '=IFERROR(MAX(M12:Q12),"")', "-", "-", "-", "-",
+            1, 1, "", 1, "",
+        ],
+        [
+            10011, "METADATA", "Tests Executed", "INT", "-", "-",
+            '=IFERROR(MIN(M13:Q13),"")', '=IFERROR(MAX(M13:Q13),"")', "-", "-", "-", "-",
+            42, 42, "", 42, "",
+        ],
+        [
+            10012, "METADATA", "Test Time", "ms", "-", "-",
+            '=IFERROR(MIN(M14:Q14),"")', '=IFERROR(MAX(M14:Q14),"")',
+            '=IFERROR(AVERAGE(M14:Q14),"")', '=IFERROR(STDEV(M14:Q14),"")', "-", "-",
+            123, 123, "", 123, "",
+        ],
+        [
+            10013, "METADATA", "DUT Flag", "TEXT", "-", "-",
+            "-", "-", "-", "-", "-", "-",
+            "Passed", "Passed", "", "Passed", "",
+        ],
+    ]
+    EXPECTED_MASKED_ROWS = [8, 9, 10, 11, 12, 14]
+    EXPECTED_SECONDARY_HEADER = BASE_HEADERS + ["SN541", "SN542", "SN543", "SN544", "SN545", "", "Trend"]
+    EXPECTED_DUT_META_COLUMNS = [
+        [1, "SN541_T25C", "", 25.0, 1, 2, "", 3, -5, 1, 1, 42, 123, "Passed"],
+        [1, "SN542", "", 85.0, 1, 2, "", 3, -5, 1, 1, 42, 123, "Passed"],
+        ["", "", "", 85.0, "", "", "", "", "", "", "", "", "", ""],
+        [2, "SN544", "", -40.0, 1, 2, "", 3, -5, 1, 1, 42, 123, "Passed"],
+        [2, "SN545_T25C", "", 25.0, "", "", "", "", "", "", "", "", "", ""],
+    ]
+    EXPECTED_MASKED_COLUMNS = [6, 7, 8, 9, 10, 12]
+
+    @staticmethod
+    def _summary():
+        duts = [
+            (1, 0, make_dut_info(fid=1, part_id="SN541_T25C")),  # tagged
+            (1, 1, make_dut_info(fid=1, part_id="SN542")),  # untagged -> file 1's MIR value
+            (
+                1,
+                2,
+                make_dut_info(
+                    fid=1,
+                    part_id="SN543_T85C",
+                    part_txt="txt3",
+                    head_site="Head 2 - Site 3",
+                    tests_executed=7,
+                    test_time="250 ms",
+                    hw_bin="Bin 3",
+                    sw_bin="Bin 4",
+                    wafer="W9",
+                    xy=(7, 8),
+                    dut_flag="Failed",
+                ),
+            ),
+            (2, 0, make_dut_info(fid=2, part_id="SN544")),  # untagged -> file 2's MIR value
+            (2, 1, make_dut_info(fid=2, part_id="SN545_T25C")),  # tag beats file 2's value
+        ]
+        summary = make_summary(base_tests(), duts)
+        # (1, 2): the dutInfo entry is missing entirely; (2, 1): truncated
+        # to indices 0..1 (the order/ids lists keep the full tuples)
+        del summary["dutInfo"][1][2]
+        summary["dutInfo"][2][1] = (2, "SN545_T25C")
+        return summary
+
+    def test_matrix_metadata_rows_identical(self):
+        spec = build_test_summary_spec(
+            self._summary(),
+            [(t["num"], 0, t["name"]) for t in base_tests()],
+            self.ORDER,
+            self.DUT_IDS,
+            "Test Summary",
+            file_temperatures=self.FILE_TEMPERATURES,
+        )[0]
+        assert spec["metadata_rows"] == self.EXPECTED_METADATA_ROWS
+        assert spec["masked_rows"] == self.EXPECTED_MASKED_ROWS
+
+    def test_matrix_secondary_header_identical(self):
+        spec = build_test_summary_spec(
+            self._summary(),
+            [(t["num"], 0, t["name"]) for t in base_tests()],
+            self.ORDER,
+            self.DUT_IDS,
+            "Test Summary",
+            file_temperatures=self.FILE_TEMPERATURES,
+        )[0]
+        assert spec["secondary_header"] == self.EXPECTED_SECONDARY_HEADER
+
+    def test_dut_summary_metadata_columns_identical(self):
+        spec = build_dut_summary_spec(
+            self._summary(),
+            [(t["num"], 0, t["name"]) for t in base_tests()],
+            self.ORDER,
+            sheet_name="DUT Summary",
+            file_temperatures=self.FILE_TEMPERATURES,
+        )[0]
+        assert [row[1:15] for row in spec["dut_rows"]] == self.EXPECTED_DUT_META_COLUMNS
+        assert spec["masked_columns"] == self.EXPECTED_MASKED_COLUMNS
+
+
 # --------------------------------------------------------------------------
 # Test rows: limits / no-limit mirror / FTR
 # --------------------------------------------------------------------------

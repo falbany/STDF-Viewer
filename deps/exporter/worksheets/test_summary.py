@@ -555,21 +555,40 @@ def _test_cells(summaryTable, test, pairs, shared_stats=None):
 # --------------------------------------------------------------------------
 
 
-def _metadata_cell(meta, summaryTable, fid, dut_index, file_temperatures=None):
-    name = meta["name"]
+def _dut_meta_info(summaryTable, fid, dut_index, file_temperatures=None):
+    """(info, temperature) of ONE (fid, dutIndex), resolved ONCE (perf
+    overhaul): the dutInfo chain and the Temperature resolution used to run
+    per metadata FIELD (14x per DUT) — both now happen here and every field
+    of the DUT reads the cached pair.
+
+    `info` degrades exactly like the old per-cell lookup (`.get(fid,
+    {}).get(dut_index) or ()` — missing entries become the empty tuple);
+    `temperature` resolves with the same arguments the Temperature row
+    always passed — the Part-ID tag first, the file's recorded MIR value
+    (§7.4 one shared resolver, so the row and the split group never
+    diverge) as the fallback. A missing info carries no tag, so it falls
+    back to the file value too, unchanged."""
     info = summaryTable.get("dutInfo", {}).get(fid, {}).get(dut_index) or ()
+    part_id = info[1] if len(info) > 1 else None
+    temperature = resolve_dut_temperature(
+        part_id if isinstance(part_id, str) else None,
+        file_temperatures.get(fid) if file_temperatures else None,
+    )
+    return info, temperature
+
+
+def _metadata_value(meta, info, temperature):
+    """One metadata field's cell for a DUT whose `(info, temperature)`
+    `_dut_meta_info` already resolved — pure: no summaryTable access, the
+    Temperature branch reads the precomputed value, every other branch
+    reads `info` exactly like the old per-cell resolution (index guards
+    identical)."""
+    name = meta["name"]
 
     def raw(index):
         return info[index] if len(info) > index else None
 
     if name == "Temperature":
-        part_id = raw(1)
-        # one shared resolver (§7.4): the split groups by this same value,
-        # so the row and the grouping can never diverge
-        temperature = resolve_dut_temperature(
-            part_id if isinstance(part_id, str) else None,
-            file_temperatures.get(fid) if file_temperatures else None,
-        )
         return "" if temperature is None else float(temperature)
     if name in ("HW Bin", "SW Bin"):
         # DB shape "Bin N" -> bare int N
@@ -659,12 +678,16 @@ def _metadata_block(summaryTable, chunk_cells, first_die, last_die, file_tempera
     rows = []
     masked_rows = []
     formula_values = {}
+    # per-DUT precompute (perf overhaul): the dutInfo chain + Temperature
+    # resolution run ONCE per die column, all 14 field rows read the cached
+    # pairs
+    per_dut = [
+        _dut_meta_info(summaryTable, fid, dut_index, file_temperatures)
+        for _global_index, fid, dut_index in chunk_cells
+    ]
     for position, meta in enumerate(METADATA_ROWS):
         excel_row = METADATA_START + position
-        values = [
-            _metadata_cell(meta, summaryTable, fid, dut_index, file_temperatures)
-            for global_index, fid, dut_index in chunk_cells
-        ]
+        values = [_metadata_value(meta, info, temperature) for info, temperature in per_dut]
         prefix = [
             METADATA_TEST_NUM_BASE + position,
             "METADATA",

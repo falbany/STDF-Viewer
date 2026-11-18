@@ -55,9 +55,10 @@ from deps.exporter.worksheets.test_summary import (
     METADATA_ROWS,
     SCIENTIFIC_FORMAT,
     _display_limits,
+    _dut_meta_info,
     _effective_lo_hi,
     _is_masked,
-    _metadata_cell,
+    _metadata_value,
     _resolve_test,
     _test_cells,
 )
@@ -230,10 +231,12 @@ def build_dut_summary_spec(
     tests = [_resolve_test(summaryTable, test_tuple) for test_tuple in testTuples]
     chunks = split_dut_chunks(tests, TEST_CHUNK_CAP)
 
-    # Metadata columns once (DUTs never chunk): value column per field over
-    # every ordered DUT; the mask rules apply PER COLUMN.
+    # Metadata columns once (DUTs never chunk): the per-DUT precompute
+    # resolves the dutInfo chain + Temperature ONCE per ordered DUT, every
+    # field column reads the cached pairs; the mask rules apply PER COLUMN.
+    per_dut = [_dut_meta_info(summaryTable, fid, dut_index, file_temperatures) for fid, dut_index in order]
     meta_columns = [
-        [_metadata_cell(meta, summaryTable, fid, dut_index, file_temperatures) for fid, dut_index in order]
+        [_metadata_value(meta, info, temperature) for info, temperature in per_dut]
         for meta in METADATA_ROWS
     ]
     masked_columns = [
