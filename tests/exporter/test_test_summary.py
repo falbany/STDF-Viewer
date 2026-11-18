@@ -1724,10 +1724,12 @@ class TestSharedStatsContext:
         assert via_shared == inline
 
     def test_multi_chunk_shared_spec_equality(self):
-        # die-chunk overflow: the shared caches are computed over the WHOLE
-        # order, so a chunk smaller than the order must recompute its own
-        # slice inline (chunk-local stat ranges + sparkline gate) — the
-        # specs stay identical to the inline build either way
+        # die-chunk overflow: chunking is PLACEMENT-only — every partial
+        # chunk slices the shared die/mirror cells through pos, while its
+        # six caches and sparkline gate stay chunk-local (they span the
+        # chunk's own die range, the entry's cover the whole order). The
+        # specs — formula_values and sparklines included — must equal the
+        # inline build either way.
         summary, test_tuples = self._fixture()
         shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
         inline = build_test_summary_spec(
@@ -1743,3 +1745,64 @@ class TestSharedStatsContext:
             shared_stats=shared,
         )
         assert via_shared == inline
+        # explicit partial-chunk pins: the overflow sheet's caches stay
+        # chunk-local (the inline path) and so does its sparkline gate
+        assert via_shared[1]["formula_values"] == inline[1]["formula_values"]
+        assert via_shared[1]["sparklines"] == inline[1]["sparklines"]
+
+    def test_partial_chunk_ignores_poisoned_shared_caches(self):
+        # teeth for the cache gate: poison every entry's caches6 and the
+        # PARTIAL-chunk spec must STILL equal the inline build — overflow
+        # sheets never consume the whole-order caches
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        poisoned = {
+            "pos": shared["pos"],
+            "entries": {
+                tup: (die, mirror, (None, None, None, None, None, 999), has)
+                for tup, (die, mirror, _caches, has) in shared["entries"].items()
+            },
+        }
+        inline = build_test_summary_spec(
+            summary, test_tuples, SHARED_ORDER, SHARED_DUT_IDS, "Test Summary", die_cap=2
+        )
+        via_poisoned = build_test_summary_spec(
+            summary,
+            test_tuples,
+            SHARED_ORDER,
+            SHARED_DUT_IDS,
+            "Test Summary",
+            die_cap=2,
+            shared_stats=poisoned,
+        )
+        assert via_poisoned == inline
+
+    def test_partial_chunk_slices_poisoned_shared_cells(self):
+        # teeth for the cell path: poison every entry's die cells and the
+        # PARTIAL-chunk spec's die cells change — overflow sheets really
+        # do slice the shared table through pos (placement-only chunking),
+        # they do not silently fall back to a full inline recomputation
+        summary, test_tuples = self._fixture()
+        shared = _build_shared_stats(summary, test_tuples, SHARED_ORDER)
+        poisoned = {
+            "pos": shared["pos"],
+            "entries": {
+                tup: (["X"] * len(die), mirror, caches, has)
+                for tup, (die, mirror, caches, has) in shared["entries"].items()
+            },
+        }
+        inline = build_test_summary_spec(
+            summary, test_tuples, SHARED_ORDER, SHARED_DUT_IDS, "Test Summary", die_cap=2
+        )
+        via_poisoned = build_test_summary_spec(
+            summary,
+            test_tuples,
+            SHARED_ORDER,
+            SHARED_DUT_IDS,
+            "Test Summary",
+            die_cap=2,
+            shared_stats=poisoned,
+        )
+        assert via_poisoned != inline
+        # the poison lands exactly in the partial chunk's die columns
+        assert via_poisoned[1]["rows"][0][12:] != inline[1]["rows"][0][12:]

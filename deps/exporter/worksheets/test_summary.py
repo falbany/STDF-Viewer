@@ -327,10 +327,11 @@ def build_test_summary_spec(
 
     `shared_stats` ({"entries", "pos"}, the DUT-block shared per-test
     table from `_build_shared_stats`) supplies the per-test die/mirror
-    cells and stat caches instead of recomputing them; None (direct
-    calls) computes everything inline. A chunk smaller than the order
-    ignores the shared caches (they are computed over the FULL order —
-    chunk-local stat ranges differ) and recomputes its slice inline.
+    cells to every chunk — chunking is placement-only, cells slice
+    through ``pos``. The six stat caches and the sparkline gate are
+    whole-order-scoped, so only the single-chunk export consumes them;
+    a chunk smaller than the order recomputes its chunk-local caches
+    inline. None (direct calls) computes everything inline.
 
     Since 2026-11-10 the banner row carries plain numeric DUT indices
     (global numbering, fix wave 2) and the numeric cell formats are
@@ -713,16 +714,20 @@ def _test_rows(
     mirror_first,
     mirror_last,
     shared_stats=None,
+    shared_caches=False,
 ):
     """The test rows of one die chunk, plus their cached formula results
     and sparklines.
 
     `shared_stats` (the DUT-block shared per-test table) supplies the
-    die/mirror cells and — only when the chunk covers the whole order,
-    the guard `_build_chunk` applies since the six caches are computed
-    over the FULL order — the stat caches and the sparkline gate without
-    recomputation; None (direct calls, chunk overflow sheets) computes
-    everything inline exactly as before."""
+    die/mirror cells for EVERY chunk — chunking is placement-only (spec
+    Wave 3.2), cells slice through ``pos`` with the inline fallback for
+    degraded pairs. `shared_caches` (True only for a chunk covering the
+    whole order — `_build_chunk` sets it, since the six caches and the
+    sparkline gate span the chunk's own die range while the entry's cover
+    the FULL order) additionally lets those come from the entry; partial
+    chunks recompute them chunk-locally inline. shared_stats=None (direct
+    calls) computes everything inline exactly as before."""
     rows = []
     formula_values = {}
     sparklines = []
@@ -730,6 +735,11 @@ def _test_rows(
     for offset, test in enumerate(tests):
         row_index = DATA_START + offset
         die_cells, mirror_cells, entry = _test_cells(summaryTable, test, pairs, shared_stats)
+        if not shared_caches:
+            # partial chunk: the six caches + sparkline gate span THIS
+            # chunk's die range — drop the entry (its caches cover the
+            # whole order) and recompute chunk-locally below
+            entry = None
         # third wave: FTR rows always take the limits path with the
         # synthetic ±0.999999 cells — the limit CF rules and the
         # limit-variant FAILS formula fire like on parametric rows
@@ -849,11 +859,13 @@ def _build_chunk(
         pair = order[global_index] if global_index < len(order) else (None, None)
         chunk_cells.append((global_index, pair[0], pair[1]))
 
-    # the shared per-test table caches the six stats over the WHOLE order —
-    # only a chunk covering every ordered DUT from its start (the
-    # single-chunk export) can take them verbatim; a smaller chunk's stat
-    # ranges and sparkline gate are chunk-local, so it recomputes inline
-    chunk_shared = shared_stats if (chunk_start == 0 and die_count == len(order)) else None
+    # chunking is PLACEMENT-only (spec Wave 3.2): every chunk slices the
+    # shared die/mirror cells through pos. The six caches + the sparkline
+    # gate span the chunk's own die range, so ONLY a chunk covering every
+    # ordered DUT from its start (the single-chunk export) may take the
+    # entry's whole-order caches verbatim; partial chunks recompute them
+    # chunk-locally inline (their formula ranges differ)
+    whole_order = chunk_start == 0 and die_count == len(order)
 
     first_die = die_col(0)
     last_die = die_col(die_count - 1) if die_count > 0 else first_die
@@ -883,7 +895,8 @@ def _build_chunk(
         last_die,
         mirror_first,
         mirror_last,
-        chunk_shared,
+        shared_stats,
+        whole_order,
     )
     formula_values.update(metadata_formula_values)
     last_data_row = DATA_START + len(rows) - 1 if rows else DATA_START
