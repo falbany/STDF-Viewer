@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from deps.exporter.charts import WAFER_DIE_WIDTH
 from deps.exporter.contract import ReportHost
 from deps.exporter.helpers import format_temperature_label, get_column_letter
 from deps.exporter.worksheets.test_summary import group_order_by_temperature
@@ -66,11 +67,16 @@ CORRELATION_GRADIENT_MID_HEX = "#FFFF00"
 CORRELATION_GRADIENT_MAX_HEX = "#CC0000"
 
 # the wafer map's grid geometry: the Y-label column sits in F, the grid
-# runs from G (the sbin-family anchor layout the ruling references)
+# runs from G (the sbin-family anchor layout the ruling references) at
+# the wafer die width — the column labels read top-to-bottom in 90°-
+# rotated header cells (2026-11-19 user ruling), so the narrow width
+# only has to fit the counts
 CORRELATION_LABEL_COL0 = 5
 CORRELATION_FIRST_GRID_COL0 = 6
 CORRELATION_LABEL_WIDTH = 34
-CORRELATION_GRID_COL_WIDTH = 7
+CORRELATION_GRID_COL_WIDTH = WAFER_DIE_WIDTH
+_HEADER_ROW_HEIGHT_PER_CHAR = 5.5  # pt of rotated 11pt text per label char
+_HEADER_ROW_HEIGHT_MAX = 409  # Excel's hard row-height cap
 
 _HEADER_LABEL = "Test"  # the F-column corner cell (the Y-axis header slot)
 
@@ -119,11 +125,19 @@ def build_correlation_spec(sheet_name: str, tests: list, cap: int = CORRELATION_
     )
     if kept > cap:
         legend += f"; showing the first {cap} of {kept} tests"
+    labels = [f"{row[0]} {row[1]}".strip() for row in rows]
+    # the 90°-rotated header cells read top-to-bottom: the header row
+    # must be tall enough for the longest label (Excel caps at 409 pt)
+    header_row_height = min(
+        _HEADER_ROW_HEIGHT_MAX,
+        int(_HEADER_ROW_HEIGHT_PER_CHAR * max(len(label) for label in labels)) + 8,
+    )
     return {
         "sheet_name": sheet_name,
         "legend": legend,
         "nums": [str(row[0]) for row in rows],
-        "labels": [f"{row[0]} {row[1]}".strip() for row in rows],
+        "labels": labels,
+        "header_row_height": header_row_height,
         "fails": [row[2] for row in rows],
         "matrix": matrix,
         "capped": kept > cap,
@@ -147,12 +161,14 @@ def build_correlation_spec(sheet_name: str, tests: list, cap: int = CORRELATION_
 
 def render_correlation_sheet(ws, spec: dict, theme) -> None:
     """The wafer fail grid's layout carrying pair counts: title band row
-    1, reading legend row 2, the column-test numbers on the anchor row,
-    F = row-test labels ("num name"), the counts as plain cached values
-    from G, ONE 3_color_scale over the whole grid, panes frozen at the
-    grid's top-left corner (headers stay visible on a 100 x 100 map)."""
+    1, reading legend row 2, the column-test labels rotated 90° on the
+    anchor row (2026-11-19 ruling — the wafer-die-width columns only
+    have to fit the counts), F = row-test labels ("num name"), the
+    counts as plain cached values from G, ONE 3_color_scale over the
+    whole grid, panes frozen at the grid's top-left corner (headers stay
+    visible on a 100 x 100 map)."""
     ws.hide_gridlines(2)
-    nums, labels, matrix = spec["nums"], spec["labels"], spec["matrix"]
+    labels, matrix = spec["labels"], spec["matrix"]
     n = len(labels)
     last_col0 = CORRELATION_FIRST_GRID_COL0 + n - 1
     ws.merge_range(0, 0, 0, last_col0, spec["sheet_name"], theme.lookalike("title"))
@@ -163,11 +179,19 @@ def render_correlation_sheet(ws, spec: dict, theme) -> None:
 
     header_row0 = 2
     axis_fmt = theme.cell_format(font="bold_body", align="center", border=True, fill_hex="EDEFF2")
+    axis_fmt_rotated = theme.cell_format(
+        font="bold_body",
+        align="center",
+        border=True,
+        fill_hex="EDEFF2",
+        extra={"rotation": 90, "valign": "bottom"},
+    )
     label_fmt = theme.cell_format(font="bold_body", align="left", border=True, fill_hex="EDEFF2")
     body_fmt = theme.cell_format(font="body", align="center")
     ws.write(header_row0, CORRELATION_LABEL_COL0, _HEADER_LABEL, axis_fmt)
-    for offset, num in enumerate(nums):
-        ws.write(header_row0, CORRELATION_FIRST_GRID_COL0 + offset, num, axis_fmt)
+    ws.set_row(header_row0, spec["header_row_height"])
+    for offset, label in enumerate(labels):
+        ws.write(header_row0, CORRELATION_FIRST_GRID_COL0 + offset, label, axis_fmt_rotated)
     for row_offset, label in enumerate(labels):
         row0 = header_row0 + 1 + row_offset
         ws.write(row0, CORRELATION_LABEL_COL0, label, label_fmt)
@@ -194,7 +218,11 @@ class TestCorrelationMixin(ReportHost):
 
     def writeTestCorrelationMap(self) -> None:
         """Write the correlation map sheet(s); no selection, no context
-        or no executed tests -> no sheet, no fetch, no tick."""
+        or no executed tests -> no sheet, no fetch. The sheets are
+        tickless (2026-11-19 fix — they add sheets, not fetches, like
+        the temperature splits; the context tick they ride is already in
+        the GUI denominator via dut_block_loop_count's
+        correlation_selected flag)."""
         # gate 1 — the selection (the sheet is NOT pre-created in
         # report_core's fixed loop; it must never appear unselected)
         if ReportSelection.TestCorrelation not in self.selectedContents:
@@ -252,5 +280,3 @@ class TestCorrelationMixin(ReportHost):
             ws = wb.add_worksheet(name)
             render_correlation_sheet(ws, spec, theme)
             self._dut_sheet_block.append(ws)
-            self.loopCount += 1
-            self.sendProgress()

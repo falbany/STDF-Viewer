@@ -300,7 +300,6 @@ def build_generated(
     wafer_tuples=None,
     heat_selected=False,
     correlation_selected=False,
-    correlation_maps=0,
     monkeypatch=None,
     file_dates=None,
     stat_dut_rows=None,
@@ -368,10 +367,14 @@ def build_generated(
         if any(w[0] == -1 for w in waferTuples):
             totalLoopCnt += 1
     if correlation_selected:
-        # 2026-11-19: the correlation mixin's own denominator (+1 per map —
-        # one all-DUTs map, or one per resolved temperature in split mode)
+        # 2026-11-19: the correlation mixin rides the DUT-block context —
+        # its sheets are tickless; when it is the ONLY context trigger
+        # (no Test Summary / DUT Summary) the context tick is its own
         selection.append(ReportSelection.TestCorrelation)
-        totalLoopCnt += correlation_maps
+        if not any(
+            s in selection for s in (ReportSelection.TestSummary, ReportSelection.DUT)
+        ):
+            totalLoopCnt += 1
     reportInfo = (
         selection,
         testTuples,

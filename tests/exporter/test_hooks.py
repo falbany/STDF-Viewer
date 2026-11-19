@@ -111,6 +111,22 @@ def test_dut_block_loop_count_progress_denominator():
     assert dut_block_loop_count(test_count=3, test_summary_selected=False, dut_selected=True) == 4
     assert dut_block_loop_count(test_count=3, test_summary_selected=True, dut_selected=False) == 4
     assert dut_block_loop_count(test_count=3, test_summary_selected=True, dut_selected=True) == 7
+    # 2026-11-19: the Test Correlation Map rides the context tick alone —
+    # its sheets are tickless (one map per temperature adds none) — and
+    # its own gate runs the context even with no other DUT-block sheet
+    assert (
+        dut_block_loop_count(
+            test_count=3, test_summary_selected=False, dut_selected=False, correlation_selected=True
+        )
+        == 1
+    )
+    assert (
+        dut_block_loop_count(
+            test_count=3, test_summary_selected=True, dut_selected=False, correlation_selected=True
+        )
+        == 4
+    )
+    assert dut_block_loop_count(test_count=3, test_summary_selected=False, dut_selected=False) == 0
 
 
 def ptr_dict():

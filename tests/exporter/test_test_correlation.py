@@ -20,6 +20,10 @@ from deps.exporter.worksheets.test_correlation import (
 from tests.exporter.conftest import load_workbook_bytes, render_workbook
 from tests.exporter.test_generator_dut import build_generated
 
+# WAFER_DIE_WIDTH (2.71 chars) as openpyxl reads it back: xlsxwriter
+# stores the 24 px width as 877/256 (the test_charts.py die-width pin)
+WAFER_DIE_WIDTH_ROUNDTRIP = 877 / 256
+
 # openpyxl's reader drops features it cannot parse (xlsxwriter's x14
 # extensions) — the suite asserts those via the raw package XML instead;
 # silence the reader-side noise here (the sibling modules' pytestmark).
@@ -131,12 +135,22 @@ class TestCorrelationRender:
     def test_layout_and_values(self, rendered):
         sheet, spec = rendered
         assert sheet["F3"].value == "Test"  # the corner (Y-axis header slot)
-        assert [sheet.cell(3, 7 + i).value for i in range(3)] == spec["nums"]
+        # column headers: the full labels, rotated 90° so the wafer-die-
+        # width columns only carry the counts
+        assert [sheet.cell(3, 7 + i).value for i in range(3)] == spec["labels"]
+        assert sheet.cell(3, 7).alignment.textRotation == 90
+        # xlsxwriter quantizes row heights to 0.75 pt steps
+        assert sheet.row_dimensions[3].height == pytest.approx(spec["header_row_height"], abs=1)
         assert sheet["F4"].value == spec["labels"][0]
         assert [sheet.cell(4, 7 + i).value for i in range(3)] == spec["matrix"][0]
         assert sheet["F5"].value == spec["labels"][1]
         # panes frozen at the grid's top-left corner: headers stay visible
         assert sheet.freeze_panes == "G4"
+
+    def test_wafer_die_column_width(self, rendered):
+        sheet, _ = rendered
+        # the wafer map's die width (24 px — xlsxwriter stores 877/256)
+        assert sheet.column_dimensions["G"].width == WAFER_DIE_WIDTH_ROUNDTRIP
 
     def test_one_color_scale_over_the_grid(self, rendered):
         sheet, spec = rendered
@@ -158,7 +172,7 @@ class TestCorrelationMapSheets:
 
     def test_sheet_when_selected(self, tmp_path, qapp, monkeypatch):
         gen, wb, _, _, _ = build_generated(
-            tmp_path, qapp, correlation_selected=True, correlation_maps=1, monkeypatch=monkeypatch
+            tmp_path, qapp, correlation_selected=True, monkeypatch=monkeypatch
         )
         assert wb.sheetnames == [
             "Test Summary",
@@ -171,7 +185,8 @@ class TestCorrelationMapSheets:
         sheet = wb["Test Correlation Map"]
         assert sheet["F3"].value == "Test"
         # fails-descending: test 12 (one failing DUT) precedes test 10
-        assert sheet["G3"].value == "12" and sheet["H3"].value == "10"
+        assert sheet["G3"].value == "12 2_Func/scanchain"
+        assert sheet["H3"].value == "10 0_TXCC/VCCC_ASIC"
         assert sheet["F4"].value == "12 2_Func/scanchain"
         assert sheet["G4"].value == 1 and sheet["H4"].value == 0
         assert sheet["F5"].value == "10 0_TXCC/VCCC_ASIC"
@@ -182,12 +197,24 @@ class TestCorrelationMapSheets:
         _, wb, _, _, _ = build_generated(tmp_path, qapp)
         assert "Test Correlation Map" not in wb.sheetnames
 
+    def test_correlation_alone_standalone_export(self, tmp_path, qapp, monkeypatch):
+        # the 2026-11-19 fix: NO Test Summary / DUT Summary / Test
+        # Statistics selected — the map still builds (its context tick is
+        # in the GUI denominator, so the progress math never divides by 0)
+        gen, wb, _, _, _ = build_generated(
+            tmp_path, qapp, with_dut=False, correlation_selected=True, monkeypatch=monkeypatch
+        )
+        assert "Test Correlation Map" in wb.sheetnames
+        sheet = wb["Test Correlation Map"]
+        assert sheet["F4"].value == "12 2_Func/scanchain"
+        assert sheet["G4"].value == 1
+        assert gen.loopCount == gen.totalLoopCnt
+
     def test_split_two_temps_two_maps(self, tmp_path, qapp, monkeypatch):
         _, wb, _, _, _ = build_generated(
             tmp_path,
             qapp,
             correlation_selected=True,
-            correlation_maps=2,
             split_temperature=True,
             monkeypatch=monkeypatch,
             part_ids=["SN541_T25C", "SN542_T85C", "SN543_T25C"],
@@ -198,9 +225,12 @@ class TestCorrelationMapSheets:
         t85 = wb["Test Correlation Map - T85°C"]
         # 25C: tests 10 + 12 both non-failing on DUTs {0, 2} — zeros grid
         # in first-appearance order
-        assert [t25.cell(3, 7 + i).value for i in range(2)] == ["10", "12"]
+        assert [t25.cell(3, 7 + i).value for i in range(2)] == [
+            "10 0_TXCC/VCCC_ASIC",
+            "12 2_Func/scanchain",
+        ]
         assert [t25.cell(4, 7 + i).value for i in range(2)] == [0, 0]
         # 85C: the single DUT fails test 12 only
-        assert t85["G3"].value == "12"
+        assert t85["G3"].value == "12 2_Func/scanchain"
         assert t85["F4"].value == "12 2_Func/scanchain"
         assert t85["G4"].value == 1

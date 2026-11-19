@@ -1332,12 +1332,16 @@ class stdfExporter(QtWidgets.QDialog):
         # overshoot (the per-DUT sheet's ticks were never counted).
         if getSetting().gen.modern_export and (
             ReportSelection.DUT in selectedContents or ReportSelection.TestSummary in selectedContents
+            # fork(falbany): the Test Correlation Map rides the same DUT
+            # block (context tick counted, its sheets are tickless)
+            or ReportSelection.TestCorrelation in selectedContents
         ):
             from .exporter.progress import dut_block_loop_count  # lazy, like wafer_merge below
             totalLoopCnt += dut_block_loop_count(
                 test_count=len(testTuples),
                 test_summary_selected=ReportSelection.TestSummary in selectedContents,
                 dut_selected=ReportSelection.DUT in selectedContents,
+                correlation_selected=ReportSelection.TestCorrelation in selectedContents,
             )
         if ReportSelection.Wafer in selectedContents:
             if getSetting().gen.modern_export:
