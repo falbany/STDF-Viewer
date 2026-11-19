@@ -1,19 +1,25 @@
-"""Tests for Modern Export hooks: persisted settings fields + the stats
-exclusion hook.
+"""Tests for Modern Export hooks: persisted settings fields, the stats
+exclusion hook, and the export-dialog page routing/layout.
 
 GeneralConfig gains `modern_export` (alias "Modern Export", default True)
 so the export dialog's "Modern Report" checkbox state survives restarts;
 the re-measure feature adds `hide_remeasured` / `split_temperature` and
 the pure `apply_dut_exclusion` numpy mask used by
-DataInterface.getTestStatistics. The UI/uic wiring is verified by import
-checks plus the full suite; these tests are pure config/numpy, no
-Qt/GUI required.
+DataInterface.getTestStatistics. The dialog hooks stay widget-free: the
+layout test reads the generated UI file's grid calls, and the routing
+tests drive `stdfExporter.gotoNextPage` through a stub surface.
 """
 
+import ast
+from pathlib import Path
+from types import SimpleNamespace
+
 import numpy as np
+from PyQt5.QtWidgets import QMessageBox
 
 from deps.DataInterface import DataInterface, apply_dut_exclusion
 from deps.SharedSrc import REC, SettingParams, calc_cpk
+from deps.uic_stdExporter import ReportSelection, stdfExporter
 
 
 def test_modern_export_default_true():
@@ -231,3 +237,114 @@ class TestExclusionRecomputesStats:
         d = interface.getTestStatistics([(10, 0, "0_TXCC/VCCC_ASIC")], [1], [-1], [1])
         row = d["Rows"][0]
         assert abs(float(row[6]) - 110.0 / 3.0) < 0.051  # full-population mean
+
+
+def _grid_slots() -> dict[str, list[tuple[int, ...]]]:
+    """Read the generated export UI's grid coordinates without a QApplication."""
+    path = Path(__file__).resolve().parents[2] / "deps" / "ui" / "stdfViewer_exportUI.py"
+    slots: dict[str, list[tuple[int, ...]]] = {}
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == "addWidget"):
+            continue
+        if not (isinstance(func.value, ast.Attribute) and func.value.attr == "gridLayout_2"):
+            continue
+        widget = node.args[0]
+        if isinstance(widget, ast.Attribute):
+            slots.setdefault(widget.attr, []).append(
+                tuple(ast.literal_eval(arg) for arg in node.args[1:])
+            )
+    return slots
+
+
+def test_test_correlation_checkbox_sits_right_of_test_summary():
+    # 2026-11-19 user ruling: the visible slot follows Test Summary (2,2)
+    slots = _grid_slots()
+    assert slots["TestSummary_cb"] == [(2, 2, 1, 1)]
+    assert slots["TestCorrelation_cb"] == [(2, 3, 1, 1)]
+
+
+class _FakeStackedWidget:
+    def __init__(self, index=0):
+        self.index = index
+
+    def currentIndex(self):
+        return self.index
+
+    def setCurrentIndex(self, index):
+        self.index = index
+
+
+class _FakeButton:
+    def __init__(self):
+        self.enabled = None
+
+    def setEnabled(self, enabled):
+        self.enabled = enabled
+
+
+class _DialogStub:
+    """The gotoNextPage surface, without constructing a real QDialog."""
+
+    def __init__(self, contents, tests=()):
+        self.exportUI = SimpleNamespace(
+            stackedWidget=_FakeStackedWidget(),
+            previousBtn=_FakeButton(),
+        )
+        self.previousPageIndex = 0
+        self._contents = list(contents)
+        self._tests = list(tests)
+        self.started = False
+        self.warnings = []
+
+    def getOutPath(self):
+        return "report.xlsx"
+
+    def getSelectedContents(self):
+        return list(self._contents)
+
+    def getExportTestTuples(self):
+        return list(self._tests)
+
+    def changeBtnStyle(self):
+        pass
+
+    def start(self):
+        self.started = True
+
+    def tr(self, text):
+        return text
+
+
+class TestCorrelationExportRouting:
+    """2026-11-19: a correlation-only selection must enter the normal
+    test/site page flow — never fall through to the immediate `start()`
+    branch reserved for FileInfo/GDR_DTR-only exports."""
+
+    def test_correlation_only_routes_through_test_page(self):
+        dialog = _DialogStub([ReportSelection.TestCorrelation])
+        stdfExporter.gotoNextPage(dialog)
+        assert dialog.exportUI.stackedWidget.currentIndex() == 1
+        assert dialog.started is False
+
+    def test_correlation_requires_a_test_selection(self, monkeypatch):
+        dialog = _DialogStub([ReportSelection.TestCorrelation])
+        dialog.exportUI.stackedWidget.setCurrentIndex(1)
+        monkeypatch.setattr(
+            QMessageBox, "warning", lambda *args, **kwargs: dialog.warnings.append(args)
+        )
+        stdfExporter.gotoNextPage(dialog)
+        assert dialog.warnings
+        assert dialog.exportUI.stackedWidget.currentIndex() == 1
+        assert dialog.started is False
+
+    def test_correlation_with_a_test_routes_to_site_page(self):
+        dialog = _DialogStub(
+            [ReportSelection.TestCorrelation], tests=[(10, 0, "0_TXCC/VCCC_ASIC")]
+        )
+        dialog.exportUI.stackedWidget.setCurrentIndex(1)
+        stdfExporter.gotoNextPage(dialog)
+        assert dialog.exportUI.stackedWidget.currentIndex() == 2
+        assert dialog.started is False

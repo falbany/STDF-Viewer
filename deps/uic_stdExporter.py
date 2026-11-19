@@ -1252,7 +1252,10 @@ class stdfExporter(QtWidgets.QDialog):
                                             ReportSelection.DUT, 
                                             ReportSelection.Stat,
                                             ReportSelection.PPQQ,
-                                            ReportSelection.TestSummary}) > 0:  # fork(falbany): hook #6
+                                            ReportSelection.TestSummary,
+                                            # fork(falbany): Test Correlation
+                                            # selects its tests on the test page
+                                            ReportSelection.TestCorrelation}) > 0:  # fork(falbany): hook #6
                 # go to test page
                 self.previousPageIndex = 0
                 self.exportUI.previousBtn.setEnabled(True)
@@ -1283,7 +1286,10 @@ class stdfExporter(QtWidgets.QDialog):
                 len(set(self.getSelectedContents()) & {ReportSelection.Trend, 
                                                        ReportSelection.Histo,
                                                        ReportSelection.Stat,
-                                                       ReportSelection.PPQQ}) == 0):
+                                                       ReportSelection.PPQQ,
+                                                       # fork(falbany): the map
+                                                       # is built from these tests
+                                                       ReportSelection.TestCorrelation}) == 0):
                 # go to site page
                 self.previousPageIndex = 1
                 self.exportUI.previousBtn.setEnabled(True)
@@ -1291,7 +1297,7 @@ class stdfExporter(QtWidgets.QDialog):
                 self.changeBtnStyle()
             else:
                 QMessageBox.warning(self, self.tr("Warning"), 
-                                    self.tr("At least one test item should be selected when Trend/Histo/Statistic/NormalValidation is checked\n"))
+                                    self.tr("At least one test item should be selected when Trend/Histo/Statistic/NormalValidation/Test Correlation is checked\n"))
         
         else:
             # site page
