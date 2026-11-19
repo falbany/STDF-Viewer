@@ -37,8 +37,9 @@ multi-MB calc chain). The whole matrix is ONE numpy matmul over the
 0/1 fail vectors the mirrors already carry ("" = not executed enters
 both operands as 0 — exactly what a SUMPRODUCT would say), written as
 plain cached values under ONE 3_color_scale: the wafer fail grid's
-rendering path, same green/yellow/red family and the same min /
-percentile-50 / max anchor computation.
+rendering path and the same min / percentile-50 / max anchor
+computation, colored with the Test Summary Cpk bands' modern soft
+green / amber / red palette (2026-11-19 user ruling).
 
 Ordering: failing DUTs, descending (top-failing test top-left),
 first-appearance order breaks ties; never-executed tests (no mirror
@@ -73,11 +74,12 @@ from deps.uic_stdExporter import ReportSelection
 
 CORRELATION_CAP = 100  # displayed matrix cap, rows AND columns (2026-11-19 user ruling)
 
-# the wafer fail grid's gradient family, verbatim (ONE scale per sheet,
-# explicit num anchors — the 2026-11-14 legend ruling's shape)
-CORRELATION_GRADIENT_MIN_HEX = "#00CC00"
-CORRELATION_GRADIENT_MID_HEX = "#FFFF00"
-CORRELATION_GRADIENT_MAX_HEX = "#CC0000"
+# ONE scale per sheet with explicit num anchors (the 2026-11-14 legend
+# ruling's shape). 2026-11-19 user ruling: use the modern Test Summary Cpk
+# band palette's green / amber / red (soft fills, no saturated primaries).
+CORRELATION_GRADIENT_MIN_HEX = "#A7F3D0"  # Cpk >= 1.67 band
+CORRELATION_GRADIENT_MID_HEX = "#FEF3C7"  # Cpk >= 1 band
+CORRELATION_GRADIENT_MAX_HEX = "#FECACA"  # Cpk < 1 band
 
 # the self-comparison diagonal's border: dark slate, border-only (no fill)
 # so the color scale underneath stays visible

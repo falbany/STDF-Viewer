@@ -189,6 +189,13 @@ class TestCorrelationRender:
             float(spec["gradient"]["mid_value"]),
             float(spec["gradient"]["max_value"]),
         ]
+        # 2026-11-19 user ruling: reuse the modern Cpk band palette from
+        # the Test Summary (soft green / amber / red)
+        assert [str(color.rgb) for color in rules[0].colorScale.color] == [
+            "FFA7F3D0",
+            "FFFEF3C7",
+            "FFFECACA",
+        ]
         # the scale covers the data grid only: label column F excluded
         # AND the last grid column included (2026-11-19 range fix)
         assert {str(cf.sqref) for cf in sheet.conditional_formatting} == {"G4:I6"}
