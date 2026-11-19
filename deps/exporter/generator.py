@@ -78,6 +78,7 @@ from deps.exporter.worksheets.dut_summary import DUTSummaryMixin
 from deps.exporter.worksheets.file_info import FileInfoMixin
 from deps.exporter.worksheets.gdr_dtr import GdrDtrMixin
 from deps.exporter.worksheets.histogram import HistogramMixin
+from deps.exporter.worksheets.test_correlation import TestCorrelationMixin
 from deps.exporter.worksheets.test_statistics import TestStatisticsMixin
 from deps.exporter.worksheets.test_summary import TestSummaryMixin, order_dut_block
 from deps.exporter.worksheets.trend_chart import TrendChartMixin
@@ -103,8 +104,8 @@ AUTOFIT_CAP = 60
 
 
 class ModernReportGenerator(  # pylint: disable=too-many-ancestors
-    # fork(falbany): 13 ancestors after WaferHeatMapMixin joined the
-    # composition (issue #13) — one more mixin than max-parents=12 admits
+    # fork(falbany): 14 ancestors after TestCorrelationMixin joined the
+    # composition (2026-11-19) — one more mixin than max-parents=12 admits
     FileInfoMixin,
     GdrDtrMixin,
     TestSummaryMixin,
@@ -113,6 +114,7 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
     BinChartMixin,
     WaferMapMixin,
     WaferHeatMapMixin,
+    TestCorrelationMixin,
     TrendChartMixin,
     HistogramMixin,
     reportGenerator,
@@ -285,6 +287,9 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
             if (
                 ReportSelection.TestSummary in self.selectedContents
                 or ReportSelection.DUT in self.selectedContents
+                # fork(falbany): the Test Correlation Map rides the same
+                # DUT-block context (flag mirrors + temperatures)
+                or ReportSelection.TestCorrelation in self.selectedContents
             ):
                 self._prepare_dut_context()
                 if self.forceQuit:
@@ -294,6 +299,13 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
                 return
             # dut summary (per-DUT sheet)
             self.writeDUT_Summary()
+            if self.forceQuit:
+                return
+
+            # test correlation maps (2026-11-19): self-gated mixin — one
+            # matrix per temperature partition when split-temp mode
+            # resolves >= 2 temperatures, one all-DUTs map otherwise
+            self.writeTestCorrelationMap()
             if self.forceQuit:
                 return
 
