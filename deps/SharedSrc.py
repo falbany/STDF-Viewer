@@ -115,6 +115,7 @@ class GeneralConfig(BaseModel):
     split_temperature: bool = Field(False, alias="Split Temperature")  # fork(falbany): split Test Summary by temperature
     test_summary: bool = Field(True, alias="Test Summary")  # fork(falbany): Test Summary matrix sheet toggle
     wafer_heat_map: bool = Field(True, alias="Wafer Heat Map")  # fork(falbany): Wafer Heat Map sheet toggle (modern-only)
+    test_correlation: bool = Field(False, alias="Test Correlation")  # fork(falbany): Test Correlation Map sheet toggle (modern-only)
     file_symbols: dict[int, str] = Field(
         default_factory=lambda: {0: "o"},
         alias="File Symbols (Scatter Points)"

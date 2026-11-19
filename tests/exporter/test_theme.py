@@ -327,4 +327,5 @@ class TestTabColors:
             "histo": "0EA5E9",
             "bin": "EA580C",
             "wafer": "7C3AED",
+            "test_correlation": "9DC3E6",  # 2026-11-19: light water blue 40%
         }

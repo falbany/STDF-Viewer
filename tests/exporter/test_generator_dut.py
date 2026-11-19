@@ -299,6 +299,7 @@ def build_generated(
     with_dut=True,
     wafer_tuples=None,
     heat_selected=False,
+    correlation_selected=False,
     monkeypatch=None,
     file_dates=None,
     stat_dut_rows=None,
@@ -365,6 +366,15 @@ def build_generated(
         selection.append(ReportSelection.WaferHeatMap)
         if any(w[0] == -1 for w in waferTuples):
             totalLoopCnt += 1
+    if correlation_selected:
+        # 2026-11-19: the correlation mixin rides the DUT-block context —
+        # its sheets are tickless; when it is the ONLY context trigger
+        # (no Test Summary / DUT Summary) the context tick is its own
+        selection.append(ReportSelection.TestCorrelation)
+        if not any(
+            s in selection for s in (ReportSelection.TestSummary, ReportSelection.DUT)
+        ):
+            totalLoopCnt += 1
     reportInfo = (
         selection,
         testTuples,
@@ -429,6 +439,9 @@ def build_generated(
     if split_temperature:
         assert monkeypatch is not None, "split_temperature=True requires monkeypatch"
         monkeypatch.setattr(getSetting().gen, "split_temperature", True)
+    if correlation_selected:
+        assert monkeypatch is not None, "correlation_selected=True requires monkeypatch"
+        monkeypatch.setattr(getSetting().gen, "test_correlation", True)
 
     def fake_wait_for_image(testTuple, head, sites, fids, chartType):
         return io.BytesIO(PNG_BYTES)
