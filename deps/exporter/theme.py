@@ -65,6 +65,9 @@ TAB_COLOR_HEXES = {
     "histo": "0EA5E9",
     "bin": "EA580C",
     "wafer": "7C3AED",
+    # 2026-11-19 user ruling: light water blue at 40% (Blue, Accent 5,
+    # Lighter 40%)
+    "test_correlation": "9DC3E6",
 }
 
 # Excel built-in named styles have no xlsxwriter equivalent (no named-style
@@ -254,6 +257,12 @@ class ModernTheme:  # pylint: disable=too-many-public-methods
         """Background-only Format for conditional-formatting rules (Excel
         merges the rule's fill itself; the format carries just the color)."""
         return self._format({"bg_color": f"#{hex6}"})
+
+    def cf_border(self, hex6: str, style: int = 2):
+        """Border-only Format for conditional-formatting rules (a box, no
+        fill): a color-scale fill underneath stays visible. ``style`` is
+        xlsxwriter's border code (2 = medium, 5 = thick)."""
+        return self._format({"border": style, "border_color": f"#{hex6}"})
 
     def cf_bin_fill(self, bg_hex: str, font_hex: str):
         """Die-cell CF rule format (issue #2): palette fill + luminance

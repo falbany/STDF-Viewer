@@ -104,6 +104,30 @@ class TestCorrelationSpec:
         assert gradient["min_value"] == 0
         assert gradient["max_value"] == 1  # the all-zero grid sits at the green end
 
+    def test_column_header_height_follows_short_test_ids(self):
+        # 2026-11-19 user ruling: the rotated column headers carry the test
+        # ID only, so a long test name must not inflate the header row.
+        spec = build_correlation_spec(
+            "s", [(10, "A_very_long_test_name_that_would_be_130pt_rotated", [1])]
+        )
+        assert spec["labels"] == ["10 A_very_long_test_name_that_would_be_130pt_rotated"]
+        # 24 pt floor: the table's filter dropdown buttons must stay usable
+        assert spec["header_row_height"] == 24
+
+    def test_duplicate_test_numbers_get_unique_tokens(self):
+        # MPR/PMR tests can share a test number; Excel Table headers must
+        # stay unique or add_table rejects the whole table (2026-11-19
+        # user-reported empty header row). The suffix also keeps the
+        # diagonal formula able to match row labels to column headers.
+        tests = [
+            (10, "A", [1, 0]),
+            (10, "B", [0, 1]),
+            (12, "C", [1, 1]),
+        ]
+        spec = build_correlation_spec("s", tests)
+        assert spec["nums"] == ["12", "10", "10#2"]
+        assert spec["labels"] == ["12 C", "10 A", "10#2 B"]
+
     def test_no_executed_tests_returns_none(self):
         assert build_correlation_spec("s", [(1, "A", ["", ""])]) is None
         assert build_correlation_spec("s", []) is None
@@ -135,9 +159,9 @@ class TestCorrelationRender:
     def test_layout_and_values(self, rendered):
         sheet, spec = rendered
         assert sheet["F3"].value == "Test"  # the corner (Y-axis header slot)
-        # column headers: the full labels, rotated 90° so the wafer-die-
-        # width columns only carry the counts
-        assert [sheet.cell(3, 7 + i).value for i in range(3)] == spec["labels"]
+        # column headers: the test IDs only, rotated 90° so the wafer-die-
+        # width columns only carry the counts; full labels stay on rows
+        assert [sheet.cell(3, 7 + i).value for i in range(3)] == spec["nums"]
         assert sheet.cell(3, 7).alignment.textRotation == 90
         # xlsxwriter quantizes row heights to 0.75 pt steps
         assert sheet.row_dimensions[3].height == pytest.approx(spec["header_row_height"], abs=1)
@@ -165,6 +189,78 @@ class TestCorrelationRender:
             float(spec["gradient"]["mid_value"]),
             float(spec["gradient"]["max_value"]),
         ]
+        # the scale covers the data grid only: label column F excluded
+        # AND the last grid column included (2026-11-19 range fix)
+        assert {str(cf.sqref) for cf in sheet.conditional_formatting} == {"G4:I6"}
+
+    def test_sheet_is_one_excel_table_with_filter(self, rendered):
+        # 2026-11-19 user ruling: filtering/sorting a test column must
+        # surface its correlations, so the whole map is one Excel Table
+        sheet, spec = rendered
+        assert len(sheet.tables) == 1
+        table = next(iter(sheet.tables.values()))
+        assert table.name.startswith("Corr_")
+        assert table.ref == "F3:I6"
+        assert table.autoFilter.ref == "F3:I6"
+        assert [column.name for column in table.tableColumns] == ["Test", *spec["nums"]]
+
+    def test_duplicate_test_numbers_keep_table_and_headers(self):
+        # regression (2026-11-19 user report): duplicate test numbers made
+        # xlsxwriter reject the table, which also left row 3 empty because
+        # the table writes the headers. Unique tokens restore both.
+        tests = [(10, "A", [1, 0]), (10, "B", [0, 1]), (12, "C", [1, 1])]
+        sheet, spec = _render("Test Correlation Map", tests)
+        assert spec["nums"] == ["12", "10", "10#2"]
+        assert sheet["F3"].value == "Test"
+        assert [sheet.cell(3, 7 + i).value for i in range(3)] == spec["nums"]
+        assert len(sheet.tables) == 1
+        table = next(iter(sheet.tables.values()))
+        assert table.ref == "F3:I6"
+        assert table.autoFilter.ref == "F3:I6"
+        assert [column.name for column in table.tableColumns] == ["Test", *spec["nums"]]
+
+    def test_blank_columns_b_to_e_are_folded(self, rendered):
+        # 2026-11-19 user ruling: B:E carry no data (the grid anchors at
+        # F), so the layout folds them instead of wasting space
+        sheet, _ = rendered
+        folded = sheet.column_dimensions["B"]
+        assert folded.hidden is True
+        assert (folded.min, folded.max) == (2, 5)  # xlsxwriter groups B:E
+        assert not sheet.column_dimensions["A"].hidden
+        assert not sheet.column_dimensions["F"].hidden
+
+    def test_print_setup_and_tab_color(self, rendered):
+        # 2026-11-19 user rulings: the map must be printable (A4
+        # landscape, fit to one page wide, title/legend/header repeated)
+        # and its tab is light water blue at 40%.
+        sheet, _ = rendered
+        assert sheet.page_setup.paperSize == int(sheet.PAPERSIZE_A4)
+        assert sheet.page_setup.orientation == "landscape"
+        assert sheet.page_setup.fitToWidth in (1, None)  # 1 = OOXML default
+        assert sheet.page_setup.fitToHeight == 0
+        assert sheet.sheet_properties.pageSetUpPr.fitToPage is True
+        assert sheet.print_title_rows == "$1:$3"
+        assert sheet.print_area.endswith("!$A$1:$I$6")
+        assert sheet.sheet_properties.tabColor.rgb == "FF9DC3E6"
+
+    def test_diagonal_self_comparison_rule_uses_border(self, rendered):
+        # 2026-11-19 user ruling: the NxN diagonal must read as "this test
+        # compared to itself". Formula-based so it follows table sorts;
+        # border-only so the color-scale fill underneath stays visible.
+        sheet, _ = rendered
+        rules = [
+            rule
+            for cf in sheet.conditional_formatting
+            for rule in cf.rules
+            if rule.type == "expression"
+        ]
+        assert len(rules) == 1
+        assert rules[0].formula == ['LEFT($F4,FIND(" ",$F4&" ")-1)=G$3']
+        border = rules[0].dxf.border
+        assert border is not None
+        assert [border.left.style, border.right.style, border.top.style, border.bottom.style] == [
+            "dashed"
+        ] * 4
 
 
 class TestCorrelationMapSheets:
@@ -184,9 +280,10 @@ class TestCorrelationMapSheets:
         ]
         sheet = wb["Test Correlation Map"]
         assert sheet["F3"].value == "Test"
-        # fails-descending: test 12 (one failing DUT) precedes test 10
-        assert sheet["G3"].value == "12 2_Func/scanchain"
-        assert sheet["H3"].value == "10 0_TXCC/VCCC_ASIC"
+        # fails-descending: test 12 (one failing DUT) precedes test 10;
+        # column headers carry the ID only, rows carry "num name"
+        assert sheet["G3"].value == "12"
+        assert sheet["H3"].value == "10"
         assert sheet["F4"].value == "12 2_Func/scanchain"
         assert sheet["G4"].value == 1 and sheet["H4"].value == 0
         assert sheet["F5"].value == "10 0_TXCC/VCCC_ASIC"
@@ -225,12 +322,12 @@ class TestCorrelationMapSheets:
         t85 = wb["Test Correlation Map - T85°C"]
         # 25C: tests 10 + 12 both non-failing on DUTs {0, 2} — zeros grid
         # in first-appearance order
-        assert [t25.cell(3, 7 + i).value for i in range(2)] == [
-            "10 0_TXCC/VCCC_ASIC",
-            "12 2_Func/scanchain",
-        ]
+        assert [t25.cell(3, 7 + i).value for i in range(2)] == ["10", "12"]
         assert [t25.cell(4, 7 + i).value for i in range(2)] == [0, 0]
         # 85C: the single DUT fails test 12 only
-        assert t85["G3"].value == "12 2_Func/scanchain"
+        assert t85["G3"].value == "12"
         assert t85["F4"].value == "12 2_Func/scanchain"
         assert t85["G4"].value == 1
+        # Excel table names are workbook-unique: one per partition map
+        names = [next(iter(sheet.tables.values())).name for sheet in (t25, t85)]
+        assert len(set(names)) == 2

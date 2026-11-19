@@ -45,16 +45,29 @@ first-appearance order breaks ties; never-executed tests (no mirror
 entry in the partition) stay off the map; the displayed matrix is
 capped at 100 x 100 tests (2026-11-19 user ruling — programs run 30 to
 200 tests with a mean of 100, so the cap bites only on the largest).
+
+2026-11-19 follow-up rulings: the grid carries ONE Excel Table
+(style: None, so the hand-tuned theme survives) with AutoFilter, so
+sorting/filtering a test column surfaces its correlations; the N x N
+diagonal gets a formula-based border rule ("this test compared to
+itself") that follows table sorts; the sheet prints A4 landscape, fit
+to one page wide with rows 1-3 repeated; its tab is light water blue
+at 40%. Repeated test numbers (MPR/PMR) become ``num#k`` tokens —
+Excel Table headers must be unique — and blank columns B:E fold shut.
 """
 
 from __future__ import annotations
+
+import re
 
 import numpy as np
 
 from deps.exporter.charts import WAFER_DIE_WIDTH
 from deps.exporter.contract import ReportHost
 from deps.exporter.helpers import format_temperature_label, get_column_letter
+from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.exporter.worksheets.test_summary import group_order_by_temperature
+from deps.exporter.writer import FOOTER_TEXT
 from deps.SharedSrc import getSetting
 from deps.uic_stdExporter import ReportSelection
 
@@ -66,19 +79,36 @@ CORRELATION_GRADIENT_MIN_HEX = "#00CC00"
 CORRELATION_GRADIENT_MID_HEX = "#FFFF00"
 CORRELATION_GRADIENT_MAX_HEX = "#CC0000"
 
+# the self-comparison diagonal's border: dark slate, border-only (no fill)
+# so the color scale underneath stays visible
+CORRELATION_DIAGONAL_BORDER_HEX = "1F2937"
+
 # the wafer map's grid geometry: the Y-label column sits in F, the grid
 # runs from G (the sbin-family anchor layout the ruling references) at
-# the wafer die width — the column labels read top-to-bottom in 90°-
-# rotated header cells (2026-11-19 user ruling), so the narrow width
-# only has to fit the counts
+# the wafer die width — the column headers carry the TEST ID only (2026-
+# 11-19 follow-up ruling: the full "num name" lives on the row labels),
+# read top-to-bottom in 90°-rotated cells, so the narrow width only has
+# to fit the counts and the short header row stays compact
 CORRELATION_LABEL_COL0 = 5
 CORRELATION_FIRST_GRID_COL0 = 6
 CORRELATION_LABEL_WIDTH = 34
 CORRELATION_GRID_COL_WIDTH = WAFER_DIE_WIDTH
-_HEADER_ROW_HEIGHT_PER_CHAR = 5.5  # pt of rotated 11pt text per label char
+_HEADER_ROW_HEIGHT_PER_CHAR = 5.5  # pt of rotated 11pt text per ID char
 _HEADER_ROW_HEIGHT_MAX = 409  # Excel's hard row-height cap
+_HEADER_ROW_HEIGHT_MIN = 24  # the table's filter dropdown buttons need room
 
 _HEADER_LABEL = "Test"  # the F-column corner cell (the Y-axis header slot)
+
+
+def _table_name(sheet_name: str) -> str:
+    """Workbook-unique, letter-starting Excel Table name for one map.
+
+    Table names carry no spaces/punctuation and must not look like a cell
+    reference; sheet names are workbook-unique, so sanitizing the sheet
+    name keeps the name unique and readable. The 40-char cap mirrors
+    ``charts.wafer_table_name``."""
+    safe = re.sub(r"\W+", "_", sheet_name).strip("_")[:40]
+    return f"Corr_{safe}" if safe else "Corr_Map"
 
 
 def _percentile50(values: list[int]) -> float:
@@ -102,7 +132,9 @@ def build_correlation_spec(sheet_name: str, tests: list, cap: int = CORRELATION_
     information); non-failing tests ride at the bottom (2026-11-19
     ruling). Order: failing DUTs descending, first-appearance order
     breaks ties — the top-failing test lands top-left. Capped at ``cap``
-    rows/columns; the legend says so when the cap bites.
+    rows/columns; the legend says so when the cap bites. Repeated test
+    numbers (MPR/PMR) get unique ``num#k`` tokens so Excel Table headers
+    stay legal while the diagonal still identifies each row.
     """
     rows = []
     for index, (num, name, mirrors) in enumerate(tests):
@@ -125,17 +157,35 @@ def build_correlation_spec(sheet_name: str, tests: list, cap: int = CORRELATION_
     )
     if kept > cap:
         legend += f"; showing the first {cap} of {kept} tests"
-    labels = [f"{row[0]} {row[1]}".strip() for row in rows]
-    # the 90°-rotated header cells read top-to-bottom: the header row
-    # must be tall enough for the longest label (Excel caps at 409 pt)
+    # MPR/PMR tests legitimately share a test number, but Excel Table
+    # headers must be unique (add_table rejects the WHOLE table on a
+    # duplicate, leaving an empty header row). Tokenize repeats as
+    # "num#2", "num#3" in display order; the same token prefixes the row
+    # label, so the diagonal rule still matches row to column.
+    nums = []
+    seen_nums: dict[str, int] = {}
+    for row in rows:
+        base = str(row[0])
+        occurrence = seen_nums.get(base, 0) + 1
+        seen_nums[base] = occurrence
+        nums.append(base if occurrence == 1 else f"{base}#{occurrence}")
+    labels = [f"{num} {row[1]}".strip() for num, row in zip(nums, rows, strict=True)]
+    # the 90°-rotated header cells read top-to-bottom: the header row must
+    # be tall enough for the longest TEST ID only — the long "num name"
+    # labels live on the rows, so the map keeps a compact footprint
+    # (Excel caps the height at 409 pt; the 24 pt floor keeps the table's
+    # filter dropdown buttons usable on short IDs)
     header_row_height = min(
         _HEADER_ROW_HEIGHT_MAX,
-        int(_HEADER_ROW_HEIGHT_PER_CHAR * max(len(label) for label in labels)) + 8,
+        max(
+            _HEADER_ROW_HEIGHT_MIN,
+            int(_HEADER_ROW_HEIGHT_PER_CHAR * max(len(num) for num in nums)) + 8,
+        ),
     )
     return {
         "sheet_name": sheet_name,
         "legend": legend,
-        "nums": [str(row[0]) for row in rows],
+        "nums": nums,
         "labels": labels,
         "header_row_height": header_row_height,
         "fails": [row[2] for row in rows],
@@ -161,23 +211,31 @@ def build_correlation_spec(sheet_name: str, tests: list, cap: int = CORRELATION_
 
 def render_correlation_sheet(ws, spec: dict, theme) -> None:
     """The wafer fail grid's layout carrying pair counts: title band row
-    1, reading legend row 2, the column-test labels rotated 90° on the
-    anchor row (2026-11-19 ruling — the wafer-die-width columns only
-    have to fit the counts), F = row-test labels ("num name"), the
-    counts as plain cached values from G, ONE 3_color_scale over the
-    whole grid, panes frozen at the grid's top-left corner (headers stay
-    visible on a 100 x 100 map)."""
+    1, reading legend row 2, the test IDs rotated 90° on the anchor row
+    (2026-11-19 follow-up ruling — the full "num name" lives in the
+    F-column row labels, so the narrow columns only have to fit the
+    counts and the header stays short), the counts as plain cached
+    values from G, ONE 3_color_scale over the data grid and a
+    formula-based border rule on the N x N diagonal. The whole map is
+    ONE Excel Table (style: None keeps the hand-tuned theme) so the
+    header filters/sorts the matrix; panes freeze at the grid's
+    top-left corner and the sheet prints A4 landscape, one page wide,
+    with rows 1-3 repeated."""
     ws.hide_gridlines(2)
-    labels, matrix = spec["labels"], spec["matrix"]
+    nums, labels, matrix = spec["nums"], spec["labels"], spec["matrix"]
     n = len(labels)
+    header_row0 = 2
     last_col0 = CORRELATION_FIRST_GRID_COL0 + n - 1
+    last_row0 = header_row0 + n  # header row + one row per test
     ws.merge_range(0, 0, 0, last_col0, spec["sheet_name"], theme.lookalike("title"))
     ws.merge_range(1, 0, 1, last_col0, spec["legend"], theme.lookalike("explanatory"))
 
     ws.set_column(CORRELATION_LABEL_COL0, CORRELATION_LABEL_COL0, CORRELATION_LABEL_WIDTH)
     ws.set_column(CORRELATION_FIRST_GRID_COL0, last_col0, CORRELATION_GRID_COL_WIDTH)
+    # columns B:E carry nothing (the map anchors at F): fold them so the
+    # screen layout and the printout do not waste horizontal space
+    ws.set_column(1, CORRELATION_LABEL_COL0 - 1, None, None, {"hidden": True})
 
-    header_row0 = 2
     axis_fmt = theme.cell_format(font="bold_body", align="center", border=True, fill_hex="EDEFF2")
     axis_fmt_rotated = theme.cell_format(
         font="bold_body",
@@ -188,23 +246,73 @@ def render_correlation_sheet(ws, spec: dict, theme) -> None:
     )
     label_fmt = theme.cell_format(font="bold_body", align="left", border=True, fill_hex="EDEFF2")
     body_fmt = theme.cell_format(font="body", align="center")
-    ws.write(header_row0, CORRELATION_LABEL_COL0, _HEADER_LABEL, axis_fmt)
     ws.set_row(header_row0, spec["header_row_height"])
-    for offset, label in enumerate(labels):
-        ws.write(header_row0, CORRELATION_FIRST_GRID_COL0 + offset, label, axis_fmt_rotated)
+
+    # one Excel Table spans label column + grid, header row through the
+    # last data row: the AutoFilter arrows sort/filter the matrix while
+    # ``style: None`` leaves the hand-tuned formats untouched (the
+    # charts.py bin tables' pattern)
+    ws.add_table(
+        header_row0,
+        CORRELATION_LABEL_COL0,
+        last_row0,
+        last_col0,
+        {
+            "name": _table_name(spec["sheet_name"]),
+            "style": None,
+            "autofilter": True,
+            "columns": [
+                {
+                    "header": header,
+                    "header_format": axis_fmt if offset == 0 else axis_fmt_rotated,
+                }
+                for offset, header in enumerate([_HEADER_LABEL, *nums])
+            ],
+        },
+    )
     for row_offset, label in enumerate(labels):
         row0 = header_row0 + 1 + row_offset
         ws.write(row0, CORRELATION_LABEL_COL0, label, label_fmt)
         for col_offset, value in enumerate(matrix[row_offset]):
             ws.write(row0, CORRELATION_FIRST_GRID_COL0 + col_offset, int(value), body_fmt)
 
-    first_letter = get_column_letter(CORRELATION_FIRST_GRID_COL0)
-    last_letter = get_column_letter(last_col0)
+    # get_column_letter is 1-based: the old 0-based args shifted the range
+    # one column left and dropped the last grid column (2026-11-19 fix)
+    first_letter = get_column_letter(CORRELATION_FIRST_GRID_COL0 + 1)
+    last_letter = get_column_letter(last_col0 + 1)
+    grid_range = f"{first_letter}{header_row0 + 2}:{last_letter}{header_row0 + 1 + n}"
+    # border-only diagonal rule, anchored at the range's top-left cell:
+    # the row label's leading test number vs the column header. Relative
+    # refs follow Excel table sorts; no fill, so the scale shows through.
+    label_letter = get_column_letter(CORRELATION_LABEL_COL0 + 1)
+    label_anchor = f"${label_letter}{header_row0 + 2}"
+    header_anchor = f"{first_letter}${header_row0 + 1}"
     ws.conditional_format(
-        f"{first_letter}{header_row0 + 2}:{last_letter}{header_row0 + 1 + n}",
-        dict(spec["gradient"]),
+        grid_range,
+        {
+            "type": "formula",
+            "criteria": (
+                f'LEFT({label_anchor},FIND(" ",{label_anchor}&" ")-1)'
+                f"={header_anchor}"
+            ),
+            # xlsxwriter border code 3 = dashed ("hyphen" style): visible
+            # without overpowering the tiny colored cells
+            "format": theme.cf_border(CORRELATION_DIAGONAL_BORDER_HEX, style=3),
+            "stop_if_true": False,
+        },
     )
+    ws.conditional_format(grid_range, dict(spec["gradient"]))
     ws.freeze_panes(header_row0 + 1, CORRELATION_FIRST_GRID_COL0)
+
+    # print design (2026-11-19 user ruling): A4 landscape, one page wide /
+    # unlimited tall, rows 1-3 (title / legend / rotated headers) repeat
+    ws.set_paper(9)  # A4
+    ws.set_landscape()
+    ws.fit_to_pages(1, 0)
+    ws.repeat_rows(0, header_row0)
+    ws.print_area(0, 0, last_row0, last_col0)
+    ws.set_footer(FOOTER_TEXT)
+    ws.set_tab_color(f"#{TAB_COLOR_HEXES['test_correlation']}")
 
 
 class TestCorrelationMixin(ReportHost):
