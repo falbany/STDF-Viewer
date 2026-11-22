@@ -1,0 +1,10 @@
+{
+  "plugins": {
+    "enabledPlugins": {
+      "mattpocock-skills@claude-plugins-official": false,
+      "design@zcode-plugins-official": true,
+      "visualize@zcode-plugins-official": true
+    },
+    "visualizeDefaultOffMigrated": true
+  }
+}

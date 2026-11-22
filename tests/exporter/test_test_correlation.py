@@ -302,11 +302,12 @@ class TestCorrelationMapSheets:
         assert "Test Correlation Map" not in wb.sheetnames
 
     def test_correlation_alone_standalone_export(self, tmp_path, qapp, monkeypatch):
-        # the 2026-11-19 fix: NO Test Summary / DUT Summary / Test
-        # Statistics selected — the map still builds (its context tick is
+        # the 2026-11-19 fix: NO Test Summary / DUT Summary selected —
+        # the map still builds (its context tick is
         # in the GUI denominator, so the progress math never divides by 0)
         gen, wb, _, _, _ = build_generated(
-            tmp_path, qapp, with_dut=False, correlation_selected=True, monkeypatch=monkeypatch
+            tmp_path, qapp, with_test_summary=False, with_per_dut=False,
+            correlation_selected=True, monkeypatch=monkeypatch
         )
         assert "Test Correlation Map" in wb.sheetnames
         sheet = wb["Test Correlation Map"]

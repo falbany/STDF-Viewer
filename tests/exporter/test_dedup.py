@@ -9,7 +9,6 @@ FETCH_SELECT_DUT_SUMMARY). No Qt, no workbook — pure functions.
 from deps.exporter.dedup import (
     compute_fid_ranks,
     compute_remeasure_drops,
-    drops_to_exclusion,
     file_dates_from_rows,
 )
 
@@ -254,10 +253,3 @@ class TestWaferAwareDrops:
         info = dut_info([(1, 0, "SN541", "Failed - 0x08", "W01")])
         assert compute_remeasure_drops(info, [1, 2]) == set()
 
-
-class TestDropsToExclusion:
-    def test_pairs_group_by_fid(self):
-        assert drops_to_exclusion({(1, 0), (2, 5)}) == {1: {0}, 2: {5}}
-
-    def test_empty_set_empty_dict(self):
-        assert drops_to_exclusion(set()) == {}

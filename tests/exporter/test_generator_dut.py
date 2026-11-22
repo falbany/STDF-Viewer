@@ -285,7 +285,6 @@ WAFER_MAP_PAYLOAD = {
 def build_generated(
     tmp_path,
     qapp,
-    with_stat=False,
     with_file_info=False,
     part_id_tagged=True,
     file_temperature=None,
@@ -296,16 +295,14 @@ def build_generated(
     hide_remeasured=False,
     with_test_summary=True,
     with_per_dut=True,
-    with_dut=True,
     wafer_tuples=None,
     heat_selected=False,
     correlation_selected=False,
     monkeypatch=None,
     file_dates=None,
-    stat_dut_rows=None,
 ):
-    """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus Stat when
-    `with_stat`, FileInfo when `with_file_info`) and return (generator,
+    """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus FileInfo
+    when `with_file_info`) and return (generator,
     reloaded workbook, report path, close/error capture). `file_temperature`
     appends a File Info "Test Temperature:" row (the Test Summary fallback
     source); `part_id_tagged` drops the _T<n>C tag from the part IDs.
@@ -314,9 +311,7 @@ def build_generated(
     `monkeypatch` fixture so it auto-restores). `wafer_tuples` overrides the
     wafer selection (e.g. [(-1, -1, "STACK")] for the stacked-wafer path).
     `heat_selected` adds the Wafer Heat Map content (issue #13: +1 tick
-    when a stacked tuple is present). `stat_dut_rows` overrides the
-    stat-only `waitForDutInfo` stub — the 2026-11-17 parity pin feeds the
-    same rows the heavy fetch serves."""
+    when a stacked tuple is present)."""
     testTuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
     selectedFiles = [1]
     selectedHeads = [1]
@@ -335,10 +330,6 @@ def build_generated(
         ReportSelection.Bin,
         ReportSelection.Wafer,
     ]
-    if with_stat:
-        # fixed creation order governs; Stat slots after the DUT block
-        selection.insert(2, ReportSelection.Stat)
-        totalLoopCnt += 2  # Stat: +1 per data row
     if not with_test_summary:
         # DUT-only: the matrix never renders — the block contributes
         # 1 context tick + 2 per-DUT ticks (the matrix's 2 test ticks go)
@@ -349,13 +340,6 @@ def build_generated(
         # the context still runs for the matrix — 1 + 2 block ticks)
         selection.remove(ReportSelection.DUT)
         totalLoopCnt -= 2
-    if not with_dut:
-        # stat-only selection: neither DUT-block sheet renders (no
-        # context fetch, no block ticks) — the filter's stat-only
-        # fallback fetch path (§7.2) is what still honors the drop-set
-        selection.remove(ReportSelection.TestSummary)
-        selection.remove(ReportSelection.DUT)
-        totalLoopCnt -= 5
     if with_file_info:
         # classic sheet-creation order: FileInfo first (+1 loop tick)
         selection.insert(0, ReportSelection.FileInfo)
@@ -368,13 +352,9 @@ def build_generated(
             totalLoopCnt += 1
     if correlation_selected:
         # 2026-11-19: the correlation mixin rides the DUT-block context —
-        # its sheets are tickless; when it is the ONLY context trigger
-        # (no Test Summary / DUT Summary) the context tick is its own
+        # its sheets are tickless; the context tick is already counted in
+        # the base 5 (it runs whenever any DUT-block sheet is selected)
         selection.append(ReportSelection.TestCorrelation)
-        if not any(
-            s in selection for s in (ReportSelection.TestSummary, ReportSelection.DUT)
-        ):
-            totalLoopCnt += 1
     reportInfo = (
         selection,
         testTuples,
@@ -392,7 +372,7 @@ def build_generated(
         sig, QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, channel
     )
 
-    # GUI side: classic-protocol summary table, chart PNGs, stat rows
+    # GUI side: classic-protocol summary table, chart PNGs
     # fetch-once invariant (2026-11-16 rename design): the context hoist
     # must fetch the heavy dutSummary handshake exactly once per export,
     # regardless of how many DUT-block sheets are selected
@@ -412,27 +392,10 @@ def build_generated(
         {1: (1, "2026-01-01 10:00:00 (UTC+0)", "")} if file_dates is None else file_dates
     )
     # the filter path must never reach the GUI for dutInfo when the DUT
-    # sheet rendered; the stat-only selection stubs the dutInfo fetch
-    # with the FULL dutInfo shape (getFullDUTInfoFromDutArray rows,
-    # 2026-11-17: the stat-only fetch is repointed to the full fetch)
+    # sheet rendered
     gen.waitForDutInfo = lambda *args: (_ for _ in ()).throw(
         AssertionError("waitForDutInfo must not be called when the DUT sheet ran")
     )
-    gen._captured_stat_kargs = []
-    if not with_dut:
-        # `stat_dut_rows` (parity pin, 2026-11-17) overrides the stub so
-        # the stat-only pipeline consumes the SAME rows the heavy fetch
-        # serves — identical input, identical drop-set expected (§7.2)
-        gen.waitForDutInfo = lambda heads, sites, fids: (
-            stat_dut_rows
-            if stat_dut_rows is not None
-            else {
-                1: {
-                    0: _full_info("SN541", "Failed - 0x08"),
-                    2: _full_info("SN541", "Passed - 0x00"),
-                }
-            }
-        )
     if hide_remeasured:
         assert monkeypatch is not None, "hide_remeasured=True requires monkeypatch"
         monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
@@ -448,61 +411,7 @@ def build_generated(
 
     gen.waitForImage = fake_wait_for_image
 
-    # classic DataInterface.getStatistics shape (containsFTR=True: the
-    # "Pattern Name" column follows "Test Name"; VECT_NAM only on the FTR row)
-    stat_table = [
-        [
-            "",
-            "Test Name",
-            "Pattern Name",
-            "Unit",
-            "Low Limit",
-            "High Limit",
-            "Fail Num",
-            "Cpk",
-            "Average",
-            "Median",
-            "St. Dev.",
-            "Min",
-            "Max",
-        ],
-        [
-            "10 / Head1 / All Sites",
-            "0_TXCC/VCCC_ASIC",
-            "",
-            "V",
-            "0.500",
-            "1.500",
-            "1",
-            "1.23",
-            "1.000",
-            "1.000",
-            "0.010",
-            "0.980",
-            "1.020",
-        ],
-        [
-            "12 / Head1 / All Sites",
-            "2_Func/scanchain",
-            "PAT_TOP",
-            "P/F",
-            "N/A",
-            "N/A",
-            "0",
-            "∞",
-            "1.000",
-            "1.000",
-            "0.000",
-            "0.000",
-            "1.000",
-        ],
-    ]
-
     def fake_wait_for_data_list(heads, sites, fids, chartType, kargs):
-        if chartType == tab.Trend and kargs.get("testTuples") == testTuples:
-            # writeStatistic passes the FULL testTuples list (per-test trend
-            # rows pass a single-tuple list — never equal here, two tests)
-            return stat_table
         if chartType == tab.Bin:
             return bin_table("HB") if kargs.get("isHBIN") else bin_table("SB")
         if chartType == tab.Wafer:
@@ -521,14 +430,6 @@ def build_generated(
         return [["TREND-ROW", "mean", 1.1]]
 
     gen.waitForDataList = fake_wait_for_data_list
-
-    real_fake = gen.waitForDataList
-
-    def capturing_wait_for_data_list(heads, sites, fids, chartType, kargs):
-        gen._captured_stat_kargs.append((chartType, dict(kargs)))
-        return real_fake(heads, sites, fids, chartType, kargs)
-
-    gen.waitForDataList = capturing_wait_for_data_list
 
     # writeTest_Summary fetches the File Info table for the temperature
     # fallback regardless of the sheet selection — the stub answers from
@@ -1384,160 +1285,6 @@ class TestRemeasureRankOrder:
         }
         assert gen._resolve_remeasure_drops() == set()
 
-    def test_stat_only_matches_dut_path_dropset(self, tmp_path, qapp, monkeypatch):
-        # §7.2 parity re-pinned under the wafer-aware key (2026-11-17):
-        # identical rows through both pipelines — the DUT-block path
-        # (stored drops) and the stat-only path (_resolve_remeasure_drops)
-        # must yield the same drop-set for the same selection
-        rows = make_summary(duplicate_sn=True)["dutInfo"]
-        gen_dut, _wb, _path, _closed, _errors = build_generated(
-            tmp_path, qapp, hide_remeasured=True, duplicate_sn=True, monkeypatch=monkeypatch
-        )
-        gen_stat, _wb, _path, _closed, _errors = build_generated(
-            tmp_path, qapp, hide_remeasured=True, with_dut=False,
-            monkeypatch=monkeypatch, stat_dut_rows=rows,
-        )
-        assert gen_dut._remeasure_drops == gen_stat._resolve_remeasure_drops()
-
-
-class TestStatsExclusionChain:
-    """G3: Test Statistics honors the drop-set in every selection — via
-    the kargs hand-off when the DUT sheet ran, via the light dutInfo-only
-    fetch when it did not."""
-
-    def test_dut_selected_kargs_carry_exclusion(self, tmp_path, qapp, monkeypatch):
-        generated = build_generated(
-            tmp_path,
-            qapp,
-            with_stat=True,
-            duplicate_sn=True,
-            hide_remeasured=True,
-            monkeypatch=monkeypatch,
-        )
-        gen, _, _, _, _ = generated
-        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
-        assert stat_kargs and stat_kargs[0].get("dut_exclusion") == {1: {0}}
-
-    def test_dut_selected_filter_off_no_exclusion_key(self, tmp_path, qapp):
-        generated = build_generated(tmp_path, qapp, with_stat=True, duplicate_sn=True)
-        gen, _, _, _, _ = generated
-        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
-        assert stat_kargs and "dut_exclusion" not in stat_kargs[0]
-
-    def test_dut_selected_never_fetches_dutinfo(self, tmp_path, qapp, monkeypatch):
-        # waitForDutInfo raises when the DUT sheet ran — the run succeeding
-        # is the assertion
-        build_generated(
-            tmp_path,
-            qapp,
-            with_stat=True,
-            duplicate_sn=True,
-            hide_remeasured=True,
-            monkeypatch=monkeypatch,
-        )
-
-    def test_stat_only_fetches_dutinfo_and_excludes(self, tmp_path, qapp, monkeypatch):
-        generated = build_generated(
-            tmp_path,
-            qapp,
-            with_stat=True,
-            duplicate_sn=True,
-            hide_remeasured=True,
-            with_dut=False,
-            monkeypatch=monkeypatch,
-        )
-        gen, wb, _, _, _ = generated
-        # the DUT sheet is absent; the fallback fetch ran (stub did not raise)
-        assert "Test Summary" not in wb.sheetnames
-        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
-        # partial fetch: SN541 at dutIndex 0 and 2 → first occurrence drops
-        assert stat_kargs and stat_kargs[0].get("dut_exclusion") == {1: {0}}
-
-
-class TestStatFtrCacheDetection:
-    """DUT + Stat selection: writeTest_Summary runs FIRST and caches the FTR
-    test keys (PRIMARY detection signal); the Test Statistics FTR row gets
-    the 0 / 0.999999 pseudo-limits, and the Fail Num / Cpk CF letters shift
-    right of the Pattern Name column."""
-
-    @pytest.fixture
-    def generated(self, tmp_path, qapp):
-        return build_generated(tmp_path, qapp, with_stat=True)
-
-    def test_sheet_inventory_with_stat(self, generated):
-        _, wb, _, _, _ = generated
-        assert wb.sheetnames == [
-            "Test Summary",
-            "DUT Summary",
-            "Test Statistics",
-            "Trend Chart",
-            "Bin Chart",
-            "Wafer W01",
-        ]
-
-    def test_ftr_cache_built_from_test_summary(self, generated):
-        gen, _, _, _, _ = generated
-        # (test_num, full test name) of every SUB_CODE==FTR testTuple; the
-        # PTR test (10, "0_TXCC/VCCC_ASIC") is not cached
-        assert gen._ftr_tests == {(12, "2_Func/scanchain")}
-
-    def test_ftr_row_pseudo_limits_via_cache(self, generated):
-        _, wb, _, _, _ = generated
-        ws = wb["Test Statistics"]
-        # FTR-shifted transformed header: SpecMin=I, SpecMax=J. FTR row 3
-        # carries the synthetic floats; the PTR row keeps its real limits.
-        # (-0.999999 survives the xlsx round-trip as a float — non-integral;
-        # 0.999999 likewise.)
-        assert ws["I3"].value == -0.999999
-        assert isinstance(ws["I3"].value, float)
-        assert not isinstance(ws["I3"].value, str)
-        assert ws["J3"].value == 0.999999
-        assert isinstance(ws["J3"].value, float)
-        assert ws["I2"].value == 0.5
-        assert ws["J2"].value == 1.5
-
-    def test_fail_num_cpk_cf_shifted_letters(self, generated):
-        _, wb, _, _, _ = generated
-        ws = wb["Test Statistics"]
-        # Fail Num index 10 -> K (left of the ninth-wave Cp insert,
-        # unchanged); Cp index 11 -> L (the old Cpk slot); Cpk index 12
-        # -> M (Pattern Name shift + Cp insert); data rows only (header
-        # row 1 excluded)
-        fail_rules = cf_block(ws, "K2:K3")
-        assert [r.formula for r in fail_rules] == [
-            ["AND(ISNUMBER(K2),K2>0)"],
-            ["AND(ISNUMBER(K2),K2=0)"],
-        ]
-        cp_rules = cf_block(ws, "L2:L3")
-        assert [r.formula[0] for r in cp_rules] == [
-            "AND(ISNUMBER(L2),L2>=1.67)",
-            "AND(ISNUMBER(L2),L2>=1.33)",
-            "AND(ISNUMBER(L2),L2>=1)",
-            "AND(ISNUMBER(L2),L2<1)",
-        ]
-        cpk_rules = cf_block(ws, "M2:M3")
-        assert [r.formula[0] for r in cpk_rules] == [
-            "AND(ISNUMBER(M2),M2>=1.67)",
-            "AND(ISNUMBER(M2),M2>=1.33)",
-            "AND(ISNUMBER(M2),M2>=1)",
-            "AND(ISNUMBER(M2),M2<1)",
-        ]
-
-    def test_loop_count_includes_stat_rows(self, generated):
-        gen, _, _, _, _ = generated
-        # DUT block 5 + Stat 2 + Trend 2 + Bin 1 + Wafer 1
-        assert gen.loopCount == gen.totalLoopCnt == 11
-
-    def test_close_signal_emitted_no_error(self, generated):
-        _, _, _, closed, errors = generated
-        assert closed == [True]
-        assert errors == []
-
-
-# --------------------------------------------------------------------------
-# Bin-sheet banner (ninth wave: Product ID / Sublot ID from File Info)
-# --------------------------------------------------------------------------
-
 
 class TestBinBanner:
     def test_banner_from_file_info(self, generated_with_file_info):
@@ -1649,14 +1396,6 @@ class TestTemperatureSplit:
         )
         _, wb, _, _, _ = generated
         assert wb.sheetnames == ["Test Summary", "DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
-
-    def test_split_does_not_touch_stats_kargs(self, tmp_path, qapp, monkeypatch):
-        generated = self.split_generated(tmp_path, qapp, monkeypatch, with_stat=True)
-        gen, _, _, _, _ = generated
-        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
-        assert stat_kargs and stat_kargs[0] == {
-            "testTuples": [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
-        }
 
 
 class TestSplitConsumesSharedTable:
@@ -2193,11 +1932,10 @@ class TestDutBlockSelectionCombos:
         """Review Focus 2: DUT Summary without the Test Summary matrix.
 
         The per-DUT sheet renders, the matrix does not; the context ran
-        once so Test Statistics keeps full FTR pseudo-limits (the cache
-        filled) and the stored drop-set (the light dutInfo fetch —
-        stubbed to throw — is never reached)."""
+        once so the FTR cache filled and the drop-set stored (the light
+        dutInfo fetch — stubbed to throw — is never reached)."""
         gen, wb, reportPath, closed, errors = build_generated(
-            tmp_path, qapp, with_test_summary=False, with_stat=True, monkeypatch=monkeypatch,
+            tmp_path, qapp, with_test_summary=False, monkeypatch=monkeypatch,
         )
         assert closed == [True] and errors == []
         names = wb.sheetnames
@@ -2210,34 +1948,13 @@ class TestDutBlockSelectionCombos:
         assert gen.loopCount == gen.totalLoopCnt
         assert gen._dut_summary_fetch_count == 1  # fetch-once invariant
 
-    def test_neither_dut_sheet_stat_only_unchanged(self, tmp_path, qapp, monkeypatch):
-        """Review Focus 4: neither sheet + Stat + hide_remeasured — the
-        light dutInfo-only fetch answers (§7.2 fallback), the cache stays
-        empty (Pattern-Name fallback), the block contributes 0 ticks."""
-        gen, wb, reportPath, closed, errors = build_generated(
-            tmp_path, qapp, with_dut=False, with_stat=True,
-            hide_remeasured=True, monkeypatch=monkeypatch,
-        )
-        assert closed == [True] and errors == []
-        assert "Test Statistics" in wb.sheetnames
-        assert "Test Summary" not in wb.sheetnames
-        assert "DUT Summary" not in wb.sheetnames
-        assert gen._ftr_tests == set()  # stat-only fallback signal
-        # the drop-set is computed on demand from the light fetch, never
-        # stored back — None is the "context never ran" marker
-        assert gen._remeasure_drops is None
-        assert isinstance(gen._resolve_remeasure_drops(), set)
-        assert gen.loopCount == gen.totalLoopCnt
-        assert gen._dut_summary_fetch_count == 0  # no heavy fetch at all
-
-
     def test_test_summary_only_export(self, tmp_path, qapp, monkeypatch):
         """Review Focus coverage (review finding 9): the matrix alone —
         tick cadence 1 context + 2 matrix (no per-DUT ticks), fetch-once
         context, cache + drop-set stored. Hook #6 routes this selection
         through the test page at the dialog level."""
         gen, wb, reportPath, closed, errors = build_generated(
-            tmp_path, qapp, with_per_dut=False, with_stat=True, monkeypatch=monkeypatch,
+            tmp_path, qapp, with_per_dut=False, monkeypatch=monkeypatch,
         )
         assert closed == [True] and errors == []
         names = wb.sheetnames

@@ -58,7 +58,7 @@ mirroring the classic cursor gaps and progress cadence.
 
 Worksheets split (2026-11-12): the per-sheet writers moved verbatim to
 ``deps/exporter/worksheets/*.py`` as mixins (file_info, gdr_dtr,
-test_summary, dut_summary, test_statistics, bin_chart, wafer_map,
+test_summary, dut_summary, bin_chart, wafer_map,
 trend_chart, histogram); this module composes them into
 ``ModernReportGenerator`` and
 keeps only the assembly — ``__init__`` state, the shared
@@ -79,7 +79,6 @@ from deps.exporter.worksheets.file_info import FileInfoMixin
 from deps.exporter.worksheets.gdr_dtr import GdrDtrMixin
 from deps.exporter.worksheets.histogram import HistogramMixin
 from deps.exporter.worksheets.test_correlation import TestCorrelationMixin
-from deps.exporter.worksheets.test_statistics import TestStatisticsMixin
 from deps.exporter.worksheets.test_summary import TestSummaryMixin, order_dut_block
 from deps.exporter.worksheets.trend_chart import TrendChartMixin
 from deps.exporter.worksheets.wafer_heat_map import WaferHeatMapMixin
@@ -110,7 +109,6 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
     GdrDtrMixin,
     TestSummaryMixin,
     DUTSummaryMixin,
-    TestStatisticsMixin,
     BinChartMixin,
     WaferMapMixin,
     WaferHeatMapMixin,
@@ -226,7 +224,6 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
                 ReportSelection.TestSummary,
                 ReportSelection.DUT,
                 ReportSelection.GDR_DTR,
-                ReportSelection.Stat,
                 ReportSelection.Trend,
                 ReportSelection.Histo,
                 ReportSelection.Bin,
@@ -246,8 +243,6 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
                     sheetName = self.tr("DUT Summary")
                 elif cont == ReportSelection.GDR_DTR:
                     sheetName = self.tr("GDR & DTR Summary")
-                elif cont == ReportSelection.Stat:
-                    sheetName = self.tr("Test Statistics")
                 elif cont == ReportSelection.Trend:
                     sheetName = self.tr("Trend Chart")
                 elif cont == ReportSelection.Histo:
@@ -325,10 +320,6 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
                 return
 
             # ** write contents related to test numbers
-            self.writeStatistic(self.testTuples, self.selectedHeads, self.selectedSites)
-            if self.forceQuit:
-                return
-
             for testTuple in self.testTuples:
                 for head, site in product(self.selectedHeads, self.selectedSites):
                     if self.forceQuit:
