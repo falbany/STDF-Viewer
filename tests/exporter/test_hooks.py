@@ -73,21 +73,47 @@ def test_split_temperature_round_trips():
     assert params.gen.split_temperature is True
 
 
-def test_test_summary_default_true():
-    assert SettingParams().gen.test_summary is True
-
-
-def test_test_summary_alias_in_dump():
-    dumped = SettingParams().model_dump(by_alias=True)
-    assert dumped["General"]["Test Summary"] is True
-
-
-def test_test_summary_round_trips():
+def test_test_summary_setting_removed():
+    # 2026-11-23 takeover: the matrix rides Stat_cb — the dedicated
+    # setting + checkbox are gone; "Test Summary" leaves the dump
     params = SettingParams()
-    params.gen.test_summary = False
+    assert not hasattr(params.gen, "test_summary")
     dumped = params.model_dump(by_alias=True)
-    assert dumped["General"]["Test Summary"] is False
-    assert params.gen.test_summary is False
+    assert "Test Summary" not in dumped["General"]
+
+
+def test_testsummary_enum_member_removed():
+    # the fork-added member is gone (gap at 10 accepted — IntEnum needs
+    # no contiguity, nothing persists members by value); Stat keeps its
+    # upstream value 6
+    from deps.uic_stdExporter import ReportSelection
+
+    assert not hasattr(ReportSelection, "TestSummary")
+    assert ReportSelection.Stat == 6
+
+
+def test_no_dangling_testsummary_references():
+    # no Python source under deps/ references the removed family
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2] / "deps"
+    offenders = [
+        f.name
+        for f in root.rglob("*.py")
+        if "__pycache__" not in str(f)
+        and ("TestSummary_cb" in f.read_text() or "ReportSelection.TestSummary" in f.read_text())
+    ]
+    assert offenders == []
+
+
+def test_stat_still_routes_to_test_page():
+    # hook #6 (2026-11-23): Stat keeps its seat in the go-to-test-page
+    # routing set AND the >=1-test validation set — Stat_cb serves both
+    # modes (classic stat table + the Stat-driven matrix)
+    import pathlib
+
+    source = (pathlib.Path(__file__).resolve().parents[2] / "deps" / "uic_stdExporter.py").read_text()
+    assert source.count("ReportSelection.Stat,") >= 2
 
 
 def test_wafer_heat_map_default_true():
@@ -259,11 +285,12 @@ def _grid_slots() -> dict[str, list[tuple[int, ...]]]:
     return slots
 
 
-def test_test_correlation_checkbox_sits_right_of_test_summary():
-    # 2026-11-19 user ruling: the visible slot follows Test Summary (2,2)
+def test_test_correlation_checkbox_takes_freed_slot():
+    # 2026-11-23: TestSummary_cb removed (Stat_cb drives the matrix now)
+    # — the Test Correlation Map moves into its freed (2,2) slot
     slots = _grid_slots()
-    assert slots["TestSummary_cb"] == [(2, 2, 1, 1)]
-    assert slots["TestCorrelation_cb"] == [(2, 3, 1, 1)]
+    assert "TestSummary_cb" not in slots
+    assert slots["TestCorrelation_cb"] == [(2, 2, 1, 1)]
 
 
 class _FakeStackedWidget:

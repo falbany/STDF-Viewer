@@ -19,8 +19,7 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
 | `file_info.py` | `writeFileInfo()` |
 | `gdr_dtr.py` | `writeGDR_DTR()` |
 | `histogram.py` | `writeHistogram(testTuple, head, site)` |
-| `test_statistics.py` | `writeStatistic(testTuples, heads, sites)` |
-| `test_summary.py` | `writeTest_Summary()` + `_prepare_dut_context()` (generator-level, shared context) |
+| `test_statistics.py` | `writeStatistic()` — the die-part matrix under its 2026-11-23 takeover name (was `test_summary.py`'s `writeTest_Summary`), plus `_prepare_dut_context()` (generator-level, shared context) |
 | `trend_chart.py` | `writeTrendPlot(testTuple, head, site)` |
 | `wafer_map.py` | `writeWaferMap()` |
 | `wafer_heat_map.py` | `writeWaferHeatMap()` |
@@ -48,8 +47,8 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
   computed numbers carry Excel formulas referencing the table ranges
   (e.g. `=SUM`, `=COUNTIF`), so they recalculate when the user edits the
   workbook. Formulas are written in English syntax (see parent ruling).
-- **Specs before pixels.** The Test Summary sheet is built as a spec dict
-  (`test_summary.build_test_summary_spec`) rendered by
+- **Specs before pixels.** The Test Statistics matrix is built as a spec dict
+  (`test_statistics.build_test_statistics_spec`) rendered by
   `writer.render_matrix_sheet`; plain tables go through
   `sheets.plain_table_spec` → `writer.render_plain_table`. Follow that
   split: mixins decide data, `writer.py` renders.
@@ -65,16 +64,18 @@ entry point** (pylint's `min-public-methods=1` admits exactly this shape):
 - **`merge_range()` needs a ≥2-cell span.** Single cells go through
   `write()`. The KPI-card sites in `charts.py` carry the guard (commit
   `2020ec3`); new merge sites need one too.
-- **Cross-mixin calls exist only by convention.** `test_statistics` calls
-  `test_summary`'s `_resolve_remeasure_drops` (its route to the shared
-  supersede ranks); `test_summary` and `wafer_map` call
-  `reportGenerator._fid_ranks` directly. They work only because both
-  sides inherit `ReportHost`, where those members are declared.
-- **The DUT-block context is generator-level.** `test_summary`'s
-  `_prepare_dut_context()` is invoked by `report_core` (once, when either
-  DUT-block sheet is selected) and fills the shared context
-  (`_dut_ctx_*`, `_ftr_tests`, `_remeasure_drops`) that both writers and
-  Test Statistics consume — the writers never fetch.
+- **Cross-mixin calls exist only by convention.** `test_statistics` and
+  `wafer_map` call `reportGenerator._fid_ranks` directly. They work only
+  because both sides inherit `ReportHost`, where those members are
+  declared. (2026-11-22: the old `test_statistics` → `test_summary`
+  `_resolve_remeasure_drops` call died with the classic-style stat
+  sheet.)
+- **The DUT-block context is generator-level.** `test_statistics`'s
+  `_prepare_dut_context()` is invoked by `report_core` (once, when
+  either DUT-block sheet — the matrix under `Stat_cb` or the per-DUT
+  sheet — is selected) and fills the shared context (`_dut_ctx_*`,
+  `_remeasure_drops`) that both writers consume — the writers never
+  fetch.
 
 ## Adding a sheet type
 

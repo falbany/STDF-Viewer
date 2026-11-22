@@ -70,7 +70,6 @@ class ReportSelection(IntEnum):
     GDR_DTR = 7
     PPQQ = 8
     Correlation = 9
-    TestSummary = 10  # fork(falbany): the Test Summary matrix (modern-only)
     WaferHeatMap = 11  # fork(falbany): the stacked all-wafers heat map (modern-only)
     TestCorrelation = 12  # fork(falbany): the Test Correlation Map (modern-only)
 
@@ -885,7 +884,6 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.Bin_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.Stat_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.DUT_cb.clicked.connect(self.changeBtnStyle)
-        self.exportUI.TestSummary_cb.clicked.connect(self.changeBtnStyle)  # fork(falbany)
         self.exportUI.FileInfo_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.Wafer_cb.clicked.connect(self.changeBtnStyle)
         self.exportUI.WaferHeatMap_cb.clicked.connect(self.changeBtnStyle)  # fork(falbany)
@@ -901,9 +899,6 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.HideRemeasured_cb.toggled.connect(self.onHideRemeasuredToggled)
         self.exportUI.SplitTemperature_cb.setChecked(getSetting().gen.split_temperature)
         self.exportUI.SplitTemperature_cb.toggled.connect(self.onSplitTemperatureToggled)
-        # fork(falbany): Test Summary matrix toggle (modern-only)
-        self.exportUI.TestSummary_cb.setChecked(getSetting().gen.test_summary)
-        self.exportUI.TestSummary_cb.toggled.connect(self.onTestSummaryToggled)
         # fork(falbany): Wafer Heat Map toggle (modern-only)
         self.exportUI.WaferHeatMap_cb.setChecked(getSetting().gen.wafer_heat_map)
         self.exportUI.WaferHeatMap_cb.toggled.connect(self.onWaferHeatMapToggled)
@@ -935,11 +930,6 @@ class stdfExporter(QtWidgets.QDialog):
         getSetting().gen.split_temperature = checked
         dumpConfigFile()
 
-    def onTestSummaryToggled(self, checked: bool):
-        # fork(falbany): persist Test Summary toggle
-        getSetting().gen.test_summary = checked
-        dumpConfigFile()
-
     def onWaferHeatMapToggled(self, checked: bool):
         # fork(falbany): persist Wafer Heat Map toggle
         getSetting().gen.wafer_heat_map = checked
@@ -955,7 +945,6 @@ class stdfExporter(QtWidgets.QDialog):
         enabled = self.exportUI.ModernReport_cb.isChecked()
         self.exportUI.HideRemeasured_cb.setEnabled(enabled)
         self.exportUI.SplitTemperature_cb.setEnabled(enabled)
-        self.exportUI.TestSummary_cb.setEnabled(enabled)
         self.exportUI.WaferHeatMap_cb.setEnabled(enabled)
         self.exportUI.TestCorrelation_cb.setEnabled(enabled)
                 
@@ -1157,8 +1146,6 @@ class stdfExporter(QtWidgets.QDialog):
         if self.exportUI.Bin_cb.isChecked(): selectedContents.append(ReportSelection.Bin)
         if self.exportUI.Stat_cb.isChecked(): selectedContents.append(ReportSelection.Stat)
         if self.exportUI.DUT_cb.isChecked(): selectedContents.append(ReportSelection.DUT)
-        # fork(falbany): modern-only — the classic loop never sees this member
-        if self.exportUI.TestSummary_cb.isChecked(): selectedContents.append(ReportSelection.TestSummary)
         if self.exportUI.FileInfo_cb.isChecked(): selectedContents.append(ReportSelection.FileInfo)
         if self.exportUI.Wafer_cb.isChecked(): selectedContents.append(ReportSelection.Wafer)
         # fork(falbany): modern-only — the classic exporter never sees this member
@@ -1252,7 +1239,6 @@ class stdfExporter(QtWidgets.QDialog):
                                             ReportSelection.DUT, 
                                             ReportSelection.Stat,
                                             ReportSelection.PPQQ,
-                                            ReportSelection.TestSummary,
                                             # fork(falbany): Test Correlation
                                             # selects its tests on the test page
                                             ReportSelection.TestCorrelation}) > 0:  # fork(falbany): hook #6
