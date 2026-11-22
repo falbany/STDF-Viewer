@@ -190,7 +190,7 @@ class TestCorrelationRender:
             float(spec["gradient"]["max_value"]),
         ]
         # 2026-11-19 user ruling: reuse the modern Cpk band palette from
-        # the Test Summary (soft green / amber / red)
+        # the Test Statistics (soft green / amber / red)
         assert [str(color.rgb) for color in rules[0].colorScale.color] == [
             "FFA7F3D0",
             "FFFEF3C7",
@@ -278,7 +278,7 @@ class TestCorrelationMapSheets:
             tmp_path, qapp, correlation_selected=True, monkeypatch=monkeypatch
         )
         assert wb.sheetnames == [
-            "Test Summary",
+            "Test Statistics",
             "DUT Summary",
             "Test Correlation Map",
             "Trend Chart",
@@ -302,7 +302,7 @@ class TestCorrelationMapSheets:
         assert "Test Correlation Map" not in wb.sheetnames
 
     def test_correlation_alone_standalone_export(self, tmp_path, qapp, monkeypatch):
-        # the 2026-11-19 fix: NO Test Summary / DUT Summary selected —
+        # the 2026-11-19 fix: NO Test Statistics / DUT Summary selected —
         # the map still builds (its context tick is
         # in the GUI denominator, so the progress math never divides by 0)
         gen, wb, _, _, _ = build_generated(

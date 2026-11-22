@@ -23,9 +23,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-xlsxwriter renderer: Test Summary matrix sheets and plain tables.
+xlsxwriter renderer: Test Statistics matrix sheets and plain tables.
 
-Pure rendering of the spec dicts built by test_summary.py — every data decision
+Pure rendering of the spec dicts built by test_statistics.py — every data decision
 was made upstream. This module writes values (formulas verbatim with their
 cached results, everything else through ``sanitize_cell``), styles (through
 the theme's workbook-scoped format factory — formats are immutable, so
@@ -45,7 +45,7 @@ from deps.exporter.theme import (
     NEUTRAL_FILL_HEX,
 )
 
-# Sheet layout, mirroring test_summary.py: banner 1, metadata 2.. (block length
+# Sheet layout, mirroring test_statistics.py: banner 1, metadata 2.. (block length
 # comes from the spec — the Head-Site split grew it to 14 rows, header 16,
 # data 17+), so the two helpers below derive the rows per spec and can
 # never drift from the spec builder.
@@ -69,11 +69,12 @@ ROW_HEIGHT = 22
 MIRROR_HEADER_TEXT = "flags (do not edit)"
 GROUP_BORDER_HEX = "94A3B8"  # heavier side color on workflow boundaries
 FOOTER_TEXT = "&C&P of &N"  # centered page-number footer (upgrade 4): &C opens the center section, &P is the page-number TOKEN (bare "P" would print literally), &N the page count
-# Tab tokens (migration upgrade 5, theme tab tokens; 2026-11-17 ruling:
-# the two DUT-block families get DIFFERENT tab colors — Test Summary keeps
-# the deep blue, the DUT Summary per-DUT sheets go purple)
-TEST_SUMMARY_TAB_HEX = "1E40AF"
-DUT_SUMMARY_TAB_HEX = "A855F7"
+# Tab tokens (migration upgrade 5, theme tab tokens; 2026-11-23 ruling:
+# the two DUT-block families get DIFFERENT tab colors — the Test
+# Statistics matrix keeps the green the sheet has had since 2026-11-11,
+# the DUT Summary per-DUT sheets take the deep blue)
+TEST_STATISTICS_TAB_HEX = "16A34A"
+DUT_SUMMARY_TAB_HEX = "1E40AF"
 
 # Fixed column geometry (2026-11-10): A=Test#, B=Test (wide, right-aligned),
 # C=Param (left-aligned). The DUT-sheet widths are pinned — no autofit.
@@ -309,7 +310,7 @@ def _render_data_rows(ws, spec, theme):
     row (2026-11-10), overriding the group banding there; Test/Param keep
     the right/left column alignment.
 
-    Row layout is [12 static | D die | 3 tail | D mirrors] (test_summary.py
+    Row layout is [12 static | D die | 3 tail | D mirrors] (test_statistics.py
     _build_chunk). The static A..L cells keep the per-cell fast path —
     their formats/fills/cached formulas vary — and their Format resolves
     through a per-render memo keyed by (column, fill, num_fmt, boundary):
@@ -992,7 +993,7 @@ def render_matrix_sheet(ws, spec: dict, theme) -> None:
     ws.freeze_panes(r0, c0)
     ws.hide_gridlines(2)  # screen + printed, matching showGridLines=False
     ws.set_footer(FOOTER_TEXT)
-    ws.set_tab_color(f"#{TEST_SUMMARY_TAB_HEX}")
+    ws.set_tab_color(f"#{TEST_STATISTICS_TAB_HEX}")
     # NO set_paper here: the wave-8 ruling gave A4 to the Bin sheet ONLY
     # (extended 2026-11-14: the wafer sheets print A4 landscape too —
     # _style_wafer_sheet); the Test Summary keeps fit-to-page with no

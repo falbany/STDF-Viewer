@@ -1332,12 +1332,12 @@ class stdfExporter(QtWidgets.QDialog):
         if ReportSelection.DUT in selectedContents and not getSetting().gen.modern_export:
             totalLoopCnt += (1 + len(testTuples))   # dut info part + test part
         # fork(falbany): hook #5 — modern DUT-block denominator (1 context
-        # fetch tick + one tick per test per selected sheet; TestSummary_cb
-        # is modern-only, so classic never counts it even when
-        # disabled-but-checked). Also fixes the pre-existing ride-along
-        # overshoot (the per-DUT sheet's ticks were never counted).
+        # fetch tick + one tick per test per selected sheet; Stat_cb drives
+        # the Test Statistics matrix in Modern mode only, so the classic
+        # Stat sheet never counts here). Also fixes the pre-existing
+        # ride-along overshoot (the per-DUT sheet's ticks were never counted).
         if getSetting().gen.modern_export and (
-            ReportSelection.DUT in selectedContents or ReportSelection.TestSummary in selectedContents
+            ReportSelection.DUT in selectedContents or ReportSelection.Stat in selectedContents
             # fork(falbany): the Test Correlation Map rides the same DUT
             # block (context tick counted, its sheets are tickless)
             or ReportSelection.TestCorrelation in selectedContents
@@ -1345,7 +1345,7 @@ class stdfExporter(QtWidgets.QDialog):
             from .exporter.progress import dut_block_loop_count  # lazy, like wafer_merge below
             totalLoopCnt += dut_block_loop_count(
                 test_count=len(testTuples),
-                test_summary_selected=ReportSelection.TestSummary in selectedContents,
+                stat_selected=ReportSelection.Stat in selectedContents,
                 dut_selected=ReportSelection.DUT in selectedContents,
                 correlation_selected=ReportSelection.TestCorrelation in selectedContents,
             )

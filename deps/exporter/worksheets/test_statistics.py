@@ -1,11 +1,11 @@
 """
 #
-# test_summary.py - exporter package - STDF Viewer
+# test_statistics.py - exporter package - STDF Viewer
 #
 # Author: falbany (fork)
 # Created Date: November 9th 2026
 # -----
-# Last Modified: Thu Nov 12 2026
+# Last Modified: Sun Nov 23 2026
 # Modified By: falbany (fork)
 # -----
 # Copyright (c) 2026 falbany (fork)
@@ -23,14 +23,17 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
-Test Summary spec builder: metadata block, live formulas, hybrid fail logic.
+Test Statistics spec builder (the 2026-11-23 takeover of the former
+Test Summary matrix): metadata block, live formulas, hybrid fail logic.
 
 Pure spec construction (strings/dicts/numbers only) — the xlsxwriter renderer
 consumes the spec dicts produced here.
 
-Worksheets split (2026-11-12): this file also hosts the TestSummaryMixin
-writer (writeTest_Summary + its order/drop helpers), moved verbatim from
-generator.py.
+Worksheets split (2026-11-12): this file also hosts the TestStatisticsMixin
+writer (writeStatistic + its order/drop helpers), moved verbatim from
+generator.py. 2026-11-23: the matrix took over the "Test Statistics"
+name + Stat_cb (test_summary.py renamed; the classic-style stat sheet
+was deleted the same day).
 """
 
 import re
@@ -73,7 +76,7 @@ from deps.uic_stdExporter import ReportSelection
 BANNER_ROW = 1
 METADATA_START = 2
 
-# Fixed A..L columns of the Test Summary sheet (2026-11-10: Test# permuted
+# Fixed A..L columns of the Test Statistics sheet (2026-11-10: Test# permuted
 # from C to A; only A/B/C move, so every formula's column letters stay put.
 # Third wave renames: "Test" -> "Test Name" (consistency with the Test
 # Statistics sheet), "STD" -> "St. Dev.", "FAILS" -> "Fails". Ninth wave:
@@ -313,7 +316,7 @@ _XY_INT_RE = re.compile(r"-?\d+")
 _HEAD_SITE_RE = re.compile(r"Head\s+(-?\d+)\s+-\s+Site\s+(-?\d+)")
 
 
-def build_test_summary_spec(
+def build_test_statistics_spec(
     summaryTable,
     testTuples,
     order,
@@ -325,7 +328,7 @@ def build_test_summary_spec(
     *,
     shared_stats=None,
 ):
-    """Build one spec dict per die chunk of the Test Summary sheet.
+    """Build one spec dict per die chunk of the Test Statistics sheet.
 
     `summaryTable` is the classic protocol dict (Data/TestInfo/dut2ind/dutInfo)
     from `waitForDutSummary`; `order` is the `(fid, dutIndex)` display order;
@@ -1083,7 +1086,7 @@ def group_order_by_temperature(
 
 def order_dut_block(worksheets: list, block: list) -> list:
     """Stable reorder placing the DUT-derived `block` contiguously directly
-    after its first member (the Test Summary base when both DUT-block
+    after its first member (the Test Statistics base when both DUT-block
     sheets are selected) — §7.4's tab-order ruling.
 
     The base sheet is already in `worksheets` at its creation position;
@@ -1107,7 +1110,7 @@ def order_dut_block(worksheets: list, block: list) -> list:
 def _build_shared_stats(summaryTable, testTuples, order):
     """The shared per-test table for the DUT block: die/mirror cells and
     the six stat caches computed ONCE per test over ``order``, consumed
-    by BOTH the Test Summary matrix and the DUT Summary column (finding
+    by BOTH the Test Statistics matrix and the DUT Summary column (finding
     4 — today both builders independently recompute identical data from
     the same summaryTable + order).
 
@@ -1140,31 +1143,14 @@ def _build_shared_stats(summaryTable, testTuples, order):
     return {"entries": entries, "pos": pos}
 
 
-class TestSummaryMixin(ReportHost):
-    """Test Summary worksheet writer (moved verbatim from generator.py)."""
+class TestStatisticsMixin(ReportHost):
+    """Test Statistics worksheet writer — the die-part matrix under its
+2026-11-23 takeover name (moved verbatim from generator.py)."""
 
-    def _resolve_remeasure_drops(self) -> set:
-        """The filter's drop-set, either direction of the sheet selection.
-
-        _prepare_dut_context stores the drop-set whenever either
-        DUT-block sheet renders (reuse it; an empty set means "ran,
-        nothing to drop" — never refetch). None means the context never
-        ran (stat-only export): the dutInfo-only fetch answers, and an
-        empty fetch degrades gracefully to an empty drop-set."""
-        if self._remeasure_drops is not None:
-            return self._remeasure_drops
-        # 2026-11-17: the stat-only fetch is the FULL dutInfo fetch (wafer
-        # id at slot 8) — same source as the DUT-block path, so both
-        # directions of the sheet selection always agree (§7.2 parity).
-        return compute_remeasure_drops(
-            self.waitForDutInfo(self.selectedHeads, self.selectedSites, self.selectedFiles) or {},
-            self.selectedFiles,
-            fid_ranks=self._fid_ranks(),  # 2026-11-13: shared supersede ranks
-        )
 
     def _order_and_ids(self, summaryTable, order_filter=None):
         """The classic `(fid, dutIndex)` display order and its per-column
-        part IDs (moved verbatim out of writeTest_Summary).
+        part IDs (moved verbatim out of writeTest_Summary (now writeStatistic)).
 
         `order_filter` (temperature split §7.4) keeps only the listed
         pairs — None keeps everything. The "DUT #n" fallback numbers
@@ -1188,10 +1174,8 @@ class TestSummaryMixin(ReportHost):
     def _prepare_dut_context(self):
         """The DUT-block shared context, fetched ONCE for both sheets.
 
-        Runs at generator level when either the Test Summary or the DUT
-        Summary sheet is selected (never for a Stat-only export — that
-        keeps the light `waitForDutInfo` fallback in
-        `_resolve_remeasure_drops`). Both-selected costs exactly one
+        Runs at generator level when either the Test Statistics (matrix)
+        or the DUT Summary sheet is selected. Both-selected costs exactly one
         round-trip per fetch; each writer consumes the stored context
         instead of producing it.
 
@@ -1202,10 +1186,8 @@ class TestSummaryMixin(ReportHost):
         final order) and `_dut_ctx_pos` ((fid, dutIndex) -> order index)
         — both writers' builders consume them via ``shared_stats=``
         instead of recomputing identical per-test data. Also fills
-        `_ftr_tests` (FTR pseudo-limit signal, consumed by
-        writeStatistic) and stores `_remeasure_drops` (the §7.2 hand-off
-        — an empty set means "ran, nothing to drop"; None means this
-        method never ran, the stat-only fallback signal). Emits the
+        `_remeasure_drops` (an empty set means "ran, nothing to
+        drop"). Emits the
         context tick (the "DUT info part" of the classic cadence)."""
         # a complex dict structure from the GUI thread
         # key: Data, value:     testTuple -> {fid, testDataDict}
@@ -1223,24 +1205,9 @@ class TestSummaryMixin(ReportHost):
         self.loopCount += 1
         self.sendProgress()
 
-        # FTR cache (fourth wave): (test_num, full test name) of every test
-        # tuple whose record SUB_CODE is FTR (any fid) — the PRIMARY FTR
-        # detection signal for writeStatistic's pseudo-limits. Filled
-        # whenever the heavy fetch ran, regardless of which sheets are
-        # selected, so a DUT-Summary-only + Stat export keeps full
-        # pseudo-limits; a Stat-only selection never reaches here and
-        # keeps the report_core-initialized empty set (fallback signal).
-        self._ftr_tests = set()
-        for test_tuple in self.testTuples:
-            fid_data = summaryTable.get("Data", {}).get(test_tuple) or {}
-            if any((fid_data.get(fid) or {}).get("SUB_CODE") == REC.FTR for fid in fid_data):
-                self._ftr_tests.add((test_tuple[0], test_tuple[2]))
-
         # re-measure filter (DUT Summary enhancements §7.2): the drop-set
-        # is computed BEFORE rendering and stored for writeStatistic's
-        # stats hook. An empty set means "ran, nothing to drop"; None
-        # (never stored) means this method did not run (stat-only
-        # fallback fetch).
+        # is computed BEFORE rendering and stored (prune happens in place).
+        # An empty set means "ran, nothing to drop".
         if getSetting().gen.hide_remeasured:
             drops = compute_remeasure_drops(
                 summaryTable["dutInfo"],
@@ -1279,11 +1246,11 @@ class TestSummaryMixin(ReportHost):
         self._dut_ctx_stats = shared_stats["entries"]
         self._dut_ctx_pos = shared_stats["pos"]
 
-    def writeTest_Summary(self):
-        """The Test Summary sheet: the die-part matrix (spec-built), the
+    def writeStatistic(self):
+        """The Test Statistics sheet (the matrix): the die-part matrix (spec-built), the
         die-chunk overflow sheets and the temperature splits (§7.4) —
         fed by the context `_prepare_dut_context` stored."""
-        MatrixSheet = self.sheetDict.get(ReportSelection.TestSummary, None)
+        MatrixSheet = self.sheetDict.get(ReportSelection.Stat, None)
         if MatrixSheet is None:
             return
         # report_core binds workbook and theme before any write* runs
@@ -1295,12 +1262,12 @@ class TestSummaryMixin(ReportHost):
         dut_ids = self._dut_ctx_dut_ids
         file_temperatures = self._dut_ctx_temps
 
-        specs = build_test_summary_spec(
+        specs = build_test_statistics_spec(
             summaryTable,
             self.testTuples,
             order,
             dut_ids,
-            sheet_name=self.tr("Test Summary"),
+            sheet_name=self.tr("Test Statistics"),
             # numeric cell formats are hardcoded scientific in the spec
             # builder (2026-11-10) — no settings-derived float format anymore
             tr=self.tr,
@@ -1312,7 +1279,7 @@ class TestSummaryMixin(ReportHost):
             shared_stats={"entries": self._dut_ctx_stats, "pos": self._dut_ctx_pos},
         )
 
-        # chunk 0 renders on the existing Test Summary sheet; chunks 1+
+        # chunk 0 renders on the existing Test Statistics sheet; chunks 1+
         # (die overflow beyond the Excel column cap) get their own sheets —
         # spec names already carry the " (n)" suffixes. Column widths are
         # pinned inside render_matrix_sheet (A=8, B=30, C..L=8, dies=8).
@@ -1340,12 +1307,12 @@ class TestSummaryMixin(ReportHost):
                     pairs = set(groups[temp])
                     subset = prune_summary_view(summaryTable, set(order) - pairs)
                     sub_order, sub_ids = self._order_and_ids(subset, order_filter=pairs)
-                    split_specs = build_test_summary_spec(
+                    split_specs = build_test_statistics_spec(
                         subset,
                         self.testTuples,
                         sub_order,
                         sub_ids,
-                        sheet_name=f"{self.tr('Test Summary')} - T{format_temperature_label(temp)}°C",
+                        sheet_name=f"{self.tr('Test Statistics')} - T{format_temperature_label(temp)}°C",
                         tr=self.tr,
                         file_temperatures=file_temperatures,
                         # finding 4: the splits consume the SAME table as

@@ -21,19 +21,20 @@ they add sheets, not fetches, like the temperature splits.
 
 def dut_block_loop_count(
     test_count: int,
-    test_summary_selected: bool,
+    stat_selected: bool,
     dut_selected: bool,
     correlation_selected: bool = False,
 ) -> int:
     """Ticks the modern DUT block emits for the progress denominator.
 
     `test_count` is `len(testTuples)`; the flags mirror the export
-    dialog's selection (a disabled-but-checked TestSummary_cb never
-    reaches here in classic mode — the caller guards on Modern Report).
+    dialog's selection (Stat_cb drives the matrix in Modern mode only —
+    the caller guards on Modern Report, so the classic Stat sheet never
+    counts here).
     The Test Correlation Map adds the context tick alone — its sheets
     are tickless — and its own gate means the context runs even with no
     other DUT-block sheet selected (2026-11-19)."""
-    sheets = (1 if test_summary_selected else 0) + (1 if dut_selected else 0)
+    sheets = (1 if stat_selected else 0) + (1 if dut_selected else 0)
     if sheets == 0 and not correlation_selected:
         return 0
     return 1 + sheets * test_count

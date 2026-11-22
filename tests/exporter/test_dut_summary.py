@@ -1,5 +1,5 @@
 """Tests for deps/exporter/worksheets/dut_summary.py: the DUT Summary spec
-builder (the Test Summary matrix transposed) and its renderer."""
+builder (the Test Statistics matrix transposed) and its renderer."""
 
 import io
 
@@ -12,7 +12,7 @@ from deps.exporter.worksheets.dut_summary import (
     TEST_CHUNK_CAP,
     build_dut_summary_spec,
 )
-from deps.exporter.worksheets.test_summary import FTR_SPEC_MAX, FTR_SPEC_MIN
+from deps.exporter.worksheets.test_statistics import FTR_SPEC_MAX, FTR_SPEC_MIN
 from deps.exporter.writer import render_dut_summary_sheet
 from tests.exporter.conftest import (
     load_workbook_bytes,
@@ -31,7 +31,7 @@ FILTER_ROW = 13
 SCIENTIFIC = "0.00E+00"
 
 # Exact formula strings (asserted literally, not via helpers — the
-# test_test_summary.py convention). P/Q are the two fixture test columns;
+# test_test_statistics.py convention). P/Q are the two fixture test columns;
 # S:T are their flag mirrors (R is the blank spacer). The attribute rows
 # are filter-aware (ruling 2026-11-16): SUBTOTAL visible-cells codes, the
 # Fails counts carrying the OFFSET visible-mask idiom.
@@ -74,7 +74,7 @@ class TestLayout:
         assert len(block) == 12
         assert block[0] == ["Test#", 10, 12]
         # the short test part keeps the numeric prefix (the matrix renders
-        # the same — test_test_summary.py)
+        # the same — test_test_statistics.py)
         assert block[1] == ["Test Name", "0_TXCC", "2_Func"]
         assert block[2] == ["Param", "VCCC_ASIC", "PAT_TOP"]  # FTR: VECT_NAM
         assert block[3] == ["Unit", "V", "P/F"]
@@ -503,7 +503,7 @@ class TestRenderer:
         ws = load_workbook_bytes(book)["DUT Summary"]
         assert ws.freeze_panes == "P14"
         assert ws.print_title_rows == "$1:$13"
-        assert ws.sheet_properties.tabColor.rgb.endswith("A855F7")  # DUT Summary family: purple (2026-11-17 user ruling)
+        assert ws.sheet_properties.tabColor.rgb.endswith("1E40AF")  # DUT Summary family: deep blue (2026-11-23 user ruling)
 
     def test_column_widths(self):
         # xlsxwriter stores width + ~0.71 (max-digit-width compensation);

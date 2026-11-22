@@ -67,7 +67,7 @@ from deps.exporter.charts import WAFER_DIE_WIDTH
 from deps.exporter.contract import ReportHost
 from deps.exporter.helpers import format_temperature_label, get_column_letter
 from deps.exporter.theme import TAB_COLOR_HEXES
-from deps.exporter.worksheets.test_summary import group_order_by_temperature
+from deps.exporter.worksheets.test_statistics import group_order_by_temperature
 from deps.exporter.writer import FOOTER_TEXT
 from deps.SharedSrc import getSetting
 from deps.uic_stdExporter import ReportSelection

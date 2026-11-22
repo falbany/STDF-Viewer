@@ -181,7 +181,7 @@ def make_rows():
 
 def make_matrix_spec(**overrides):
     spec = {
-        "name": "Test Summary",
+        "name": "Test Statistics",
         # banner row 1: base labels + plain numeric DUT indices (fix wave 2)
         "headers": BASE_HEADERS + [1, 2, 3, "", "Trend"],
         "metadata_rows": make_metadata_rows(),
@@ -223,12 +223,12 @@ def make_matrix_spec(**overrides):
     return spec
 
 
-def render(spec=None, ws_title="Test Summary"):
+def render(spec=None, ws_title="Test Statistics"):
     book_bytes = render_matrix_bytes(spec, ws_title)
     return load_workbook_bytes(book_bytes)
 
 
-def render_matrix_bytes(spec=None, ws_title="Test Summary"):
+def render_matrix_bytes(spec=None, ws_title="Test Statistics"):
     """One-sheet xlsxwriter workbook through render_matrix_sheet -> bytes."""
     the_spec = spec if spec is not None else make_matrix_spec()
 
@@ -292,7 +292,7 @@ class TestMatrixLayout:
         return roundtrip(render())
 
     def test_banner_row_values_and_style(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["A1"].value == "Test#"
         assert ws["M1"].value == 1  # banner labels are plain numeric DUT indices
         assert ws["A1"].fill.fgColor.rgb == "FFCBD5E1"
@@ -301,7 +301,7 @@ class TestMatrixLayout:
         )  # xlsxwriter rounds to the pixel grid
 
     def test_repeated_header_secondary_values_and_style(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["A16"].value == "Test#"
         assert ws["M16"].value == "SN541"
         assert ws["N16"].value == "SN541"  # duplicate display text kept
@@ -310,13 +310,13 @@ class TestMatrixLayout:
         assert ws.row_dimensions[16].height == pytest.approx(22, abs=0.26)
 
     def test_data_formula_survives_reload(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["G17"].value == '=IFERROR(MIN(M17:O17),"")'
         assert ws["K18"].value == CPK_18
         assert ws["L19"].value == FAILS_LIMITS_19
 
     def test_metadata_label_font_and_formulas(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["A2"].value == 10000  # Test# now leads the row
         assert ws["B2"].value == "METADATA"
         assert ws["C2"].value == "File ID"
@@ -332,37 +332,37 @@ class TestMatrixLayout:
 
     def test_metadata_stats_keep_general_format(self):
         # scientific applies to data rows only (2026-11-10 R3)
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["G2"].number_format == "General"
         assert ws["M2"].number_format == "General"
 
     def test_masked_row_hidden(self):
         # xlsxwriter hides via the row's hidden attribute (no height-0 dance)
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws.row_dimensions[8].hidden is True
         assert ws.row_dimensions[2].hidden is not True
 
     def test_freeze_and_gridlines(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws.freeze_panes == "M17"
         assert ws.sheet_view.showGridLines is False
 
     def test_repeat_rows_header_row(self):
         # final-review fix 5: the blue header (row 16) repeats on every
         # printed page (spec §10 repeat_rows read-back)
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws.print_title_rows == "$16:$16"
 
     def test_print_setup_fit_to_page(self):
         # xlsxwriter writes fitToHeight=0 + <pageSetUpPr fitToPage="1"/>;
         # fitToWidth=1 is the OOXML default and is omitted (openpyxl: None)
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws.page_setup.fitToWidth in (1, None)
         assert ws.page_setup.fitToHeight == 0
         assert ws.sheet_properties.pageSetUpPr.fitToPage is True
 
     def test_number_formats_per_row_type(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["A17"].number_format == "0"  # Test# (column A)
         assert ws["E17"].number_format == SCIENTIFIC  # SpecMin
         assert ws["F17"].number_format == SCIENTIFIC  # SpecMax
@@ -381,12 +381,12 @@ class TestMatrixLayout:
     def test_cp_column_never_scientific(self):
         # ninth wave regression guard: J held St. Dev. (scientific) before;
         # as Cp it gets "0.00" via the fixed-column map on every data row
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         for cell in ("J17", "J18", "J19"):
             assert ws[cell].number_format == "0.00", cell
 
     def test_data_cell_values_follow_new_column_order(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["A17"].value == 10  # Test#
         assert ws["B17"].value == "0_TXCC"  # Test
         assert ws["C17"].value == "VCCC_ASIC"  # Param
@@ -403,7 +403,7 @@ class TestMatrixColumnWidths:
         # xlsxwriter stores width + ~0.71 (max-digit-width compensation);
         # assert within that tolerance
         wb = render()
-        ws = roundtrip(wb)["Test Summary"]
+        ws = roundtrip(wb)["Test Statistics"]
         assert col_dim(ws, "A").width == pytest.approx(8, abs=0.75)
         assert col_dim(ws, "B").width == pytest.approx(30, abs=0.75)
         for letter in ("C", "D", "E", "F", "G", "H", "I", "J", "K", "L"):
@@ -416,7 +416,7 @@ class TestMatrixColumnWidths:
     def test_die_widths_follow_spec_die_columns(self):
         spec = make_matrix_spec(die_columns=["M"])
         wb = render(spec)
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert col_dim(ws, "M").width == pytest.approx(8, abs=0.75)
         # only the spec's die columns get pinned: nothing covers N
         assert col_dim(ws, "N") is None
@@ -432,24 +432,24 @@ class TestMatrixAlignment:
         return roundtrip(render())
 
     def test_data_rows_test_right_param_left(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["B17"].alignment.horizontal == "right"  # Test name
         assert ws["C17"].alignment.horizontal == "left"  # Param
         assert ws["A17"].alignment.horizontal == "center"  # Test#
         assert ws["D17"].alignment.horizontal == "center"  # Unit
 
     def test_metadata_rows_test_right_param_left(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["B2"].alignment.horizontal == "right"  # METADATA label
         assert ws["C2"].alignment.horizontal == "left"  # field name
 
     def test_vertical_center_kept(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["B17"].alignment.vertical == "center"
         assert ws["C2"].alignment.vertical == "center"
 
     def test_banner_and_header_keep_centered(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["A1"].alignment.horizontal == "center"  # banner
         assert ws["B1"].alignment.horizontal == "center"
         assert ws["A16"].alignment.horizontal == "center"  # blue header
@@ -466,29 +466,29 @@ class TestSpecMinMaxStaticFill:
         return roundtrip(render())
 
     def test_metadata_rows_yellow(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         for cell in ("E2", "F2", "E9", "F15"):
             assert ws[cell].fill.fgColor.rgb == "FFFFF3CD", cell
 
     def test_data_rows_yellow(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         for cell in ("E17", "F17", "E18", "F18", "E19", "F19"):
             assert ws[cell].fill.fgColor.rgb == "FFFFF3CD", cell
 
     def test_yellow_overrides_group_banding_on_ef(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         # row 18 sits in the banded odd group, but E/F stay yellow
         assert ws["A18"].fill.fgColor.rgb == "FFE9EEF6"
         assert ws["E18"].fill.fgColor.rgb == "FFFFF3CD"
         assert ws["F18"].fill.fgColor.rgb == "FFFFF3CD"
 
     def test_other_columns_not_filled(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         for cell in ("A17", "D17", "G17", "L17", "M17"):
             assert ws[cell].fill.patternType is None, cell
 
     def test_banner_and_header_keep_own_fills(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["E1"].fill.fgColor.rgb == "FFCBD5E1"  # banner
         assert ws["E16"].fill.fgColor.rgb == "FF1E40AF"  # blue header
 
@@ -507,7 +507,7 @@ class TestMatrixConditionalFormatting:
         # real limits (-0.999999 / 0.999999), so the limit rules fire naturally
         # on them. Remaining set: blank-neutral, fail-low, fail-high,
         # flag-mirror, pass.
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         rules = cf_block(ws, "M17:O19")
         assert len(rules) >= 3
         assert [r.formula for r in rules] == [
@@ -526,14 +526,14 @@ class TestMatrixConditionalFormatting:
     def test_no_pf_visible_flag_rule_anywhere(self):
         # the removed rule keyed on LEFT($D...,3)="P/F" must not exist in
         # any die-range rule set (FTR rows are limit-styled now)
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         for cf in ws.conditional_formatting:
             for rule in cf.rules:
                 for formula in rule.formula:
                     assert "P/F" not in formula
 
     def test_cpk_bands(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         rules = cf_block(ws, "K17:K19")
         assert [r.formula for r in rules] == [
             ["AND(ISNUMBER(K17),K17>=1.67)"],
@@ -551,10 +551,10 @@ class TestMatrixConditionalFormatting:
         assert fills == ["FFA7F3D0", "FFD1FAE5", "FFFEF3C7", "FFFECACA"]
 
     def test_cp_column_banded_like_cpk(self):
-        # ninth wave left the Test Summary Cp column (J) unbanded; the user
+        # ninth wave left the Test Statistics Cp column (J) unbanded; the user
         # then asked for the same Cpk-style bands there — identical four
         # ISNUMBER-guarded rules on J17:J19.
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         rules = cf_block(ws, "J17:J19")
         assert [r.formula for r in rules] == [
             ["AND(ISNUMBER(J17),J17>=1.67)"],
@@ -572,7 +572,7 @@ class TestMatrixConditionalFormatting:
         assert fills == ["FFA7F3D0", "FFD1FAE5", "FFFEF3C7", "FFFECACA"]
 
     def test_fails_color_scale(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         rules = cf_block(ws, "L17:L19")
         assert len(rules) == 1
         scale = rules[0].colorScale
@@ -587,7 +587,7 @@ class TestMatrixConditionalFormatting:
         # never in the range. Superseded (neutral yellow) first, then Fail
         # (red; upstream values are "Failed - 0xNN"), then Pass (green),
         # all stopIfTrue with case-insensitive SEARCH.
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         rules = cf_block(ws, "M15:O15")
         assert [r.formula for r in rules] == [
             ['ISNUMBER(SEARCH("Superseded",M15))'],
@@ -610,7 +610,7 @@ class TestMatrixConditionalFormatting:
         # renders normally (visible, no rules on its die cells)
         spec = make_matrix_spec()
         del spec["conditional_formatting"]["dut_flag_range"]
-        ws = roundtrip(render(spec))["Test Summary"]
+        ws = roundtrip(render(spec))["Test Statistics"]
         with pytest.raises(AssertionError):
             cf_block(ws, "M15:O15")
         assert ws.row_dimensions[15].hidden is not True
@@ -632,7 +632,7 @@ class TestMatrixConditionalFormatting:
                 "dut_flag_range": "M15:M15",
             },
         )
-        ws = roundtrip(render(spec))["Test Summary"]
+        ws = roundtrip(render(spec))["Test Statistics"]
         rules = cf_block(ws, "M15")
         assert [r.formula[0] for r in rules] == [
             'ISNUMBER(SEARCH("Superseded",M15))',
@@ -657,7 +657,7 @@ class TestDuplicatePartIdPairRule:
 
     def test_pair_formula_counts_wafer_row_and_part_row(self):
         book = roundtrip(render(self.spec_with(part_id_range="M3:O3", wafer_range="M8:O8")))
-        rules = cf_block(book["Test Summary"], "M3:O3")
+        rules = cf_block(book["Test Statistics"], "M3:O3")
         assert len(rules) == 1
         # xlsxwriter emits type "formula"; openpyxl reads it as "expression"
         assert rules[0].type == "expression"
@@ -678,7 +678,7 @@ class TestDuplicatePartIdPairRule:
         # (C and H); the anchor's wafer counterpart is the same row's
         # Wafer-column cell
         book = roundtrip(render(self.spec_with(part_id_range="C14:C16", wafer_range="H14:H16")))
-        rules = cf_block(book["Test Summary"], "C14:C16")
+        rules = cf_block(book["Test Statistics"], "C14:C16")
         assert rules[0].formula[0].startswith('AND(C14<>"",COUNTIFS($H$14:$H$16,')
         assert "$C$14:$C$16," in rules[0].formula[0]
 
@@ -686,14 +686,14 @@ class TestDuplicatePartIdPairRule:
         # defensive fallback (no caller today): part_id_range alone gives
         # the old Excel-native duplicate rule
         book = roundtrip(render(self.spec_with(part_id_range="M3:O3")))
-        rules = cf_block(book["Test Summary"], "M3:O3")
+        rules = cf_block(book["Test Statistics"], "M3:O3")
         assert len(rules) == 1
         assert rules[0].type == "duplicateValues"
 
     def test_rule_uses_builtin_soft_yellow(self):
         # 2026-11-18 ruling: builtin "Neutral" #FFEB9C instead of #FFFF00
         book = roundtrip(render(self.spec_with(part_id_range="M3:O3", wafer_range="M8:O8")))
-        rule = cf_block(book["Test Summary"], "M3:O3")[0]
+        rule = cf_block(book["Test Statistics"], "M3:O3")[0]
         assert str(rule.dxf.fill.bgColor.rgb).endswith("FFEB9C")
 
 
@@ -707,7 +707,7 @@ class TestMatrixRowGroups:
         return roundtrip(render())
 
     def test_group_boundary_heavier_top_border(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         # row_groups [0,1,2]: boundaries at data rows 18 and 19, columns A..L
         for cell in ("A18", "F18", "L18", "L19"):
             top = ws[cell].border.top
@@ -718,7 +718,7 @@ class TestMatrixRowGroups:
         assert ws["A17"].border.top.color.rgb == "FFDBEAFE"
 
     def test_odd_group_banding_on_fixed_columns(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         # groups 0/1/2 on rows 17/18/19: odd group index (1) -> row 18 banded
         assert ws["A18"].fill.fgColor.rgb == "FFE9EEF6"
         assert ws["L18"].fill.fgColor.rgb == "FFE9EEF6"
@@ -742,7 +742,7 @@ class TestMatrixAutoFilter:
         # native AutoFilter over the same range. Duplicated header text
         # ("SN541" twice) is legal for autofilters — the ref still covers
         # the full header..last-data range, and no Excel Table is written.
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws.auto_filter.ref == "A16:O19"
         assert list(ws.tables) == []  # no /xl/tables/table1.xml anymore
         assert ws["M16"].value == "SN541"
@@ -765,7 +765,7 @@ class TestMatrixAutoFilter:
             },
         )
         spec.pop("auto_filter")
-        ws = roundtrip(render(spec))["Test Summary"]
+        ws = roundtrip(render(spec))["Test Statistics"]
         assert ws.auto_filter.ref is None
         assert list(ws.tables) == []
 
@@ -780,7 +780,7 @@ class TestMatrixMirrorsAndSanitization:
         return roundtrip(render())
 
     def test_mirror_columns_hidden_with_grey_header(self):
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         for letter in ("S", "T", "U"):
             assert col_dim(ws, letter).hidden is True
             header = ws[f"{letter}16"]
@@ -796,13 +796,13 @@ class TestMatrixMirrorsAndSanitization:
         spec = make_matrix_spec()
         spec["rows"][0][1] = "bad\x00name"  # Test name (column B)
         spec["metadata_rows"][1][12] = "SN\x00541"  # Part ID die value
-        ws = roundtrip(render(spec))["Test Summary"]
+        ws = roundtrip(render(spec))["Test Statistics"]
         assert ws["B17"].value == "badname"
         assert ws["M3"].value == "SN541"
 
     def test_formulas_not_mangled(self):
         # formula cells pass through sanitize untouched
-        ws = self.wb()["Test Summary"]
+        ws = self.wb()["Test Statistics"]
         assert ws["L17"].value == FAILS_LIMITS_17
 
 
@@ -861,7 +861,7 @@ class TestPlainTable:
     def test_column_fills_override_banding(self):
         # third wave contract: {"column_letter": hex6} paints a static fill
         # on the DATA cells of those columns, applied after banding so it
-        # wins (the plain-table counterpart of the Test Summary's yellow
+        # wins (the plain-table counterpart of the Test Statistics's yellow
         # SpecMin/SpecMax); header cells keep their own blue fill
         spec = self.spec()
         spec["column_fills"] = {"B": "FFF3CD"}
@@ -1026,7 +1026,7 @@ class TestPlainTableConditionalFormatting:
         assert fills == ["FFFFCCCC", "FFCCFFCC"]
 
     def test_cpk_band_rules_match_matrix_contract(self):
-        # the SAME four ISNUMBER-guarded bands as the Test Summary (shared
+        # the SAME four ISNUMBER-guarded bands as the Test Statistics (shared
         # builder): first three stopIfTrue, worst band open
         ws = self.render_and_reload()
         rules = cf_block(ws, "L2:L3")
@@ -1106,7 +1106,7 @@ class TestPlainTableConditionalFormatting:
 
 class TestRealSpecIntegration:
     def test_real_matrix_spec_renders_and_reloads(self):
-        from tests.exporter.test_test_summary import base_duts, base_tests, build
+        from tests.exporter.test_test_statistics import base_duts, base_tests, build
 
         spec = build(base_tests(), base_duts())[0]
         wb = render(spec)
@@ -1114,9 +1114,9 @@ class TestRealSpecIntegration:
         # Head/Site 11/12 (constant stubs), Test Time 14 (fourth wave: DUT
         # Flag 15 stays visible)
         for row in (2, 8, 9, 10, 11, 12, 14):
-            assert wb["Test Summary"].row_dimensions[row].hidden is True
-        assert wb["Test Summary"].row_dimensions[15].hidden is not True
-        ws = roundtrip(wb)["Test Summary"]
+            assert wb["Test Statistics"].row_dimensions[row].hidden is True
+        assert wb["Test Statistics"].row_dimensions[15].hidden is not True
+        ws = roundtrip(wb)["Test Statistics"]
         assert ws["A17"].value == 10
         assert ws["B17"].value == "0_TXCC"
         assert ws["D19"].value == "P/F"
@@ -1263,7 +1263,7 @@ class TestMatrixCachedValues:
         book = render_matrix_bytes(spec)
         from openpyxl import load_workbook
 
-        ws = load_workbook(io.BytesIO(book), data_only=True)["Test Summary"]
+        ws = load_workbook(io.BytesIO(book), data_only=True)["Test Statistics"]
         formula_cells = {
             "G17": (17, 7),
             "H17": (17, 8),
@@ -1328,7 +1328,7 @@ class TestMatrixCachedValues:
         book = render_matrix_bytes(spec)
         from openpyxl import load_workbook
 
-        ws = load_workbook(io.BytesIO(book), data_only=True)["Test Summary"]
+        ws = load_workbook(io.BytesIO(book), data_only=True)["Test Statistics"]
         assert ws["G17"].value == 0  # MIN of an empty range computes 0
         assert ws["H17"].value == 0
         for cell in ("I17", "J17", "K17"):
@@ -1392,10 +1392,10 @@ class TestMatrixCachedValues:
         book = render_matrix_bytes(spec)
         from openpyxl import load_workbook
 
-        ws = load_workbook(io.BytesIO(book), data_only=True)["Test Summary"]
+        ws = load_workbook(io.BytesIO(book), data_only=True)["Test Statistics"]
         assert ws["J17"].value in ("", None)
         assert ws["K17"].value in ("", None)
-        ws2 = load_workbook(io.BytesIO(book))["Test Summary"]
+        ws2 = load_workbook(io.BytesIO(book))["Test Statistics"]
         assert "IFERROR" in ws2["J17"].value
 
 
@@ -1421,8 +1421,8 @@ class TestMatrixSparklines:
         xml = read_xml(book, "xl/worksheets/sheet1.xml")
         assert "sparklineGroups" in xml
         # sheet-qualified absolute ranges
-        assert "Test Summary!M17:O17" in xml or "'Test Summary'!M17:O17" in xml
-        assert "Test Summary!M19:O19" in xml or "'Test Summary'!M19:O19" in xml
+        assert "Test Statistics!M17:O17" in xml or "'Test Statistics'!M17:O17" in xml
+        assert "Test Statistics!M19:O19" in xml or "'Test Statistics'!M19:O19" in xml
         # pinned visual tokens (2026-11-11 user ruling: high RED, low
         # GREEN — swapped; 2026-11-13 ruling: negative points NOT
         # displayed — xlsxwriter omits the negative attribute when off)
@@ -1447,15 +1447,15 @@ class TestMatrixSparklines:
 
     def test_chunk_sheet_sparklines_qualified_ranges(self):
         # Review Focus 5: each chunk sheet qualifies its OWN name — a
-        # chunk-2 range must reference 'Test Summary (2)' not the base name
+        # chunk-2 range must reference 'Test Statistics (2)' not the base name
         spec = self.sparkline_spec(
             [
                 {"row": 17, "type": "line", "range": "M17:O17"},
             ]
         )
-        book = render_matrix_bytes(spec, "Test Summary (2)")
+        book = render_matrix_bytes(spec, "Test Statistics (2)")
         xml = read_xml(book, "xl/worksheets/sheet1.xml")
-        assert "'Test Summary (2)'!M17:O17" in xml
+        assert "'Test Statistics (2)'!M17:O17" in xml
 
 
 # --------------------------------------------------------------------------
@@ -1648,10 +1648,10 @@ class TestMatrixBulkSegments:
         # P/F-row "0" die format hold, mirror flags and blanks survive, the
         # tail spacers stay blank, and the uniform body styling (thin border,
         # no fill — banding stops at column L) reaches every bulk cell.
-        from tests.exporter.test_test_summary import base_duts, base_tests, build
+        from tests.exporter.test_test_statistics import base_duts, base_tests, build
 
         spec = build(base_tests(), base_duts())[0]
-        ws = roundtrip(render(spec))["Test Summary"]
+        ws = roundtrip(render(spec))["Test Statistics"]
         # parametric die cells (row 17): numbers survive, the NaN DUT is blank
         assert ws["M17"].value == 1.0
         assert ws["N17"].value == 1.2
@@ -1686,7 +1686,7 @@ class TestMatrixBulkSegments:
         # never as an invalid number in the sheet XML
         spec = make_matrix_spec()
         spec["rows"][0][14] = float("nan")  # die cell O17
-        ws = roundtrip(render(spec))["Test Summary"]
+        ws = roundtrip(render(spec))["Test Statistics"]
         assert ws["O17"].value is None
 
     def test_bulk_write_row_call_bounds(self, monkeypatch):

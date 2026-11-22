@@ -319,8 +319,7 @@ class TestTabColors:
     def test_pinned_hexes(self):
         assert TAB_COLOR_HEXES == {
             "file_info": "94A3B8",
-            "test_summary": "1E40AF",
-            "dut_summary": "A855F7",  # 2026-11-17 user ruling: distinguish the per-DUT family
+            "dut_summary": "1E40AF",  # 2026-11-23 user ruling: per-DUT family takes the deep blue (purple retired)
             "gdr": "94A3B8",
             "trend": "0EA5E9",
             "histo": "0EA5E9",

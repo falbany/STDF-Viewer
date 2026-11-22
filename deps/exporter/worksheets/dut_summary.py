@@ -30,7 +30,7 @@ One row per DUT (the global DUT # down column A restores display order
 after a sort/filter), the 14 metadata fields as frozen leftmost columns
 (B..O), the tests appended right (P..), AutoFilter on the frozen columns.
 Complement, not replacement: the Test Summary matrix and all its waves stay
-untouched — the per-field helpers are imported one-way from test_summary.py
+untouched — the per-field helpers are imported one-way from test_statistics.py
 (values, mask policy and fail logic are shared, never re-implemented).
 
 Pure spec construction (strings/dicts/numbers only) — the xlsxwriter
@@ -50,7 +50,7 @@ from deps.exporter.helpers import (
     stat_cached,
     stat_formula_col,
 )
-from deps.exporter.worksheets.test_summary import (
+from deps.exporter.worksheets.test_statistics import (
     BASE_HEADERS,
     METADATA_ROWS,
     SCIENTIFIC_FORMAT,
@@ -133,13 +133,13 @@ def _test_column(
     cache_entries, number_format)`` — the attribute block's 12 cells (6
     static + 6 live formulas), the per-DUT cell columns for the DUT rows
     and sparklines, and the ``(attribute_row, cached_result)`` pairs with
-    test_summary._test_rows' cache gating (None caches "" except MIN/MAX's
+    test_statistics._test_rows' cache gating (None caches "" except MIN/MAX's
     faithful 0)."""
     col = test_col(offset)
     col1 = FIRST_TEST_COL_INDEX + offset  # 1-based
     die_cells, mirror_cells, entry = _test_cells(summaryTable, test, order, shared_stats)
 
-    # third wave branch logic (test_summary._test_rows): FTR rows always
+    # third wave branch logic (test_statistics._test_rows): FTR rows always
     # take the limits path with the synthetic ±0.999999 window; the
     # display cells come from the ONE branch (_display_limits, mirrored
     # by _effective_lo_hi for the cache inputs)
@@ -172,7 +172,7 @@ def _test_column(
     ]
 
     # cached formula results keyed (1-based row, 1-based col) — the same
-    # gating as test_summary._test_rows: inline, ONE numeric_values pass
+    # gating as test_statistics._test_rows: inline, ONE numeric_values pass
     # over the die cells then row_stat_caches (sigma/fmean once for
     # Cp+Cpk; the FAILS branch selection lives inside: one-sided OR
     # semantics when a limit is present, the flag-mirror count when BOTH
@@ -225,7 +225,7 @@ def build_dut_summary_spec(
     restarts at column P.
 
     `shared_stats` ({"entries", "pos"}, the DUT-block shared per-test
-    table from test_summary._build_shared_stats) supplies the per-test
+    table from test_statistics._build_shared_stats) supplies the per-test
     die/mirror cells and stat caches instead of recomputing them; None
     (direct calls) computes everything inline. Every test column spans
     the full unchunked DUT axis, so the shared caches are valid for
