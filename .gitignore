@@ -84,3 +84,4 @@ test.py
 
 # single app instance lock
 STDF-Viewer.lock
+.zcode/

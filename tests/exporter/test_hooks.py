@@ -106,14 +106,39 @@ def test_no_dangling_testsummary_references():
     assert offenders == []
 
 
-def test_stat_still_routes_to_test_page():
-    # hook #6 (2026-11-23): Stat keeps its seat in the go-to-test-page
-    # routing set AND the >=1-test validation set — Stat_cb serves both
-    # modes (classic stat table + the Stat-driven matrix)
-    import pathlib
+def test_classic_stat_tick_count_guarded_in_modern_mode():
+    # review finding 1 (2026-11-23): the classic Stat branch must not add
+    # its N*S*H*F ticks in Modern mode — the matrix under Stat_cb emits
+    # 1+N via hook #5, and the unguarded term double-counted the
+    # denominator (progress stalled at ~(1+N)/(N*S*H*F+1+N))
+    source = (Path(__file__).resolve().parents[2] / "deps" / "uic_stdExporter.py").read_text()
+    assert (
+        "if ReportSelection.Stat in selectedContents and not getSetting().gen.modern_export:"
+        in source
+    )
 
-    source = (pathlib.Path(__file__).resolve().parents[2] / "deps" / "uic_stdExporter.py").read_text()
-    assert source.count("ReportSelection.Stat,") >= 2
+
+class TestStatRouting:
+    """2026-11-23 takeover: Stat_cb serves both modes — a Stat-only
+    selection enters the test-page flow (the classic stat table and the
+    Modern matrix both need test items)."""
+
+    def test_stat_only_routes_through_test_page(self):
+        dialog = _DialogStub([ReportSelection.Stat])
+        stdfExporter.gotoNextPage(dialog)
+        assert dialog.exportUI.stackedWidget.currentIndex() == 1
+        assert dialog.started is False
+
+    def test_stat_requires_a_test_selection(self, monkeypatch):
+        dialog = _DialogStub([ReportSelection.Stat])
+        dialog.exportUI.stackedWidget.setCurrentIndex(1)
+        monkeypatch.setattr(
+            QMessageBox, "warning", lambda *args, **kwargs: dialog.warnings.append(args)
+        )
+        stdfExporter.gotoNextPage(dialog)
+        assert dialog.warnings
+        assert dialog.exportUI.stackedWidget.currentIndex() == 1
+        assert dialog.started is False
 
 
 def test_wafer_heat_map_default_true():

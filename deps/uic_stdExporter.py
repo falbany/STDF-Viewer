@@ -1309,7 +1309,10 @@ class stdfExporter(QtWidgets.QDialog):
             totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
         if ReportSelection.Histo in selectedContents:
             totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads)
-        if ReportSelection.Stat in selectedContents:
+        # fork(falbany): classic Stat ticks only — in Modern mode Stat_cb
+        # drives the Test Statistics matrix, whose 1+N ticks hook #5 below
+        # adds (unguarded, the term double-counted the Modern denominator)
+        if ReportSelection.Stat in selectedContents and not getSetting().gen.modern_export:
             totalLoopCnt += len(testTuples) * len(selectedSites) * len(selectedHeads) * len(selectedFiles)
         if ReportSelection.Bin in selectedContents:
             totalLoopCnt += len(selectedSites) * len(selectedHeads)
