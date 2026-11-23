@@ -1,9 +1,9 @@
-"""Tests for deps/exporter/generator.py: Test Summary + chart sheets.
+"""Tests for deps/exporter/generator.py: Test Statistics + chart sheets.
 
 Task 8 integration: selectedContents={TestSummary, DUT, Trend, Bin, Wafer} (Histogram
 deliberately NOT selected), two test items (one parametric with limits, one
 FTR), three DUTs in one file. waitForDutSummary returns a classic-protocol
-summaryTable (fixture style of test_test_summary.py::make_summary), waitForImage a
+summaryTable (fixture style of test_test_statistics.py::make_summary), waitForImage a
 small real PNG, waitForDataList simple stat rows. report_core() runs against
 tmp_path; cell/style assertions run on the reloaded workbook, image
 assertions on the in-memory one (openpyxl does not reload images from saved
@@ -25,7 +25,7 @@ from deps.SharedSrc import REC, getSetting, tab
 from deps.exporter.charts import BIN_TABLE_HEADERS
 from deps.exporter.generator import ModernReportGenerator
 from deps.exporter.worksheets.file_info import bin_banner_from_file_info
-from deps.exporter.worksheets.test_summary import build_test_summary_spec
+from deps.exporter.worksheets.test_statistics import build_test_statistics_spec
 from deps.exporter.theme import number_format_from_settings
 from deps.uic_stdExporter import ReportSelection, dataChannel, signals
 from tests.exporter.test_writer import col_dim
@@ -285,7 +285,6 @@ WAFER_MAP_PAYLOAD = {
 def build_generated(
     tmp_path,
     qapp,
-    with_stat=False,
     with_file_info=False,
     part_id_tagged=True,
     file_temperature=None,
@@ -296,27 +295,23 @@ def build_generated(
     hide_remeasured=False,
     with_test_summary=True,
     with_per_dut=True,
-    with_dut=True,
     wafer_tuples=None,
     heat_selected=False,
     correlation_selected=False,
     monkeypatch=None,
     file_dates=None,
-    stat_dut_rows=None,
 ):
-    """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus Stat when
-    `with_stat`, FileInfo when `with_file_info`) and return (generator,
+    """Run report_core() once for {DUT, Trend, Bin, Wafer} (plus FileInfo
+    when `with_file_info`) and return (generator,
     reloaded workbook, report path, close/error capture). `file_temperature`
-    appends a File Info "Test Temperature:" row (the Test Summary fallback
+    appends a File Info "Test Temperature:" row (the Test Statistics fallback
     source); `part_id_tagged` drops the _T<n>C tag from the part IDs.
     `duplicate_sn` shares SN541 between the first and third DUT;
     `hide_remeasured` flips the filter setting for the run (pass the test's
     `monkeypatch` fixture so it auto-restores). `wafer_tuples` overrides the
     wafer selection (e.g. [(-1, -1, "STACK")] for the stacked-wafer path).
     `heat_selected` adds the Wafer Heat Map content (issue #13: +1 tick
-    when a stacked tuple is present). `stat_dut_rows` overrides the
-    stat-only `waitForDutInfo` stub — the 2026-11-17 parity pin feeds the
-    same rows the heavy fetch serves."""
+    when a stacked tuple is present)."""
     testTuples = [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
     selectedFiles = [1]
     selectedHeads = [1]
@@ -324,38 +319,27 @@ def build_generated(
     waferTuples = [(0, 1, "W01")] if wafer_tuples is None else wafer_tuples
     reportPath = str(tmp_path / "report.xlsx")
     # modern totalLoopCnt formula (hook #5, dut_block_loop_count):
-    # Trend 2*1*1 + Bin 1*1 + DUT block (1 context + 2 Test Summary
+    # Trend 2*1*1 + Bin 1*1 + DUT block (1 context + 2 Test Statistics
     # matrix + 2 DUT Summary per-DUT) + Wafer real tuples post-split
     # (issue #13: the stacked tuple's tick moved to the heat denominator)
     totalLoopCnt = 2 + 1 + 5 + sum(1 for w in waferTuples if w[0] != -1)
     selection = [
-        ReportSelection.TestSummary,
+        ReportSelection.Stat,
         ReportSelection.DUT,
         ReportSelection.Trend,
         ReportSelection.Bin,
         ReportSelection.Wafer,
     ]
-    if with_stat:
-        # fixed creation order governs; Stat slots after the DUT block
-        selection.insert(2, ReportSelection.Stat)
-        totalLoopCnt += 2  # Stat: +1 per data row
     if not with_test_summary:
         # DUT-only: the matrix never renders — the block contributes
         # 1 context tick + 2 per-DUT ticks (the matrix's 2 test ticks go)
-        selection.remove(ReportSelection.TestSummary)
+        selection.remove(ReportSelection.Stat)
         totalLoopCnt -= 2
     if not with_per_dut:
         # TS-only: the per-DUT sheet never renders (its 2 test ticks go;
         # the context still runs for the matrix — 1 + 2 block ticks)
         selection.remove(ReportSelection.DUT)
         totalLoopCnt -= 2
-    if not with_dut:
-        # stat-only selection: neither DUT-block sheet renders (no
-        # context fetch, no block ticks) — the filter's stat-only
-        # fallback fetch path (§7.2) is what still honors the drop-set
-        selection.remove(ReportSelection.TestSummary)
-        selection.remove(ReportSelection.DUT)
-        totalLoopCnt -= 5
     if with_file_info:
         # classic sheet-creation order: FileInfo first (+1 loop tick)
         selection.insert(0, ReportSelection.FileInfo)
@@ -368,13 +352,9 @@ def build_generated(
             totalLoopCnt += 1
     if correlation_selected:
         # 2026-11-19: the correlation mixin rides the DUT-block context —
-        # its sheets are tickless; when it is the ONLY context trigger
-        # (no Test Summary / DUT Summary) the context tick is its own
+        # its sheets are tickless; the context tick is already counted in
+        # the base 5 (it runs whenever any DUT-block sheet is selected)
         selection.append(ReportSelection.TestCorrelation)
-        if not any(
-            s in selection for s in (ReportSelection.TestSummary, ReportSelection.DUT)
-        ):
-            totalLoopCnt += 1
     reportInfo = (
         selection,
         testTuples,
@@ -392,7 +372,7 @@ def build_generated(
         sig, QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, channel
     )
 
-    # GUI side: classic-protocol summary table, chart PNGs, stat rows
+    # GUI side: classic-protocol summary table, chart PNGs
     # fetch-once invariant (2026-11-16 rename design): the context hoist
     # must fetch the heavy dutSummary handshake exactly once per export,
     # regardless of how many DUT-block sheets are selected
@@ -412,27 +392,10 @@ def build_generated(
         {1: (1, "2026-01-01 10:00:00 (UTC+0)", "")} if file_dates is None else file_dates
     )
     # the filter path must never reach the GUI for dutInfo when the DUT
-    # sheet rendered; the stat-only selection stubs the dutInfo fetch
-    # with the FULL dutInfo shape (getFullDUTInfoFromDutArray rows,
-    # 2026-11-17: the stat-only fetch is repointed to the full fetch)
+    # sheet rendered
     gen.waitForDutInfo = lambda *args: (_ for _ in ()).throw(
         AssertionError("waitForDutInfo must not be called when the DUT sheet ran")
     )
-    gen._captured_stat_kargs = []
-    if not with_dut:
-        # `stat_dut_rows` (parity pin, 2026-11-17) overrides the stub so
-        # the stat-only pipeline consumes the SAME rows the heavy fetch
-        # serves — identical input, identical drop-set expected (§7.2)
-        gen.waitForDutInfo = lambda heads, sites, fids: (
-            stat_dut_rows
-            if stat_dut_rows is not None
-            else {
-                1: {
-                    0: _full_info("SN541", "Failed - 0x08"),
-                    2: _full_info("SN541", "Passed - 0x00"),
-                }
-            }
-        )
     if hide_remeasured:
         assert monkeypatch is not None, "hide_remeasured=True requires monkeypatch"
         monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
@@ -448,61 +411,7 @@ def build_generated(
 
     gen.waitForImage = fake_wait_for_image
 
-    # classic DataInterface.getStatistics shape (containsFTR=True: the
-    # "Pattern Name" column follows "Test Name"; VECT_NAM only on the FTR row)
-    stat_table = [
-        [
-            "",
-            "Test Name",
-            "Pattern Name",
-            "Unit",
-            "Low Limit",
-            "High Limit",
-            "Fail Num",
-            "Cpk",
-            "Average",
-            "Median",
-            "St. Dev.",
-            "Min",
-            "Max",
-        ],
-        [
-            "10 / Head1 / All Sites",
-            "0_TXCC/VCCC_ASIC",
-            "",
-            "V",
-            "0.500",
-            "1.500",
-            "1",
-            "1.23",
-            "1.000",
-            "1.000",
-            "0.010",
-            "0.980",
-            "1.020",
-        ],
-        [
-            "12 / Head1 / All Sites",
-            "2_Func/scanchain",
-            "PAT_TOP",
-            "P/F",
-            "N/A",
-            "N/A",
-            "0",
-            "∞",
-            "1.000",
-            "1.000",
-            "0.000",
-            "0.000",
-            "1.000",
-        ],
-    ]
-
     def fake_wait_for_data_list(heads, sites, fids, chartType, kargs):
-        if chartType == tab.Trend and kargs.get("testTuples") == testTuples:
-            # writeStatistic passes the FULL testTuples list (per-test trend
-            # rows pass a single-tuple list — never equal here, two tests)
-            return stat_table
         if chartType == tab.Bin:
             return bin_table("HB") if kargs.get("isHBIN") else bin_table("SB")
         if chartType == tab.Wafer:
@@ -522,15 +431,7 @@ def build_generated(
 
     gen.waitForDataList = fake_wait_for_data_list
 
-    real_fake = gen.waitForDataList
-
-    def capturing_wait_for_data_list(heads, sites, fids, chartType, kargs):
-        gen._captured_stat_kargs.append((chartType, dict(kargs)))
-        return real_fake(heads, sites, fids, chartType, kargs)
-
-    gen.waitForDataList = capturing_wait_for_data_list
-
-    # writeTest_Summary fetches the File Info table for the temperature
+    # writeStatistic fetches the File Info table for the temperature
     # fallback regardless of the sheet selection — the stub answers from
     # the fixture's table (empty when the sheet is not selected, plus the
     # "Test Temperature:" row when `file_temperature` is set)
@@ -582,37 +483,37 @@ def generated_with_file_info(tmp_path, qapp):
 class TestSheetInventory:
     def test_sheets_classic_order_without_histogram(self, generated):
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["Test Summary", "DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
+        assert wb.sheetnames == ["Test Statistics", "DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
 
     def test_unselected_and_overflow_sheets_absent(self, generated):
         _, wb, _, _, _ = generated
         assert "Histogram" not in wb.sheetnames  # not selected
-        assert "Test Summary (2)" not in wb.sheetnames  # 3 DUTs, single chunk
+        assert "Test Statistics (2)" not in wb.sheetnames  # 3 DUTs, single chunk
 
 
 # --------------------------------------------------------------------------
-# Test Summary matrix sheet
+# Test Statistics matrix sheet
 # --------------------------------------------------------------------------
 
 
 class TestTestSummarySheet:
     def test_banner_row_one(self, generated):
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert ws["A1"].value == "Test#"  # Test# leads the base labels
         assert ws["M1"].value == 1  # banner labels are plain ints
         assert ws["A1"].fill.fgColor.rgb == "FFCBD5E1"
 
     def test_repeated_header_row_sixteen(self, generated):
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert ws["A16"].value == "Test#"
         assert ws["A16"].fill.fgColor.rgb == "FF1E40AF"
         assert ws["M16"].value == "SN541"  # part ID base
 
     def test_metadata_block_layout(self, generated):
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         # 14 metadata rows (2..15, issue #1 split), Test# 10000.., numeric
         # cells parsed bare
         assert ws["A2"].value == 10000
@@ -635,7 +536,7 @@ class TestTestSummarySheet:
         # issue #1: the combined Head-Site text row became two numeric rows
         # (Head 11, Site 12) with bare-integer die cells
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert ws["C11"].value == "Head"
         assert ws["D11"].value == "INT"
         assert ws["M11"].value == 1
@@ -647,14 +548,14 @@ class TestTestSummarySheet:
 
     def test_first_test_formulas_at_row_seventeen(self, generated):
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert ws["G17"].value.startswith("=IFERROR(MIN(M17:")
         assert ws["H17"].value.startswith("=IFERROR(MAX(M17:")
         assert ws["L17"].value.startswith("=IFERROR(SUMPRODUCT(")
 
     def test_die_values_parametric_and_ftr(self, generated):
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert ws["M17"].value == 1.0
         assert ws["N17"].value == 1.2
         # FTR row: die cells from the flag list (0 pass / 1 fail)
@@ -668,7 +569,7 @@ class TestTestSummarySheet:
         # xlsxwriter migration: spacer P, Trend Q (visible), spacer R, then
         # the hidden flag mirrors S..U
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         for letter in ("P", "Q", "R"):
             dim = col_dim(ws, letter)
             assert dim is None or not dim.hidden
@@ -679,7 +580,7 @@ class TestTestSummarySheet:
         # 2026-11-10 R9: DUT-sheet widths are fixed by the renderer
         # (xlsxwriter stores width + ~0.71 — max-digit-width compensation)
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert col_dim(ws, "A").width == pytest.approx(8, abs=0.75)  # Test#
         assert col_dim(ws, "B").width == pytest.approx(30, abs=0.75)  # Test name
         assert col_dim(ws, "C").width == pytest.approx(8, abs=0.75)  # Param
@@ -692,7 +593,7 @@ class TestTestSummarySheet:
 
 
 class TestDutTemperatureFallback:
-    """writeTest_Summary wires the File Info "Test Temperature:" row into the
+    """writeStatistic wires the File Info "Test Temperature:" row into the
     Temperature metadata row's fallback (untagged part IDs)."""
 
     @pytest.fixture
@@ -714,28 +615,28 @@ class TestDutTemperatureFallback:
 
     def test_untagged_part_ids_take_file_temperature(self, generated_fallback):
         _, wb, _, _, _ = generated_fallback
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert ws["M5"].value == 85.0  # Temperature row (5): die cells M..O
         assert ws["N5"].value == 85.0
         assert ws["O5"].value == 85.0
 
     def test_tagged_part_ids_keep_encoded_temperature(self, generated_tagged):
         _, wb, _, _, _ = generated_tagged
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert ws["M5"].value == 25.0  # part-ID tag wins over the file value
         assert ws["N5"].value == 25.0
         assert ws["O5"].value == 85.0
 
     def test_no_tag_no_file_row_stays_blank(self, generated_no_source):
         _, wb, _, _, _ = generated_no_source
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert ws["M5"].value in ("", None)
         assert ws["O5"].value in ("", None)
 
     def test_fallback_temperatures_fold_like_tags(self, generated_fallback):
         # constant 85C across all DUTs -> the Temperature row hides
         _, wb, _, _, _ = generated_fallback
-        assert wb["Test Summary"].row_dimensions[5].hidden is True
+        assert wb["Test Statistics"].row_dimensions[5].hidden is True
 
 
 # --------------------------------------------------------------------------
@@ -1135,7 +1036,7 @@ class TestChartSheets:
     def test_bin_sheet_a4_print_setup(self, generated):
         # eighth wave (R1): the Bin sheet prints on A4, fit to one page
         # wide with unlimited height; other sheets keep their defaults
-        # (the Test Summary sets fit-to-page but no paper size). The class
+        # (the Test Statistics sets fit-to-page but no paper size). The class
         # constant PAPERSIZE_A4 is the string "9"; the saved attribute
         # round-trips as int 9 through openpyxl's Integer descriptor.
         _, wb, _, _, _ = generated
@@ -1145,12 +1046,12 @@ class TestChartSheets:
         assert ws.page_setup.fitToHeight == 0
         assert ws.sheet_properties.pageSetUpPr.fitToPage is True
         assert wb["Trend Chart"].page_setup.paperSize is None
-        assert wb["Test Summary"].page_setup.paperSize is None
+        assert wb["Test Statistics"].page_setup.paperSize is None
         # and never landscape: the 2026-11-14 wafer print ruling extends
-        # A4/landscape to the wafer sheets ONLY (the Test Summary's
+        # A4/landscape to the wafer sheets ONLY (the Test Statistics's
         # fit_to_pages serializes the explicit 'portrait' default)
         assert wb["Trend Chart"].page_setup.orientation is None
-        assert wb["Test Summary"].page_setup.orientation in (None, "portrait")
+        assert wb["Test Statistics"].page_setup.orientation in (None, "portrait")
 
 
 # --------------------------------------------------------------------------
@@ -1161,7 +1062,7 @@ class TestChartSheets:
 class TestProgressContract:
     def test_loop_count_matches_classic_total(self, generated):
         gen, _, _, _, _ = generated
-        # DUT block 5 (1 context + 2 Test Summary matrix + 2 DUT Summary
+        # DUT block 5 (1 context + 2 Test Statistics matrix + 2 DUT Summary
         # per-DUT), Trend 2 (2 tests x 1 head x 1 site), Bin 1, Wafer 1
         assert gen.totalLoopCnt == 9
         assert gen.loopCount == gen.totalLoopCnt
@@ -1186,7 +1087,7 @@ class TestDieCellNumberFormat:
 
     def test_die_cells_scientific_hardcoded(self, generated):
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert ws["M17"].number_format == "0.00E+00"
         assert ws["N17"].number_format == "0.00E+00"
         assert ws["M18"].number_format == "0"  # FTR die cells stay integer
@@ -1198,7 +1099,7 @@ class TestDieCellNumberFormat:
         monkeypatch.setattr(settings.gen, "data_precision", 3)
         monkeypatch.setattr(settings.gen, "data_notation", "F")
         _, wb, _, _, _ = build_generated(tmp_path, qapp)
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert number_format_from_settings(3, "F") == "0.000"  # utility intact
         assert ws["M17"].number_format == "0.00E+00"  # hardcode wins
         assert ws["N17"].number_format == "0.00E+00"
@@ -1229,7 +1130,7 @@ class TestDuplicatePartIdHighlight:
 
     def test_one_pair_rule_on_part_id_die_cells(self, generated):
         _, wb, _, _, _ = generated
-        rules = cf_block(wb["Test Summary"], "M3:O3")
+        rules = cf_block(wb["Test Statistics"], "M3:O3")
         assert len(rules) == 1
         # xlsxwriter emits type "formula"; openpyxl reads it as "expression"
         assert rules[0].type == "expression"
@@ -1242,14 +1143,14 @@ class TestDuplicatePartIdHighlight:
 
     def test_rule_uses_builtin_soft_yellow(self, generated):
         _, wb, _, _, _ = generated
-        rules = cf_block(wb["Test Summary"], "M3:O3")
+        rules = cf_block(wb["Test Statistics"], "M3:O3")
         assert str(rules[0].dxf.fill.bgColor.rgb).endswith("FFEB9C")
 
     def test_base_cells_not_covered(self, generated):
         _, wb, _, _, _ = generated
         # the CF range is the die span only — never the full row
         with pytest.raises(AssertionError, match="no conditional formatting"):
-            cf_block(wb["Test Summary"], "A3:O3")
+            cf_block(wb["Test Statistics"], "A3:O3")
 
 
 class TestRemeasureFilterPrune:
@@ -1261,7 +1162,7 @@ class TestRemeasureFilterPrune:
             tmp_path, qapp, duplicate_sn=True, hide_remeasured=True, monkeypatch=monkeypatch
         )
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         # kept order: dutIndex 1 (SN542) then 2 (the later SN541)
         assert ws["M16"].value == "SN542"
         assert ws["N16"].value == "SN541"
@@ -1271,7 +1172,7 @@ class TestRemeasureFilterPrune:
     def test_filter_off_keeps_all_columns(self, tmp_path, qapp):
         generated = build_generated(tmp_path, qapp, duplicate_sn=True)
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         assert ws["M16"].value == "SN541"
         assert ws["N16"].value == "SN542"
         assert ws["O16"].value == "SN541"
@@ -1281,14 +1182,14 @@ class TestRemeasureFilterPrune:
             tmp_path, qapp, blank_ids=True, hide_remeasured=True, monkeypatch=monkeypatch
         )
         _, wb, _, _, _ = generated
-        ws = wb["Test Summary"]
+        ws = wb["Test Statistics"]
         # nothing dropped: all three die columns survive
         assert ws["M16"].value == "DUT #1"
         assert ws["N16"].value == "DUT #2"
         assert ws["O16"].value == "DUT #3"
 
     def test_prune_summary_view_removes_exactly_the_drops(self):
-        from deps.exporter.worksheets.test_summary import prune_summary_view
+        from deps.exporter.worksheets.test_statistics import prune_summary_view
 
         summary = make_summary()
         dropped = {(1, 0)}
@@ -1303,7 +1204,7 @@ class TestRemeasureFilterPrune:
         assert 0 in summary["dutInfo"][1]
 
     def test_prune_summary_view_empty_set_is_identity(self):
-        from deps.exporter.worksheets.test_summary import prune_summary_view
+        from deps.exporter.worksheets.test_statistics import prune_summary_view
 
         summary = make_summary()
         assert prune_summary_view(summary, set()) is summary
@@ -1311,232 +1212,12 @@ class TestRemeasureFilterPrune:
 
 class TestRemeasureRankOrder:
     """2026-11-13 supersede ranks (issue #4): open-button mode orders the
-    files by STDF timestamps — the Test Summary drop-set follows
+    files by STDF timestamps — the Test Statistics drop-set follows
     (rank, dutIndex), not raw fid order, even when the earlier-timestamp
-    file carries the higher fid. One rank map feeds both the Test Summary
+    file carries the higher fid. One rank map feeds both the Test Statistics
     (this test) and the wafer merge (test_generator.py)."""
 
-    def test_earlier_timestamp_drops_despite_higher_fid(self, tmp_path, qapp, monkeypatch):
-        monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
-        reportInfo = (
-            [ReportSelection.DUT], [], [1, 2], [1], [-1],
-            str(tmp_path / "report.xlsx"), [], 0,
-        )
-        gen = ModernReportGenerator(
-            signals(), QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, dataChannel()
-        )
-        gen._remeasure_drops = None  # report_core init: force the fallback fetch
-        # SN541 re-measured across files: fid 2 (higher fid) measured
-        # EARLIER (FINISH_T 01-01) than fid 1 (01-09) — the fid-2
-        # occurrence drops; raw fid order would have dropped (1, 0).
-        # waitForDutInfo answers the FULL dutInfo fetch shape
-        gen.waitForDutInfo = lambda heads, sites, fids: {
-            1: {0: _full_info("SN541", "Passed - 0x00", "W01")},
-            2: {0: _full_info("SN541", "Failed - 0x08", "W01")},
-        }
-        gen.waitForFileDates = lambda fids: {
-            1: (1, "2026-01-09 10:00:00 (UTC+0)", ""),
-            2: (1, "2026-01-01 10:00:00 (UTC+0)", ""),
-        }
-        assert gen._resolve_remeasure_drops() == {(2, 0)}
 
-    def test_merge_mode_ranks_by_fid_unchanged(self, tmp_path, qapp, monkeypatch):
-        # a merge-utility load (fid 2 has 2 SubFids) keeps the fid rule:
-        # the higher fid is "latest" regardless of timestamps
-        monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
-        reportInfo = (
-            [ReportSelection.DUT], [], [1, 2], [1], [-1],
-            str(tmp_path / "report.xlsx"), [], 0,
-        )
-        gen = ModernReportGenerator(
-            signals(), QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, dataChannel()
-        )
-        gen._remeasure_drops = None
-        gen.waitForDutInfo = lambda heads, sites, fids: {
-            1: {0: _full_info("SN541", "Passed - 0x00", "W01")},
-            2: {0: _full_info("SN541", "Failed - 0x08", "W01")},
-        }
-        gen.waitForFileDates = lambda fids: {
-            1: (1, "2026-01-09 10:00:00 (UTC+0)", ""),
-            2: (2, "2026-01-01 10:00:00 (UTC+0)", ""),  # 2 SubFids -> merge mode
-        }
-        assert gen._resolve_remeasure_drops() == {(1, 0)}
-
-    def test_stat_only_wafer_scoped(self, tmp_path, qapp, monkeypatch):
-        # same SN on two wafers: the stat-only path must keep both —
-        # wafer-aware like the DUT-block path (2026-11-17)
-        monkeypatch.setattr(getSetting().gen, "hide_remeasured", True)
-        reportInfo = (
-            [ReportSelection.Stat], [], [1, 2], [1], [-1],
-            str(tmp_path / "report.xlsx"), [], 0,
-        )
-        gen = ModernReportGenerator(
-            signals(), QtCore.QMutex(), QtCore.QWaitCondition(), reportInfo, dataChannel()
-        )
-        gen._remeasure_drops = None
-        gen.waitForDutInfo = lambda heads, sites, fids: {
-            1: {0: _full_info("SN541", "Failed - 0x08", "W01")},
-            2: {0: _full_info("SN541", "Passed - 0x00", "W02")},
-        }
-        gen.waitForFileDates = lambda fids: {
-            1: (1, "2026-01-01 10:00:00 (UTC+0)", ""),
-            2: (1, "2026-01-09 10:00:00 (UTC+0)", ""),
-        }
-        assert gen._resolve_remeasure_drops() == set()
-
-    def test_stat_only_matches_dut_path_dropset(self, tmp_path, qapp, monkeypatch):
-        # §7.2 parity re-pinned under the wafer-aware key (2026-11-17):
-        # identical rows through both pipelines — the DUT-block path
-        # (stored drops) and the stat-only path (_resolve_remeasure_drops)
-        # must yield the same drop-set for the same selection
-        rows = make_summary(duplicate_sn=True)["dutInfo"]
-        gen_dut, _wb, _path, _closed, _errors = build_generated(
-            tmp_path, qapp, hide_remeasured=True, duplicate_sn=True, monkeypatch=monkeypatch
-        )
-        gen_stat, _wb, _path, _closed, _errors = build_generated(
-            tmp_path, qapp, hide_remeasured=True, with_dut=False,
-            monkeypatch=monkeypatch, stat_dut_rows=rows,
-        )
-        assert gen_dut._remeasure_drops == gen_stat._resolve_remeasure_drops()
-
-
-class TestStatsExclusionChain:
-    """G3: Test Statistics honors the drop-set in every selection — via
-    the kargs hand-off when the DUT sheet ran, via the light dutInfo-only
-    fetch when it did not."""
-
-    def test_dut_selected_kargs_carry_exclusion(self, tmp_path, qapp, monkeypatch):
-        generated = build_generated(
-            tmp_path,
-            qapp,
-            with_stat=True,
-            duplicate_sn=True,
-            hide_remeasured=True,
-            monkeypatch=monkeypatch,
-        )
-        gen, _, _, _, _ = generated
-        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
-        assert stat_kargs and stat_kargs[0].get("dut_exclusion") == {1: {0}}
-
-    def test_dut_selected_filter_off_no_exclusion_key(self, tmp_path, qapp):
-        generated = build_generated(tmp_path, qapp, with_stat=True, duplicate_sn=True)
-        gen, _, _, _, _ = generated
-        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
-        assert stat_kargs and "dut_exclusion" not in stat_kargs[0]
-
-    def test_dut_selected_never_fetches_dutinfo(self, tmp_path, qapp, monkeypatch):
-        # waitForDutInfo raises when the DUT sheet ran — the run succeeding
-        # is the assertion
-        build_generated(
-            tmp_path,
-            qapp,
-            with_stat=True,
-            duplicate_sn=True,
-            hide_remeasured=True,
-            monkeypatch=monkeypatch,
-        )
-
-    def test_stat_only_fetches_dutinfo_and_excludes(self, tmp_path, qapp, monkeypatch):
-        generated = build_generated(
-            tmp_path,
-            qapp,
-            with_stat=True,
-            duplicate_sn=True,
-            hide_remeasured=True,
-            with_dut=False,
-            monkeypatch=monkeypatch,
-        )
-        gen, wb, _, _, _ = generated
-        # the DUT sheet is absent; the fallback fetch ran (stub did not raise)
-        assert "Test Summary" not in wb.sheetnames
-        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
-        # partial fetch: SN541 at dutIndex 0 and 2 → first occurrence drops
-        assert stat_kargs and stat_kargs[0].get("dut_exclusion") == {1: {0}}
-
-
-class TestStatFtrCacheDetection:
-    """DUT + Stat selection: writeTest_Summary runs FIRST and caches the FTR
-    test keys (PRIMARY detection signal); the Test Statistics FTR row gets
-    the 0 / 0.999999 pseudo-limits, and the Fail Num / Cpk CF letters shift
-    right of the Pattern Name column."""
-
-    @pytest.fixture
-    def generated(self, tmp_path, qapp):
-        return build_generated(tmp_path, qapp, with_stat=True)
-
-    def test_sheet_inventory_with_stat(self, generated):
-        _, wb, _, _, _ = generated
-        assert wb.sheetnames == [
-            "Test Summary",
-            "DUT Summary",
-            "Test Statistics",
-            "Trend Chart",
-            "Bin Chart",
-            "Wafer W01",
-        ]
-
-    def test_ftr_cache_built_from_test_summary(self, generated):
-        gen, _, _, _, _ = generated
-        # (test_num, full test name) of every SUB_CODE==FTR testTuple; the
-        # PTR test (10, "0_TXCC/VCCC_ASIC") is not cached
-        assert gen._ftr_tests == {(12, "2_Func/scanchain")}
-
-    def test_ftr_row_pseudo_limits_via_cache(self, generated):
-        _, wb, _, _, _ = generated
-        ws = wb["Test Statistics"]
-        # FTR-shifted transformed header: SpecMin=I, SpecMax=J. FTR row 3
-        # carries the synthetic floats; the PTR row keeps its real limits.
-        # (-0.999999 survives the xlsx round-trip as a float — non-integral;
-        # 0.999999 likewise.)
-        assert ws["I3"].value == -0.999999
-        assert isinstance(ws["I3"].value, float)
-        assert not isinstance(ws["I3"].value, str)
-        assert ws["J3"].value == 0.999999
-        assert isinstance(ws["J3"].value, float)
-        assert ws["I2"].value == 0.5
-        assert ws["J2"].value == 1.5
-
-    def test_fail_num_cpk_cf_shifted_letters(self, generated):
-        _, wb, _, _, _ = generated
-        ws = wb["Test Statistics"]
-        # Fail Num index 10 -> K (left of the ninth-wave Cp insert,
-        # unchanged); Cp index 11 -> L (the old Cpk slot); Cpk index 12
-        # -> M (Pattern Name shift + Cp insert); data rows only (header
-        # row 1 excluded)
-        fail_rules = cf_block(ws, "K2:K3")
-        assert [r.formula for r in fail_rules] == [
-            ["AND(ISNUMBER(K2),K2>0)"],
-            ["AND(ISNUMBER(K2),K2=0)"],
-        ]
-        cp_rules = cf_block(ws, "L2:L3")
-        assert [r.formula[0] for r in cp_rules] == [
-            "AND(ISNUMBER(L2),L2>=1.67)",
-            "AND(ISNUMBER(L2),L2>=1.33)",
-            "AND(ISNUMBER(L2),L2>=1)",
-            "AND(ISNUMBER(L2),L2<1)",
-        ]
-        cpk_rules = cf_block(ws, "M2:M3")
-        assert [r.formula[0] for r in cpk_rules] == [
-            "AND(ISNUMBER(M2),M2>=1.67)",
-            "AND(ISNUMBER(M2),M2>=1.33)",
-            "AND(ISNUMBER(M2),M2>=1)",
-            "AND(ISNUMBER(M2),M2<1)",
-        ]
-
-    def test_loop_count_includes_stat_rows(self, generated):
-        gen, _, _, _, _ = generated
-        # DUT block 5 + Stat 2 + Trend 2 + Bin 1 + Wafer 1
-        assert gen.loopCount == gen.totalLoopCnt == 11
-
-    def test_close_signal_emitted_no_error(self, generated):
-        _, _, _, closed, errors = generated
-        assert closed == [True]
-        assert errors == []
-
-
-# --------------------------------------------------------------------------
-# Bin-sheet banner (ninth wave: Product ID / Sublot ID from File Info)
-# --------------------------------------------------------------------------
 
 
 class TestBinBanner:
@@ -1601,25 +1282,25 @@ class TestTemperatureSplit:
         generated = self.split_generated(tmp_path, qapp, monkeypatch)
         _, wb, _, _, _ = generated
         names = wb.sheetnames
-        assert "Test Summary - T-55°C" in names
-        assert "Test Summary - T125.5°C" in names
-        assert "Test Summary - T25°C" in names
+        assert "Test Statistics - T-55°C" in names
+        assert "Test Statistics - T125.5°C" in names
+        assert "Test Statistics - T25°C" in names
         # ascending by temperature among the splits: -55 < 25 < 125.5
         # (pre-Task-8 truth: appended after the other sheets — Task 8
         # pins the adjacent order)
-        i55 = names.index("Test Summary - T-55°C")
-        i125 = names.index("Test Summary - T125.5°C")
-        i25 = names.index("Test Summary - T25°C")
+        i55 = names.index("Test Statistics - T-55°C")
+        i125 = names.index("Test Statistics - T125.5°C")
+        i25 = names.index("Test Statistics - T25°C")
         assert i55 < i25 < i125
 
     def test_each_split_carries_only_its_temperature(self, tmp_path, qapp, monkeypatch):
         generated = self.split_generated(tmp_path, qapp, monkeypatch)
         _, wb, _, _, _ = generated
-        assert wb["Test Summary - T25°C"]["M16"].value == "SN541"
-        assert wb["Test Summary - T-55°C"]["M16"].value == "SN542"
-        assert wb["Test Summary - T125.5°C"]["M16"].value == "SN543"
+        assert wb["Test Statistics - T25°C"]["M16"].value == "SN541"
+        assert wb["Test Statistics - T-55°C"]["M16"].value == "SN542"
+        assert wb["Test Statistics - T125.5°C"]["M16"].value == "SN543"
         # one die column per sheet: N15 is the spacer region everywhere
-        for name in ("Test Summary - T25°C", "Test Summary - T-55°C", "Test Summary - T125.5°C"):
+        for name in ("Test Statistics - T25°C", "Test Statistics - T-55°C", "Test Statistics - T125.5°C"):
             assert wb[name]["N16"].value in (None, "")
 
     def test_unresolvable_dut_base_only(self, tmp_path, qapp, monkeypatch):
@@ -1629,17 +1310,17 @@ class TestTemperatureSplit:
         )
         _, wb, _, _, _ = generated
         # base sheet keeps all four DUTs
-        base_headers = [wb["Test Summary"][f"{col}16"].value for col in "MNOP"]
+        base_headers = [wb["Test Statistics"][f"{col}16"].value for col in "MNOP"]
         assert base_headers == ["SN541", "SN542", "SN543", "SN544"]
         # SN544 appears in NO split sheet
-        for name in ("Test Summary - T25°C", "Test Summary - T-55°C", "Test Summary - T125.5°C"):
+        for name in ("Test Statistics - T25°C", "Test Statistics - T-55°C", "Test Statistics - T125.5°C"):
             headers = [wb[name][f"{col}16"].value for col in "MN"]
             assert "SN544" not in headers
 
     def test_split_off_unchanged(self, tmp_path, qapp):
         generated = build_generated(tmp_path, qapp, part_ids=list(self.SPLIT_IDS))
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["Test Summary", "DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
+        assert wb.sheetnames == ["Test Statistics", "DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
 
     def test_single_temperature_no_split_sheets(self, tmp_path, qapp, monkeypatch):
         generated = build_generated(
@@ -1648,15 +1329,7 @@ class TestTemperatureSplit:
             split_temperature=True, monkeypatch=monkeypatch,
         )
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["Test Summary", "DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
-
-    def test_split_does_not_touch_stats_kargs(self, tmp_path, qapp, monkeypatch):
-        generated = self.split_generated(tmp_path, qapp, monkeypatch, with_stat=True)
-        gen, _, _, _, _ = generated
-        stat_kargs = [k for chart, k in gen._captured_stat_kargs if chart == tab.Trend]
-        assert stat_kargs and stat_kargs[0] == {
-            "testTuples": [(10, 0, "0_TXCC/VCCC_ASIC"), (12, 0, "2_Func/scanchain")]
-        }
+        assert wb.sheetnames == ["Test Statistics", "DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
 
 
 class TestSplitConsumesSharedTable:
@@ -1675,10 +1348,10 @@ class TestSplitConsumesSharedTable:
 
     @classmethod
     def _split_run(cls, tmp_path, qapp, monkeypatch):
-        """One split-ON export with build_test_summary_spec spied: returns
+        """One split-ON export with build_test_statistics_spec spied: returns
         (gen, calls, real_build) — `calls` records every (args, kwargs)
         the writer passed (base sheet first, then the ascending splits)."""
-        real_build = build_test_summary_spec
+        real_build = build_test_statistics_spec
         calls = []
 
         def spy(*args, **kwargs):
@@ -1686,7 +1359,7 @@ class TestSplitConsumesSharedTable:
             return real_build(*args, **kwargs)
 
         monkeypatch.setattr(
-            "deps.exporter.worksheets.test_summary.build_test_summary_spec", spy
+            "deps.exporter.worksheets.test_statistics.build_test_statistics_spec", spy
         )
         gen, wb, _, _, _ = build_generated(
             tmp_path, qapp,
@@ -1703,7 +1376,7 @@ class TestSplitConsumesSharedTable:
         return [
             (args, kwargs)
             for args, kwargs in calls
-            if kwargs.get("sheet_name", "").startswith("Test Summary - T")
+            if kwargs.get("sheet_name", "").startswith("Test Statistics - T")
         ]
 
     def test_split_calls_pass_shared_context_table(self, tmp_path, qapp, monkeypatch):
@@ -1802,7 +1475,7 @@ class TestDutBlockTabOrder:
     the workbook end."""
 
     def test_order_dut_block_places_block_after_base(self):
-        from deps.exporter.worksheets.test_summary import order_dut_block
+        from deps.exporter.worksheets.test_statistics import order_dut_block
 
         fileinfo, dut, gdr, stat, trend, chunk, split_a = object(), object(), object(), object(), object(), object(), object()
         worksheets = [fileinfo, dut, gdr, stat, trend, chunk, split_a]
@@ -1810,14 +1483,14 @@ class TestDutBlockTabOrder:
         assert order_dut_block(worksheets, block) == [fileinfo, dut, chunk, split_a, gdr, stat, trend]
 
     def test_single_member_block_is_identity(self):
-        from deps.exporter.worksheets.test_summary import order_dut_block
+        from deps.exporter.worksheets.test_statistics import order_dut_block
 
         fileinfo, dut, stat = object(), object(), object()
         worksheets = [fileinfo, dut, stat]
         assert order_dut_block(worksheets, [dut]) == worksheets
 
     def test_empty_block_is_identity(self):
-        from deps.exporter.worksheets.test_summary import order_dut_block
+        from deps.exporter.worksheets.test_statistics import order_dut_block
 
         worksheets = [object(), object()]
         assert order_dut_block(worksheets, []) == worksheets
@@ -1830,10 +1503,10 @@ class TestDutBlockTabOrder:
         )
         _, wb, _, _, _ = generated
         assert wb.sheetnames == [
-            "Test Summary",
-            "Test Summary - T-55°C",
-            "Test Summary - T25°C",
-            "Test Summary - T125.5°C",
+            "Test Statistics",
+            "Test Statistics - T-55°C",
+            "Test Statistics - T25°C",
+            "Test Statistics - T125.5°C",
             "DUT Summary",
             "Trend Chart",
             "Bin Chart",
@@ -2140,7 +1813,7 @@ class TestWaferCellMap:
 
 
 # --------------------------------------------------------------------------
-# DUT Summary sheet (the transposed Test Summary complement)
+# DUT Summary sheet (the transposed Test Statistics complement)
 # --------------------------------------------------------------------------
 
 
@@ -2165,19 +1838,20 @@ class TestDUTSummarySheet:
     def test_dut_summary_follows_the_dut_block(self, tmp_path, qapp, monkeypatch):
         _, wb, _, _, _ = build_generated(tmp_path, qapp, monkeypatch=monkeypatch)
         names = wb.sheetnames
-        assert names.index("DUT Summary") == names.index("Test Summary") + 1
+        assert names.index("DUT Summary") == names.index("Test Statistics") + 1
 
     def test_tab_colors_distinguish_families(self, tmp_path, qapp, monkeypatch):
-        # 2026-11-17 user ruling: the two DUT-block table kinds get
-        # different tab colors — Test Summary keeps the deep blue, the
-        # DUT Summary per-DUT sheets go purple
+        # 2026-11-23 user ruling: the two DUT-block table kinds get
+        # different tab colors — the Test Statistics matrix keeps the
+        # green (the sheet's color since 2026-11-11), the DUT Summary
+        # per-DUT sheets take the deep blue
         _, wb, _, _, _ = build_generated(tmp_path, qapp, monkeypatch=monkeypatch)
-        assert wb["Test Summary"].sheet_properties.tabColor.rgb == "FF1E40AF"
-        assert wb["DUT Summary"].sheet_properties.tabColor.rgb == "FFA855F7"
+        assert wb["Test Statistics"].sheet_properties.tabColor.rgb == "FF16A34A"
+        assert wb["DUT Summary"].sheet_properties.tabColor.rgb == "FF1E40AF"
 
     def test_test_summary_untouched(self, tmp_path, qapp, monkeypatch):
         _, wb, _, _, _ = build_generated(tmp_path, qapp, monkeypatch=monkeypatch)
-        dut = wb["Test Summary"]
+        dut = wb["Test Statistics"]
         assert dut["A16"].value == "Test#"  # repeated header row 16 intact
         assert dut["M17"].value == 1.0  # first die cell of data row 17
 
@@ -2190,46 +1864,22 @@ class TestDUTSummarySheet:
 
 class TestDutBlockSelectionCombos:
     def test_dut_only_export(self, tmp_path, qapp, monkeypatch):
-        """Review Focus 2: DUT Summary without the Test Summary matrix.
+        """Review Focus 2: DUT Summary without the Test Statistics matrix.
 
         The per-DUT sheet renders, the matrix does not; the context ran
-        once so Test Statistics keeps full FTR pseudo-limits (the cache
-        filled) and the stored drop-set (the light dutInfo fetch —
-        stubbed to throw — is never reached)."""
+        once so the FTR cache filled and the drop-set stored (the light
+        dutInfo fetch — stubbed to throw — is never reached)."""
         gen, wb, reportPath, closed, errors = build_generated(
-            tmp_path, qapp, with_test_summary=False, with_stat=True, monkeypatch=monkeypatch,
+            tmp_path, qapp, with_test_summary=False, monkeypatch=monkeypatch,
         )
         assert closed == [True] and errors == []
         names = wb.sheetnames
         assert "DUT Summary" in names
-        assert "Test Summary" not in names
-        # context ran: FTR cache filled (pseudo-limits stay PRIMARY) and
-        # the drop-set stored (Stat never takes the light-fetch path)
-        assert gen._ftr_tests
+        assert "Test Statistics" not in names
+        # context ran: the drop-set stored
         assert gen._remeasure_drops is not None
         assert gen.loopCount == gen.totalLoopCnt
         assert gen._dut_summary_fetch_count == 1  # fetch-once invariant
-
-    def test_neither_dut_sheet_stat_only_unchanged(self, tmp_path, qapp, monkeypatch):
-        """Review Focus 4: neither sheet + Stat + hide_remeasured — the
-        light dutInfo-only fetch answers (§7.2 fallback), the cache stays
-        empty (Pattern-Name fallback), the block contributes 0 ticks."""
-        gen, wb, reportPath, closed, errors = build_generated(
-            tmp_path, qapp, with_dut=False, with_stat=True,
-            hide_remeasured=True, monkeypatch=monkeypatch,
-        )
-        assert closed == [True] and errors == []
-        assert "Test Statistics" in wb.sheetnames
-        assert "Test Summary" not in wb.sheetnames
-        assert "DUT Summary" not in wb.sheetnames
-        assert gen._ftr_tests == set()  # stat-only fallback signal
-        # the drop-set is computed on demand from the light fetch, never
-        # stored back — None is the "context never ran" marker
-        assert gen._remeasure_drops is None
-        assert isinstance(gen._resolve_remeasure_drops(), set)
-        assert gen.loopCount == gen.totalLoopCnt
-        assert gen._dut_summary_fetch_count == 0  # no heavy fetch at all
-
 
     def test_test_summary_only_export(self, tmp_path, qapp, monkeypatch):
         """Review Focus coverage (review finding 9): the matrix alone —
@@ -2237,13 +1887,12 @@ class TestDutBlockSelectionCombos:
         context, cache + drop-set stored. Hook #6 routes this selection
         through the test page at the dialog level."""
         gen, wb, reportPath, closed, errors = build_generated(
-            tmp_path, qapp, with_per_dut=False, with_stat=True, monkeypatch=monkeypatch,
+            tmp_path, qapp, with_per_dut=False, monkeypatch=monkeypatch,
         )
         assert closed == [True] and errors == []
         names = wb.sheetnames
-        assert "Test Summary" in names
+        assert "Test Statistics" in names
         assert "DUT Summary" not in names
-        assert gen._ftr_tests
         assert gen._remeasure_drops is not None
         assert gen._dut_summary_fetch_count == 1
         assert gen.loopCount == gen.totalLoopCnt
@@ -2254,7 +1903,7 @@ class TestDutContextSharedStats:
     table (`_dut_ctx_stats`/`_dut_ctx_pos`) alongside the rest of the
     context; the writers pass it to their builders as ``shared_stats``.
     The builders' spec identity is pinned by the equality tests in
-    test_test_summary.py::TestSharedStatsContext — here the wiring is."""
+    test_test_statistics.py::TestSharedStatsContext — here the wiring is."""
 
     def test_shared_table_built_with_context(self, tmp_path, qapp):
         gen, _, _, closed, errors = build_generated(tmp_path, qapp)

@@ -73,21 +73,72 @@ def test_split_temperature_round_trips():
     assert params.gen.split_temperature is True
 
 
-def test_test_summary_default_true():
-    assert SettingParams().gen.test_summary is True
-
-
-def test_test_summary_alias_in_dump():
-    dumped = SettingParams().model_dump(by_alias=True)
-    assert dumped["General"]["Test Summary"] is True
-
-
-def test_test_summary_round_trips():
+def test_test_summary_setting_removed():
+    # 2026-11-23 takeover: the matrix rides Stat_cb — the dedicated
+    # setting + checkbox are gone; "Test Summary" leaves the dump
     params = SettingParams()
-    params.gen.test_summary = False
+    assert not hasattr(params.gen, "test_summary")
     dumped = params.model_dump(by_alias=True)
-    assert dumped["General"]["Test Summary"] is False
-    assert params.gen.test_summary is False
+    assert "Test Summary" not in dumped["General"]
+
+
+def test_testsummary_enum_member_removed():
+    # the fork-added member is gone (gap at 10 accepted — IntEnum needs
+    # no contiguity, nothing persists members by value); Stat keeps its
+    # upstream value 6
+    from deps.uic_stdExporter import ReportSelection
+
+    assert not hasattr(ReportSelection, "TestSummary")
+    assert ReportSelection.Stat == 6
+
+
+def test_no_dangling_testsummary_references():
+    # no Python source under deps/ references the removed family
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2] / "deps"
+    offenders = [
+        f.name
+        for f in root.rglob("*.py")
+        if "__pycache__" not in str(f)
+        and ("TestSummary_cb" in f.read_text() or "ReportSelection.TestSummary" in f.read_text())
+    ]
+    assert offenders == []
+
+
+def test_classic_stat_tick_count_guarded_in_modern_mode():
+    # review finding 1 (2026-11-23): the classic Stat branch must not add
+    # its N*S*H*F ticks in Modern mode — the matrix under Stat_cb emits
+    # 1+N via hook #5, and the unguarded term double-counted the
+    # denominator (progress stalled at ~(1+N)/(N*S*H*F+1+N))
+    source = (Path(__file__).resolve().parents[2] / "deps" / "uic_stdExporter.py").read_text()
+    assert (
+        "if ReportSelection.Stat in selectedContents and not getSetting().gen.modern_export:"
+        in source
+    )
+
+
+class TestStatRouting:
+    """2026-11-23 takeover: Stat_cb serves both modes — a Stat-only
+    selection enters the test-page flow (the classic stat table and the
+    Modern matrix both need test items)."""
+
+    def test_stat_only_routes_through_test_page(self):
+        dialog = _DialogStub([ReportSelection.Stat])
+        stdfExporter.gotoNextPage(dialog)
+        assert dialog.exportUI.stackedWidget.currentIndex() == 1
+        assert dialog.started is False
+
+    def test_stat_requires_a_test_selection(self, monkeypatch):
+        dialog = _DialogStub([ReportSelection.Stat])
+        dialog.exportUI.stackedWidget.setCurrentIndex(1)
+        monkeypatch.setattr(
+            QMessageBox, "warning", lambda *args, **kwargs: dialog.warnings.append(args)
+        )
+        stdfExporter.gotoNextPage(dialog)
+        assert dialog.warnings
+        assert dialog.exportUI.stackedWidget.currentIndex() == 1
+        assert dialog.started is False
 
 
 def test_wafer_heat_map_default_true():
@@ -113,26 +164,26 @@ def test_dut_block_loop_count_progress_denominator():
     # upstream 1 + N branch, untouched)
     from deps.exporter.progress import dut_block_loop_count
 
-    assert dut_block_loop_count(test_count=0, test_summary_selected=False, dut_selected=False) == 0
-    assert dut_block_loop_count(test_count=3, test_summary_selected=False, dut_selected=True) == 4
-    assert dut_block_loop_count(test_count=3, test_summary_selected=True, dut_selected=False) == 4
-    assert dut_block_loop_count(test_count=3, test_summary_selected=True, dut_selected=True) == 7
+    assert dut_block_loop_count(test_count=0, stat_selected=False, dut_selected=False) == 0
+    assert dut_block_loop_count(test_count=3, stat_selected=False, dut_selected=True) == 4
+    assert dut_block_loop_count(test_count=3, stat_selected=True, dut_selected=False) == 4
+    assert dut_block_loop_count(test_count=3, stat_selected=True, dut_selected=True) == 7
     # 2026-11-19: the Test Correlation Map rides the context tick alone —
     # its sheets are tickless (one map per temperature adds none) — and
     # its own gate runs the context even with no other DUT-block sheet
     assert (
         dut_block_loop_count(
-            test_count=3, test_summary_selected=False, dut_selected=False, correlation_selected=True
+            test_count=3, stat_selected=False, dut_selected=False, correlation_selected=True
         )
         == 1
     )
     assert (
         dut_block_loop_count(
-            test_count=3, test_summary_selected=True, dut_selected=False, correlation_selected=True
+            test_count=3, stat_selected=True, dut_selected=False, correlation_selected=True
         )
         == 4
     )
-    assert dut_block_loop_count(test_count=3, test_summary_selected=False, dut_selected=False) == 0
+    assert dut_block_loop_count(test_count=3, stat_selected=False, dut_selected=False) == 0
 
 
 def ptr_dict():
@@ -259,11 +310,12 @@ def _grid_slots() -> dict[str, list[tuple[int, ...]]]:
     return slots
 
 
-def test_test_correlation_checkbox_sits_right_of_test_summary():
-    # 2026-11-19 user ruling: the visible slot follows Test Summary (2,2)
+def test_test_correlation_checkbox_takes_freed_slot():
+    # 2026-11-23: TestSummary_cb removed (Stat_cb drives the matrix now)
+    # — the Test Correlation Map moves into its freed (2,2) slot
     slots = _grid_slots()
-    assert slots["TestSummary_cb"] == [(2, 2, 1, 1)]
-    assert slots["TestCorrelation_cb"] == [(2, 3, 1, 1)]
+    assert "TestSummary_cb" not in slots
+    assert slots["TestCorrelation_cb"] == [(2, 2, 1, 1)]
 
 
 class _FakeStackedWidget:

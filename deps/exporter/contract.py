@@ -6,9 +6,9 @@ theme, progress plumbing and selection state they consume. Every mixin
 inherits ``ReportHost`` so type checkers (pyright) and pylint see the
 attributes and methods the host guarantees — without it, ``self._theme``
 and friends are unknown members on the mixin classes themselves, and the
-cross-mixin couplings (TestStatistics -> TestSummary's
-``_resolve_remeasure_drops``, both -> ``reportGenerator._fid_ranks``)
-exist only in convention.
+cross-mixin couplings (DUTSummary -> TestStatistics's shared
+context, both -> ``reportGenerator._fid_ranks``) exist only in
+convention.
 
 The contract carries no runtime state: every member is a PEP 526
 annotation (no value assigned, guaranteed by ``__slots__ = ()``), so
@@ -44,8 +44,7 @@ class ReportHost:  # pylint: disable=too-few-public-methods
 
     # -- per-run state (report_core re-binds each run) --
     _bin_banner: str  # Bin-sheet banner; File Info overwrites it
-    _ftr_tests: set  # (test_num, test_name) tuples filled by _prepare_dut_context
-    _remeasure_drops: set | None  # None = stat-only signal (§7.2)
+    _remeasure_drops: set | None  # drop-set stored by _prepare_dut_context (§7.2)
     _fid_ranks_cache: dict | None  # None until the first _fid_ranks() call
     _wafer_fetched: list  # per-run stash (issue #13): (index, wafer, payload)
                           # triples writeWaferMap fetched; [] until then
@@ -53,7 +52,7 @@ class ReportHost:  # pylint: disable=too-few-public-methods
 
     # -- DUT-block shared context (_prepare_dut_context, generator level:
     #    fetched ONCE when either DUT-block sheet is selected; both
-    #    writeTest_Summary and writeDUT_Summary consume it, including the
+    #    writeStatistic and writeDUT_Summary consume it, including the
     #    shared per-test table passed to the builders as shared_stats) --
     _dut_ctx_summary: dict  # the PRUNED summaryTable
     _dut_ctx_order: list  # classic (fid, dutIndex) display order
@@ -96,8 +95,6 @@ class ReportHost:  # pylint: disable=too-few-public-methods
     # WaferMapMixin's per-wafer cosmetics (issue #13: the heat map sheet
     # reuses them — cross-mixin by convention)
     _style_wafer_sheet: Callable[..., None]
-    # TestSummaryMixin's re-measure drop-set resolver (§7.2)
-    _resolve_remeasure_drops: Callable[[], Any]
     # DUTSummaryMixin's per-DUT sheet writer (generator-invoked; reads the
     # context _prepare_dut_context stored)
     writeDUT_Summary: Callable[..., None]

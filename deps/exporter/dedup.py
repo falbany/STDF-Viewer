@@ -127,12 +127,3 @@ def compute_remeasure_drops(
             if index + 1 < len(pairs):
                 drops.add(pair)
     return drops
-
-
-def drops_to_exclusion(drops: set[tuple[int, int]]) -> dict[int, set[int]]:
-    """Drop-set -> the `dut_exclusion` shape the stats hook takes
-    (`{fid: {dutIndex, ...}}`); empty drops -> empty dict."""
-    exclusion: dict[int, set[int]] = {}
-    for fid, dut_index in drops:
-        exclusion.setdefault(fid, set()).add(dut_index)
-    return exclusion

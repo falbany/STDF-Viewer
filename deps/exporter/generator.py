@@ -50,7 +50,7 @@ is one 250 pt row with 8.5 cm donuts cell-anchored A{row} / D{row}.
 
 Instance state (``self._wb``, ``self._theme``, ``self._row``) replaces the
 classic module-level ``sv`` statics, so several generators can coexist.
-The Test Summary matrix is rendered through the Task 4/5 spec builder and
+The Test Statistics matrix (2026-11-23 takeover name) is rendered through the Task 4/5 spec builder and
 matrix renderer (die chunks beyond the Excel column cap get their own
 "(n)" sheets); the chart sheets (bin, wafer, trend, histogram) embed the
 GUI-provided PNGs and write their stat rows with the themed body style,
@@ -58,7 +58,7 @@ mirroring the classic cursor gaps and progress cadence.
 
 Worksheets split (2026-11-12): the per-sheet writers moved verbatim to
 ``deps/exporter/worksheets/*.py`` as mixins (file_info, gdr_dtr,
-test_summary, dut_summary, test_statistics, bin_chart, wafer_map,
+test_statistics, dut_summary, bin_chart, wafer_map,
 trend_chart, histogram); this module composes them into
 ``ModernReportGenerator`` and
 keeps only the assembly — ``__init__`` state, the shared
@@ -79,8 +79,7 @@ from deps.exporter.worksheets.file_info import FileInfoMixin
 from deps.exporter.worksheets.gdr_dtr import GdrDtrMixin
 from deps.exporter.worksheets.histogram import HistogramMixin
 from deps.exporter.worksheets.test_correlation import TestCorrelationMixin
-from deps.exporter.worksheets.test_statistics import TestStatisticsMixin
-from deps.exporter.worksheets.test_summary import TestSummaryMixin, order_dut_block
+from deps.exporter.worksheets.test_statistics import TestStatisticsMixin, order_dut_block
 from deps.exporter.worksheets.trend_chart import TrendChartMixin
 from deps.exporter.worksheets.wafer_heat_map import WaferHeatMapMixin
 from deps.exporter.worksheets.wafer_map import WaferMapMixin
@@ -98,7 +97,7 @@ from deps.uic_stdExporter import (
 
 # auto-fit column width = max content length * 1.1, capped (classic uses the
 # same *1.1 factor via xlsxwriter set_column; the cap is the modern bound).
-# Plain sheets only — the Test Summary widths are pinned by the renderer.
+# Plain sheets only — the Test Statistics widths are pinned by the renderer.
 AUTOFIT_FACTOR = 1.1
 AUTOFIT_CAP = 60
 
@@ -108,9 +107,8 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
     # composition (2026-11-19) — one more mixin than max-parents=12 admits
     FileInfoMixin,
     GdrDtrMixin,
-    TestSummaryMixin,
-    DUTSummaryMixin,
     TestStatisticsMixin,
+    DUTSummaryMixin,
     BinChartMixin,
     WaferMapMixin,
     WaferHeatMapMixin,
@@ -141,7 +139,6 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
         # any write* mixin runs (declared here so the attributes exist
         # from construction on)
         self._bin_banner = ""
-        self._ftr_tests: set = set()
         self._remeasure_drops: set | None = None
         self._fid_ranks_cache: dict | None = None
         self._wafer_fetched: list = []
@@ -183,15 +180,8 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
         # "{Product ID} / {Sublot ID}" when the File Info sheet is
         # selected and the English anchors resolve
         self._bin_banner = self.tr("Bin Chart")
-        # FTR cache (fourth wave) initialized BEFORE any writer runs:
-        # _prepare_dut_context fills it when either DUT-block sheet is
-        # selected; a Stat-only selection leaves it empty (the
-        # Pattern-Name fallback covers detection there)
-        self._ftr_tests: set = set()
         # re-measure filter hand-off (§7.2): None until
-        # _prepare_dut_context stores its drop-set — None (vs an empty
-        # set) is the stat-only signal that triggers the light
-        # dutInfo-only fetch
+        # _prepare_dut_context stores its drop-set
         self._remeasure_drops: set | None = None
         # supersede rank map (2026-11-13 wafer merge): None until the
         # first _fid_ranks() call — ONE waitForFileDates round-trip per
@@ -223,10 +213,9 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
             #    classic order; 2./3./4. below write them in classic order
             for cont in [
                 ReportSelection.FileInfo,
-                ReportSelection.TestSummary,
+                ReportSelection.Stat,
                 ReportSelection.DUT,
                 ReportSelection.GDR_DTR,
-                ReportSelection.Stat,
                 ReportSelection.Trend,
                 ReportSelection.Histo,
                 ReportSelection.Bin,
@@ -237,8 +226,10 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
                 # sheet order in the xlsx is fixed
                 if cont == ReportSelection.FileInfo:
                     sheetName = self.tr("File Info")
-                elif cont == ReportSelection.TestSummary:
-                    sheetName = self.tr("Test Summary")
+                elif cont == ReportSelection.Stat:
+                    # 2026-11-23 takeover: Stat_cb drives the matrix in
+                    # Modern mode (slot 2 kept — layout unchanged)
+                    sheetName = self.tr("Test Statistics")
                 elif cont == ReportSelection.DUT:
                     # Modern mode: the per-DUT sheet (DUTs on rows). Classic
                     # never sees this loop — its own writer keeps its
@@ -246,8 +237,6 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
                     sheetName = self.tr("DUT Summary")
                 elif cont == ReportSelection.GDR_DTR:
                     sheetName = self.tr("GDR & DTR Summary")
-                elif cont == ReportSelection.Stat:
-                    sheetName = self.tr("Test Statistics")
                 elif cont == ReportSelection.Trend:
                     sheetName = self.tr("Trend Chart")
                 elif cont == ReportSelection.Histo:
@@ -262,7 +251,7 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
                     sheetName = self.tr("Correlation")
                 if cont in self.selectedContents:
                     self.sheetDict[cont] = self._wb.add_worksheet(sheetName)
-                    if cont == ReportSelection.TestSummary:
+                    if cont == ReportSelection.Stat:
                         # block[0] = the Test Summary base sheet (§7.4
                         # reorder). The DUT Summary base joins the block at
                         # write time so the block stays in write order —
@@ -285,7 +274,7 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
             # is selected — fetch-once; both-selected costs exactly one
             # round-trip per fetch. The writers run in tab order.
             if (
-                ReportSelection.TestSummary in self.selectedContents
+                ReportSelection.Stat in self.selectedContents
                 or ReportSelection.DUT in self.selectedContents
                 # fork(falbany): the Test Correlation Map rides the same
                 # DUT-block context (flag mirrors + temperatures)
@@ -294,7 +283,7 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
                 self._prepare_dut_context()
                 if self.forceQuit:
                     return
-            self.writeTest_Summary()
+            self.writeStatistic()
             if self.forceQuit:
                 return
             # dut summary (per-DUT sheet)
@@ -325,10 +314,6 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
                 return
 
             # ** write contents related to test numbers
-            self.writeStatistic(self.testTuples, self.selectedHeads, self.selectedSites)
-            if self.forceQuit:
-                return
-
             for testTuple in self.testTuples:
                 for head, site in product(self.selectedHeads, self.selectedSites):
                     if self.forceQuit:

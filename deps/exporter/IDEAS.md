@@ -201,6 +201,13 @@ autofilter. Chart factory = bar variant of `build_bin_donut` in
 **Open.** N (10?); ties; zero-fail rows excluded from the chart;
 degrades away when the Fail Num anchor is missing (translated UI).
 
+**Rehomed (2026-11-22).** With the classic stat table replaced by the
+modern matrix — which took over the "Test Statistics" name and Stat_cb
+(see item 13) — this block's home becomes that matrix: the Fails
+column (L) already carries live formulas + cached values per test row —
+collect while writing, render the block below the matrix's last data
+row; the chart pattern is unchanged.
+
 ## 11. Supersede provenance comments — *small/medium*
 
 **What.** With "Hide re-measured DUTs" on, annotate each kept DUT's
@@ -259,6 +266,36 @@ The Soft Bins tables (per-wafer + merged sheets) and the Fail Map Count
 table (stacked sheet) get Excel-formula Distribution columns
 (`=Count/Total`, Total row `=SUM`), matching the live-COUNTIF Count
 columns they sit beside. Spec'd as
-`docs/superpowers/specs/2026-11-16-wafer-table-distribution-formulas-design.md`;
+`docs/superpowers/specs/2026-11-16-wafer-tables-distribution-formulas-design.md`;
 the Stacked Wafers table's Yield column deferral is resolved 2026-11-16
 (item 7 shipped: the roster replaced the table — nothing left to defer).
+
+---
+
+## 13. Site/Head/File split sheets on the Test Summary — *medium, parked 2026-11-22*
+
+**What.** The temperature-split machinery (§7.4) generalized to the
+other aggregation axes: one extra Test Statistics sheet per group when
+the lot spans multiple sites, heads, or files — "Test Statistics -
+Site 0", "- Head 1", "- File 2" — additive split sheets over subset
+orders, exactly the `group_order_by_temperature` + `prune_summary_view`
++ subset-`sub_order` pattern (a split's order is a strict subset, so
+`_is_table_order` already keeps its stat caches chunk-local).
+
+**Why.** Recovers the per-site/per-head/per-file Cp/Cpk comparison the
+classic Test Statistics sheet carried — the one aggregation axis lost
+when that sheet was replaced by the modern matrix, which took over the
+"Test Statistics" name + Stat_cb (2026-11-22 ruling: splits unused so
+far; the DUT Summary's per-DUT Head/Site/File ID columns are the
+interim manual workaround). Parked until the need is real.
+
+**Where.** `worksheets/test_statistics.py` (the matrix module, renamed
+with the 2026-11-22 takeover): sibling groupers of
+`group_order_by_temperature` over the same `order` (head/site from the
+`dutInfo` slot-3 text, file from the pair's fid); the split loop in
+`writeTest_Summary` gains the axis choice. No new fetches —
+`shared_stats` slicing already covers subset orders.
+
+**Open.** Which axes (site / head / file — one, or all three?); auto
+(only when the lot is actually mixed) vs an exporter checkbox;
+combinatorial interaction with temperature splits (sheet-count cap?).
