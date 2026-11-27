@@ -72,6 +72,7 @@ class ReportSelection(IntEnum):
     Correlation = 9
     WaferHeatMap = 11  # fork(falbany): the stacked all-wafers heat map (modern-only)
     TestCorrelation = 12  # fork(falbany): the Test Correlation Map (modern-only)
+    Overview = 13  # fork(falbany): the Report Overview first sheet (modern-only)
 
 
 class sv:
@@ -905,6 +906,9 @@ class stdfExporter(QtWidgets.QDialog):
         # fork(falbany): Test Correlation Map toggle (modern-only)
         self.exportUI.TestCorrelation_cb.setChecked(getSetting().gen.test_correlation)
         self.exportUI.TestCorrelation_cb.toggled.connect(self.onTestCorrelationToggled)
+        # fork(falbany): Report Overview toggle (modern-only)
+        self.exportUI.Overview_cb.setChecked(getSetting().gen.report_overview)
+        self.exportUI.Overview_cb.toggled.connect(self.onOverviewToggled)
         self._sync_option_checkboxes()
         # bind check/cancel button to function
         self.exportUI.checkAll.clicked.connect(lambda: self.toggleSite(True))
@@ -940,6 +944,11 @@ class stdfExporter(QtWidgets.QDialog):
         getSetting().gen.test_correlation = checked
         dumpConfigFile()
 
+    def onOverviewToggled(self, checked: bool):
+        # fork(falbany): persist Report Overview toggle
+        getSetting().gen.report_overview = checked
+        dumpConfigFile()
+
     def _sync_option_checkboxes(self):
         # fork(falbany): these options are Modern-only — disabled with it
         enabled = self.exportUI.ModernReport_cb.isChecked()
@@ -947,6 +956,7 @@ class stdfExporter(QtWidgets.QDialog):
         self.exportUI.SplitTemperature_cb.setEnabled(enabled)
         self.exportUI.WaferHeatMap_cb.setEnabled(enabled)
         self.exportUI.TestCorrelation_cb.setEnabled(enabled)
+        self.exportUI.Overview_cb.setEnabled(enabled)  # fork(falbany): Report Overview is Modern-only too
                 
     def showUI(self):
         # used to determine the source of close event
@@ -1152,6 +1162,8 @@ class stdfExporter(QtWidgets.QDialog):
         if self.exportUI.WaferHeatMap_cb.isChecked(): selectedContents.append(ReportSelection.WaferHeatMap)
         # fork(falbany): modern-only — the classic exporter never sees this member
         if self.exportUI.TestCorrelation_cb.isChecked(): selectedContents.append(ReportSelection.TestCorrelation)
+        # fork(falbany): modern-only — the classic exporter never sees this member
+        if self.exportUI.Overview_cb.isChecked(): selectedContents.append(ReportSelection.Overview)
         if self.exportUI.GDR_DTR_cb.isChecked(): selectedContents.append(ReportSelection.GDR_DTR)
         if self.exportUI.PPQQ_cb.isChecked(): selectedContents.append(ReportSelection.PPQQ)
         if self.exportUI.Correlation_cb.isChecked(): selectedContents.append(ReportSelection.Correlation)
