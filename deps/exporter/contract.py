@@ -23,6 +23,7 @@ from collections.abc import Callable
 from typing import Any
 
 import xlsxwriter
+from xlsxwriter.worksheet import Worksheet
 
 from deps.exporter.theme import ModernTheme
 
@@ -52,7 +53,7 @@ class ReportHost:  # pylint: disable=too-few-public-methods
 
     # -- Report Overview stash (fork, 2026-11-27): the close-time renderer
     #    reads these; nothing fetches, nothing ticks --
-    _overview_sheet: "xlsxwriter.worksheet.Worksheet | None"
+    _overview_sheet: Worksheet | None
     _file_info_table: "list | None"  # the File Info dataTable (banner/names/temps)
     _ov_facts: dict  # Report Overview facts (schema: overview.derive_notes)
 

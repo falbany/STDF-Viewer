@@ -72,7 +72,6 @@ from itertools import product
 import xlsxwriter
 from PyQt5 import QtCore
 
-from deps.SharedSrc import getSetting
 from deps.exporter.charts import complete_chart_flags
 from deps.exporter.overview import build_overview_spec, render_overview
 from deps.exporter.theme import ModernTheme
@@ -91,6 +90,7 @@ from deps.exporter.writer import (
     reset_widths,
     write_body_cell,
 )
+from deps.SharedSrc import getSetting
 from deps.uic_stdExporter import (
     ReportSelection,
     dataChannel,

@@ -22,12 +22,12 @@ from xlsxwriter.utility import quote_sheetname
 from deps.exporter.charts import BIN_BANNER_ROW_HEIGHT_PT
 from deps.exporter.helpers import format_temperature_label
 from deps.exporter.theme import HEADER_FILL_HEX, TAB_COLOR_HEXES
-from deps.exporter.writer import DUT_SUMMARY_TAB_HEX, FOOTER_TEXT, TEST_STATISTICS_TAB_HEX
 from deps.exporter.worksheets.file_info import (
     bin_banner_from_file_info,
     file_names_from_file_info,
     file_temperatures_from_file_info,
 )
+from deps.exporter.writer import DUT_SUMMARY_TAB_HEX, FOOTER_TEXT, TEST_STATISTICS_TAB_HEX
 from deps.uic_stdExporter import ReportSelection
 
 # Locale-proof family keys: everything downstream (role labels, tab hexes)
@@ -249,7 +249,7 @@ def _format_count(value) -> str:
     return f"{value:,}"
 
 
-def build_overview_spec(
+def build_overview_spec(  # pylint: disable=too-many-arguments,too-many-locals,too-many-branches,too-many-statements
     *,
     wss: list,
     overview_ws,
@@ -287,7 +287,7 @@ def build_overview_spec(
     facts = facts or {}
     sheet_names: list = []
     sheet_families: list = []
-    for ws, family in zip(wss, _sheet_families(wss, overview_ws, sheet_dict, tr)):
+    for ws, family in zip(wss, _sheet_families(wss, overview_ws, sheet_dict, tr), strict=True):
         if ws is not overview_ws:
             sheet_names.append(ws.get_name())
             sheet_families.append(family)
@@ -313,16 +313,15 @@ def build_overview_spec(
     if dut_count is None:
         duts_value = "—"
     elif hide_remeasured:
-        duts_value = "{} tested · {} superseded · {} re-measured (kept latest)".format(
-            _format_count(dut_count),
-            _format_count(drop_count or 0),
-            _format_count(facts.get("remeasured_groups", 0)),
+        duts_value = (
+            f"{_format_count(dut_count)} tested · {_format_count(drop_count or 0)} "
+            f"superseded · {_format_count(facts.get('remeasured_groups', 0))} re-measured (kept latest)"
         )
     else:
         duts_value = f"{_format_count(dut_count)} tested"
-    heads_value = "{} head{} · {} site{}".format(
-        len(heads), "" if len(heads) == 1 else "s",
-        len(sites), "" if len(sites) == 1 else "s",
+    heads_value = (
+        f"{len(heads)} head{'' if len(heads) == 1 else 's'} · "
+        f"{len(sites)} site{'' if len(sites) == 1 else 's'}"
     )
     if wafer_count is None:
         wafers_value = "—"
@@ -350,7 +349,7 @@ def build_overview_spec(
     stat_duts = dict(facts.get("stat_sheet_duts") or [])
     corr_duts = dict(facts.get("corr_sheet_duts") or [])
     sheets = []
-    for name, family in zip(sheet_names, sheet_families):
+    for name, family in zip(sheet_names, sheet_families, strict=True):
         base = None
         if family == "stat":
             base = tr("Test Statistics")
@@ -365,7 +364,7 @@ def build_overview_spec(
             chunk_index = name[name.rfind("(") + 1 : name.rfind(")")]
             chunk_total = sum(
                 1
-                for other, other_family in zip(sheet_names, sheet_families)
+                for other, other_family in zip(sheet_names, sheet_families, strict=True)
                 if other_family == family and other.startswith(base + " (")
             ) + 1
             note = tr("chunk {} of {}").format(chunk_index, chunk_total)
@@ -454,7 +453,6 @@ def render_overview(ws, spec: dict, theme) -> None:
     role_fmt = theme.cell_format(font="body", align="left")
     duts_fmt = theme.cell_format(font="body", align="right")
     note_fmt = theme.cell_format(font="body", align="left")
-    value_chip = theme._format({})
 
     # row 1 — the banner (same treatment as the Bin sheet's, no fill)
     ws.merge_range(0, 0, 0, 4, spec["title"], theme.lookalike("title", wrap=True))
