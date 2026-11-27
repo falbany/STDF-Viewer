@@ -73,6 +73,7 @@ import xlsxwriter
 from PyQt5 import QtCore
 
 from deps.exporter.charts import complete_chart_flags
+from deps.exporter.helpers import reorder_sheets_to_end
 from deps.exporter.overview import build_overview_spec, render_overview
 from deps.exporter.theme import ModernTheme
 from deps.exporter.worksheets.bin_chart import BinChartMixin
@@ -368,6 +369,16 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors,too-many-inst
                 self._wb.worksheets_objs = order_dut_block(
                     self._wb.worksheets_objs, self._dut_sheet_block
                 )
+            # fork(falbany): 2026-11-28 tab-order ruling — GDR & DTR Summary
+            # then Bin Chart close the strip (identity-based; sheets that
+            # were not selected are skipped)
+            self._wb.worksheets_objs = reorder_sheets_to_end(
+                self._wb.worksheets_objs,
+                [
+                    self.sheetDict.get(ReportSelection.GDR_DTR),
+                    self.sheetDict.get(ReportSelection.Bin),
+                ],
+            )
             # Defined-name localSheetIds carry the sheet's CREATION index
             # (xlsxwriter workbook.py _prepare_defined_names reads
             # sheet.index) — the wafer base-sheet drop and the DUT-block

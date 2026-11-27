@@ -74,7 +74,7 @@ FOOTER_TEXT = "&C&P of &N"  # centered page-number footer (upgrade 4): &C opens 
 # Statistics matrix keeps the green the sheet has had since 2026-11-11,
 # the DUT Summary per-DUT sheets take the deep blue)
 TEST_STATISTICS_TAB_HEX = "16A34A"
-DUT_SUMMARY_TAB_HEX = "1E40AF"
+DUT_SUMMARY_TAB_HEX = "0F766E"  # 2026-11-28 palette ruling B: per-DUT teal
 
 # Fixed column geometry (2026-11-10): A=Test#, B=Test (wide, right-aligned),
 # C=Param (left-aligned). The DUT-sheet widths are pinned — no autofit.

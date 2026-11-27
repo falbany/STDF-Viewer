@@ -299,6 +299,7 @@ def build_generated(
     heat_selected=False,
     correlation_selected=False,
     overview_selected=False,
+    gdr_selected=False,
     monkeypatch=None,
     file_dates=None,
 ):
@@ -360,6 +361,11 @@ def build_generated(
         # fork 2026-11-27: the Report Overview is rendered at close time —
         # zero fetches, zero ticks (tickless-sheets pattern)
         selection.append(ReportSelection.Overview)
+    if gdr_selected:
+        # 2026-11-28 tab-order ruling: GDR & DTR closes the strip (+1 tick
+        # per the classic denominator rule)
+        selection.append(ReportSelection.GDR_DTR)
+        totalLoopCnt += 1
     reportInfo = (
         selection,
         testTuples,
@@ -488,7 +494,7 @@ def generated_with_file_info(tmp_path, qapp):
 class TestSheetInventory:
     def test_sheets_classic_order_without_histogram(self, generated):
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["Test Statistics", "DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
+        assert wb.sheetnames == ["Test Statistics", "DUT Summary", "Trend Chart", "Wafer W01", "Bin Chart"]
 
     def test_unselected_and_overflow_sheets_absent(self, generated):
         _, wb, _, _, _ = generated
@@ -1325,7 +1331,7 @@ class TestTemperatureSplit:
     def test_split_off_unchanged(self, tmp_path, qapp):
         generated = build_generated(tmp_path, qapp, part_ids=list(self.SPLIT_IDS))
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["Test Statistics", "DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
+        assert wb.sheetnames == ["Test Statistics", "DUT Summary", "Trend Chart", "Wafer W01", "Bin Chart"]
 
     def test_single_temperature_no_split_sheets(self, tmp_path, qapp, monkeypatch):
         generated = build_generated(
@@ -1334,7 +1340,7 @@ class TestTemperatureSplit:
             split_temperature=True, monkeypatch=monkeypatch,
         )
         _, wb, _, _, _ = generated
-        assert wb.sheetnames == ["Test Statistics", "DUT Summary", "Trend Chart", "Bin Chart", "Wafer W01"]
+        assert wb.sheetnames == ["Test Statistics", "DUT Summary", "Trend Chart", "Wafer W01", "Bin Chart"]
 
 
 class TestSplitConsumesSharedTable:
@@ -1514,8 +1520,8 @@ class TestDutBlockTabOrder:
             "Test Statistics - T125.5°C",
             "DUT Summary",
             "Trend Chart",
-            "Bin Chart",
             "Wafer W01",
+            "Bin Chart",
         ]
 
 
@@ -1716,7 +1722,7 @@ class TestWaferCellMap:
         _, wb, _, _, _ = build_generated(
             tmp_path, qapp, wafer_tuples=[(0, 1, "W01"), (1, 1, "W02")]
         )
-        assert wb.sheetnames[-2:] == ["Wafer W01", "Wafer W02"]
+        assert wb.sheetnames[-3:] == ["Wafer W01", "Wafer W02", "Bin Chart"]
         assert wb["Wafer W01"]["A1"].value == "W01 – All Sites"
         assert wb["Wafer W02"]["A1"].value == "W02 – All Sites"
         assert wb["Wafer W01"].freeze_panes == "G4"
@@ -1746,7 +1752,7 @@ class TestWaferCellMap:
         _, wb, _, _, _ = build_generated(
             tmp_path, qapp, wafer_tuples=[(0, 1, "A/B:C"), (1, 1, "A/B:C")]
         )
-        assert wb.sheetnames[-2:] == ["Wafer A_B_C", "Wafer A_B_C_2"]
+        assert wb.sheetnames[-3:] == ["Wafer A_B_C", "Wafer A_B_C_2", "Bin Chart"]
 
     def test_multi_wafer_formulas_are_per_sheet(self, tmp_path, qapp):
         # each block's COUNTIF/SUM formulas reference ITS OWN sheet's map
@@ -1781,7 +1787,7 @@ class TestWaferCellMap:
                 mod.WAFER_MAP_PAYLOAD = original
 
         _, wb, _, _, _ = build(tmp_path, qapp)
-        assert wb.sheetnames[-1] == "Wafer W01"  # single-wafer fixture
+        assert wb.sheetnames[-2:] == ["Wafer W01", "Bin Chart"]  # single-wafer fixture; Bin closes the strip (2026-11-28 ruling)
         ws = wb["Wafer W01"]
         assert "A1:D1" in {str(r) for r in ws.merged_cells.ranges}
         assert ws["A2"].value == "WAFER_ID:"
@@ -1852,7 +1858,7 @@ class TestDUTSummarySheet:
         # per-DUT sheets take the deep blue
         _, wb, _, _, _ = build_generated(tmp_path, qapp, monkeypatch=monkeypatch)
         assert wb["Test Statistics"].sheet_properties.tabColor.rgb == "FF16A34A"
-        assert wb["DUT Summary"].sheet_properties.tabColor.rgb == "FF1E40AF"
+        assert wb["DUT Summary"].sheet_properties.tabColor.rgb == "FF0F766E"
 
     def test_test_summary_untouched(self, tmp_path, qapp, monkeypatch):
         _, wb, _, _, _ = build_generated(tmp_path, qapp, monkeypatch=monkeypatch)

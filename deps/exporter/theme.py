@@ -57,15 +57,16 @@ CPK_BAND_HEXES = ("A7F3D0", "D1FAE5", "FEF3C7", "FECACA")
 # role; the generator maps its ReportSelection entries onto these.
 TAB_COLOR_HEXES = {
     "file_info": "94A3B8",
-    "dut_summary": "1E40AF",  # 2026-11-23 user ruling: per-DUT family takes the deep blue (purple retired; the matrix green lives in writer.TEST_STATISTICS_TAB_HEX)
-    "gdr": "94A3B8",
+    # 2026-11-28 palette ruling B ("workflow spectrum"): the per-DUT
+    # analytics are the teal family, freeing the deep blue for the overview
+    "dut_summary": "0F766E",
+    "gdr": "64748B",  # deep slate, distinct from File Info
     "trend": "0EA5E9",
-    "histo": "0EA5E9",
+    "histo": "0284C7",  # deep sky — the chart pair separates
     "bin": "EA580C",
     "wafer": "7C3AED",
-    # 2026-11-19 user ruling: light water blue at 40% (Blue, Accent 5,
-    # Lighter 40%)
-    "test_correlation": "9DC3E6",
+    "wafer_heat_map": "A78BFA",  # light violet — wafer family, distinguishable
+    "test_correlation": "14B8A6",  # teal — joins the per-DUT family
     # 2026-11-27 user ruling: the overview reuses the DUT Summary deep blue —
     # "official front page" feel
     "overview": "1E40AF",

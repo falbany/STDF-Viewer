@@ -56,6 +56,7 @@ from deps.exporter.charts import (
 )
 from deps.exporter.contract import ReportHost
 from deps.exporter.helpers import sanitize_cell
+from deps.exporter.theme import TAB_COLOR_HEXES
 from deps.SharedSrc import tab
 from deps.uic_stdExporter import ReportSelection
 
@@ -472,5 +473,8 @@ class WaferHeatMapMixin(ReportHost):
         )
         # per-wafer cosmetics (cross-mixin by convention, contract-declared)
         self._style_wafer_sheet(HeatSheet)
+        # fork(falbany): same wafer family look, own light violet
+        # (2026-11-28 palette ruling B)
+        HeatSheet.set_tab_color(f"#{TAB_COLOR_HEXES['wafer_heat_map']}")
         self.loopCount += 1
         self.sendProgress()

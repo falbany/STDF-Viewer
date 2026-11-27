@@ -458,6 +458,8 @@ class TestWaferHeatMap:
         wb = load_workbook(reportPath)
         assert wb.sheetnames == ["Wafer W08", "Wafer Heat Map"]
         heat = wb["Wafer Heat Map"]
+        # 2026-11-28 palette ruling B: same wafer family, own light violet
+        assert heat.sheet_properties.tabColor.rgb == "FFA78BFA"
         assert heat["A14"].value == "Stacked Wafers" and heat["A15"].value == "W08"
         assert heat["B10"].value == "Total DUTs Tested"
         # each payload fetched exactly once: writeWaferMap took W08, the heat

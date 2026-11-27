@@ -445,7 +445,7 @@ class TestBuildOverviewSpec:
         assert by_name["Test Statistics (2)"]["note"] == "chunk 2 of 2"
         assert by_name["Test Statistics - T-40°C"]["duts"] == 9216
         assert by_name["Test Statistics - T-40°C"]["note"] == "temperature split"
-        assert by_name["DUT Summary"]["hex"] == "1E40AF"
+        assert by_name["DUT Summary"]["hex"] == "0F766E"
         assert by_name["DUT Summary"]["duts"] == 18432
         assert by_name["Wafer 1"]["hex"] == "7C3AED"
         assert by_name["Wafer 1"]["duts"] is None
@@ -687,7 +687,7 @@ class TestOverviewIntegration:
         assert wb.sheetnames[1] == "File Info"
         assert wb.sheetnames[2] == "Test Statistics"
         assert wb.sheetnames.index("DUT Summary") > wb.sheetnames.index("Test Statistics")
-        assert wb.sheetnames[-1] == "Wafer W01"
+        assert wb.sheetnames[-2:] == ["Wafer W01", "Bin Chart"]  # Bin closes the strip (2026-11-28 ruling)
         # the stage-1 banner from the File Info anchors (harness table)
         assert wb["Report Overview"].cell(row=1, column=1).value == "ASIC-X / LOT123"
 
@@ -774,6 +774,26 @@ class TestOverviewIntegration:
             "Stacked wafer view added (all wafers)" in value
             for value in self._overview_values(wb)
         )
+
+    def test_gdr_and_bin_close_the_strip(self, tmp_path, qapp):
+        # 2026-11-28 user ruling: GDR & DTR Summary then Bin Chart are the
+        # last two tabs; the overview TOC mirrors the final order
+        from urllib.parse import unquote
+
+        _gen, wb, _path, closed, _errors = build_generated(
+            tmp_path, qapp, overview_selected=True, gdr_selected=True
+        )
+        assert closed == [True]
+        assert wb.sheetnames[-2:] == ["GDR & DTR Summary", "Bin Chart"]
+        assert wb.sheetnames[0] == "Report Overview"
+        targets = [
+            cell.hyperlink.location
+            for row in wb["Report Overview"].iter_rows()
+            for cell in row
+            if cell.hyperlink
+        ]
+        names = [unquote(t.split("!")[0]).strip("'") for t in targets]
+        assert names == wb.sheetnames[1:]
 
     def test_overview_off_is_regression_free(self, tmp_path, qapp):
         _gen, wb, _path, _closed, _errors = build_generated(tmp_path, qapp)
