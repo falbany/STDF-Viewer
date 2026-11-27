@@ -50,6 +50,12 @@ class ReportHost:  # pylint: disable=too-few-public-methods
                           # triples writeWaferMap fetched; [] until then
     _dut_sheet_block: list  # DUT-derived sheets, base first (§7.4 reorder)
 
+    # -- Report Overview stash (fork, 2026-11-27): the close-time renderer
+    #    reads these; nothing fetches, nothing ticks --
+    _overview_sheet: "xlsxwriter.worksheet.Worksheet | None"
+    _file_info_table: "list | None"  # the File Info dataTable (banner/names/temps)
+    _ov_facts: dict  # Report Overview facts (schema: overview.derive_notes)
+
     # -- DUT-block shared context (_prepare_dut_context, generator level:
     #    fetched ONCE when either DUT-block sheet is selected; both
     #    writeStatistic and writeDUT_Summary consume it, including the

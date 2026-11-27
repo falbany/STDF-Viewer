@@ -298,6 +298,7 @@ def build_generated(
     wafer_tuples=None,
     heat_selected=False,
     correlation_selected=False,
+    overview_selected=False,
     monkeypatch=None,
     file_dates=None,
 ):
@@ -355,6 +356,10 @@ def build_generated(
         # its sheets are tickless; the context tick is already counted in
         # the base 5 (it runs whenever any DUT-block sheet is selected)
         selection.append(ReportSelection.TestCorrelation)
+    if overview_selected:
+        # fork 2026-11-27: the Report Overview is rendered at close time —
+        # zero fetches, zero ticks (tickless-sheets pattern)
+        selection.append(ReportSelection.Overview)
     reportInfo = (
         selection,
         testTuples,

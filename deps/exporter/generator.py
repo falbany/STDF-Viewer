@@ -143,6 +143,11 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
         self._fid_ranks_cache: dict | None = None
         self._wafer_fetched: list = []
         self._dut_sheet_block: list = []
+        # Report Overview stash (fork, 2026-11-27): the close-time renderer
+        # reads these; report_core re-binds every one per run
+        self._overview_sheet = None
+        self._file_info_table = None
+        self._ov_facts: dict = {}
 
     # ----------------------------------------------------------------------
     # helpers
@@ -195,6 +200,11 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
         # temperature splits + the DUT Summary per-DUT sheets, base first)
         # for the close-time tab-order reorder (§7.4)
         self._dut_sheet_block: list = []
+        # Report Overview per-run stash (fork, 2026-11-27): the sheet the
+        # close-time renderer paints + the facts the writers stashed
+        self._overview_sheet = None
+        self._file_info_table = None
+        self._ov_facts: dict = {}
         # the shared per-test table of the DUT-block context (finding 4):
         # empty until _prepare_dut_context rebuilds it — it runs whenever
         # either DUT-block sheet is selected, before the writers that

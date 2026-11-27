@@ -180,6 +180,10 @@ class FileInfoMixin(ReportHost):
 
         # get file info table
         dataTable = self.waitForTableData(isFileInfo=True)
+        # fork(falbany): Report Overview banner/file-names/temperatures
+        # source (stashed before the forceQuit check so partial exports
+        # keep their banner)
+        self._file_info_table = dataTable
         if self.forceQuit:
             return
 

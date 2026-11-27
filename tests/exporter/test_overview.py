@@ -22,6 +22,7 @@ from deps.exporter.theme import ModernTheme
 from deps.exporter.worksheets.file_info import file_names_from_file_info
 from deps.uic_stdExporter import ReportSelection
 from tests.exporter.conftest import load_workbook_bytes, render_workbook
+from tests.exporter.test_generator_dut import build_generated
 
 pytestmark = [
     pytest.mark.filterwarnings("ignore:Sparkline Group extension"),
@@ -605,3 +606,58 @@ class TestRenderOverview:
         assert "Export Notes" in values
         # the renderer prepends the "– " bullet itself
         assert "– something happened" in values
+
+
+class TestOverviewStashHooks:
+    """Task 8: the _ov_facts/_file_info_table stash hooks, populated by
+    real build_generated runs (the DUT-block harness)."""
+
+    def test_plain_run_stashes_matrix_facts(self, tmp_path, qapp):
+        gen, _wb, _path, _closed, _errors = build_generated(tmp_path, qapp)
+        # 3 DUTs, no chunk overflow, no splits, no merges in the baseline
+        assert gen._ov_facts["stat_chunks"] == 1
+        assert gen._ov_facts["stat_splits"] == []
+        assert gen._ov_facts["stat_unresolved"] is None
+        names = dict(gen._ov_facts["stat_sheet_duts"])
+        assert names["Test Statistics"] == 3
+        assert "merged_wafers" not in gen._ov_facts
+        # the context's File Info fetch rides the same stash (empty table:
+        # the sheet is not selected and no temperature was set)
+        assert gen._file_info_table == []
+
+    def test_remeasured_groups_stash(self, tmp_path, qapp, monkeypatch):
+        gen, wb, _path, _closed, _errors = build_generated(
+            tmp_path, qapp, duplicate_sn=True, hide_remeasured=True, monkeypatch=monkeypatch
+        )
+        assert len(gen._remeasure_drops) >= 1
+        assert gen._ov_facts["remeasured_groups"] >= 1
+
+    def test_split_facts_from_a_split_run(self, tmp_path, qapp, monkeypatch):
+        gen, wb, _path, _closed, _errors = build_generated(
+            tmp_path,
+            qapp,
+            split_temperature=True,
+            monkeypatch=monkeypatch,
+            part_ids=["SN541_T25C", "SN542_T85C", "SN543_T25C"],
+        )
+        assert "Test Statistics - T25°C" in wb.sheetnames
+        assert [temp for temp, _count in gen._ov_facts["stat_splits"]] == [25.0, 85.0]
+        names = dict(gen._ov_facts["stat_sheet_duts"])
+        assert names["Test Statistics - T25°C"] == 2
+        assert names["Test Statistics - T85°C"] == 1
+        assert gen._ov_facts["stat_chunks"] == 1
+
+    def test_file_info_table_stash_with_sheet(self, tmp_path, qapp):
+        gen, _wb, _path, _closed, _errors = build_generated(
+            tmp_path, qapp, with_file_info=True
+        )
+        assert gen._file_info_table and gen._file_info_table[0][0] == "File Name"
+
+    def test_overview_selected_adds_no_tick(self, tmp_path, qapp):
+        # the overview is tickless: a full run with it selected still
+        # completes (closed) and stashes the facts
+        gen, wb, _path, closed, _errors = build_generated(
+            tmp_path, qapp, overview_selected=True
+        )
+        assert closed == [True]
+        assert gen._ov_facts["stat_chunks"] == 1

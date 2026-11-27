@@ -326,4 +326,5 @@ class TestTabColors:
             "bin": "EA580C",
             "wafer": "7C3AED",
             "test_correlation": "9DC3E6",  # 2026-11-19: light water blue 40%
+            "overview": "1E40AF",  # 2026-11-27: DUT Summary blue — official front page
         }
