@@ -105,9 +105,11 @@ AUTOFIT_FACTOR = 1.1
 AUTOFIT_CAP = 60
 
 
-class ModernReportGenerator(  # pylint: disable=too-many-ancestors
+class ModernReportGenerator(  # pylint: disable=too-many-ancestors,too-many-instance-attributes
     # fork(falbany): 14 ancestors after TestCorrelationMixin joined the
-    # composition (2026-11-19) — one more mixin than max-parents=12 admits
+    # composition (2026-11-19) — one more mixin than max-parents=12 admits;
+    # 17 instance attributes after the Report Overview stash joined
+    # (2026-11-27) — three more than max-attributes=15 admits
     FileInfoMixin,
     GdrDtrMixin,
     TestStatisticsMixin,
@@ -215,8 +217,14 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
         self._dut_ctx_stats: dict = {}
         self._dut_ctx_pos: dict = {}
         # the rest of the DUT-block shared context (_dut_ctx_summary/
-        # _order/_dut_ids/_temps) binds in _prepare_dut_context, like the
-        # other per-run state
+        # _dut_ids) binds in _prepare_dut_context, like the other per-run
+        # state — _dut_ctx_temps/_dut_ctx_order bind None HERE so the
+        # close-time overview render can gate on the binding itself
+        # (2026-11-28 review fix: an early forceQuit used to leave them
+        # unbound while the render's contextlib.suppress swallowed the
+        # AttributeError, painting a completely blank first tab)
+        self._dut_ctx_temps = None
+        self._dut_ctx_order = None
 
         # the try/finally mirrors the classic `with Workbook(...)` block:
         # the (partial) workbook is saved on forceQuit early-returns and on
@@ -376,14 +384,11 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
             # the file (same spirit as complete_chart_flags' suppress).
             if self._overview_sheet is not None:
                 with contextlib.suppress(Exception):
-                    ctx_ran = any(
-                        cont in self.selectedContents
-                        for cont in (
-                            ReportSelection.Stat,
-                            ReportSelection.DUT,
-                            ReportSelection.TestCorrelation,
-                        )
-                    )
+                    # the context BINDING is the truth, not the selection
+                    # (2026-11-28 review fix): an early forceQuit can return
+                    # report_core while the selection said the context
+                    # should run — the reset block binds None, the writers
+                    # are unreachable in that state
                     spec = build_overview_spec(
                         wss=self._wb.worksheets_objs,
                         overview_ws=self._overview_sheet,
@@ -403,21 +408,20 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
                         correlation_selected=(
                             ReportSelection.TestCorrelation in self.selectedContents
                         ),
-                        ctx_temps=self._dut_ctx_temps if ctx_ran else None,
+                        ctx_temps=self._dut_ctx_temps,
                         selected_fids=self.selectedFiles,
                         test_count=len(self.testTuples),
-                        dut_count=len(self._dut_ctx_order) if ctx_ran else None,
+                        dut_count=(
+                            len(self._dut_ctx_order)
+                            if self._dut_ctx_order is not None
+                            else None
+                        ),
                         heads=self.selectedHeads,
                         sites=self.selectedSites,
                         wafer_count=len(self._wafer_fetched) or None,
                         generated=datetime.now().strftime("%Y-%m-%d %H:%M"),
                         tr=self.tr,
                     )
-                    spec["headings"] = {
-                        "report": self.tr("Report"),
-                        "sheets": self.tr("Sheets"),
-                        "notes": self.tr("Export Notes"),
-                    }
                     render_overview(self._overview_sheet, spec, self._theme)
             self._wb.close()
             # xlsxwriter gap completion (charts.py): inject the data-label

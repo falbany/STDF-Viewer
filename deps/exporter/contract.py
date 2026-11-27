@@ -62,9 +62,9 @@ class ReportHost:  # pylint: disable=too-few-public-methods
     #    writeStatistic and writeDUT_Summary consume it, including the
     #    shared per-test table passed to the builders as shared_stats) --
     _dut_ctx_summary: dict  # the PRUNED summaryTable
-    _dut_ctx_order: list  # classic (fid, dutIndex) display order
+    _dut_ctx_order: "list | None"  # classic (fid, dutIndex) display order; None until bound
     _dut_ctx_dut_ids: list  # per-column part IDs, "DUT #n" fallback
-    _dut_ctx_temps: dict  # per-file MIR temperatures (File Info fetch)
+    _dut_ctx_temps: "dict | None"  # per-file MIR temperatures; None until _prepare_dut_context binds (the overview render gates on the binding — 2026-11-28 review fix)
     _dut_ctx_stats: dict  # test_tuple -> (die, mirror, caches6, has_num), aligned to _dut_ctx_order
     _dut_ctx_pos: dict  # (fid, dutIndex) -> index into _dut_ctx_order (dut2ind hoist)
     _prepare_dut_context: Callable[[], None]

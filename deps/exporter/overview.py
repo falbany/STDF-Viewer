@@ -23,6 +23,7 @@ from deps.exporter.charts import BIN_BANNER_ROW_HEIGHT_PT
 from deps.exporter.helpers import format_temperature_label
 from deps.exporter.theme import HEADER_FILL_HEX, TAB_COLOR_HEXES
 from deps.exporter.worksheets.file_info import (
+    FILE_INFO_NUMERIC_LABELS,
     bin_banner_from_file_info,
     file_names_from_file_info,
     file_temperatures_from_file_info,
@@ -138,12 +139,12 @@ def resolve_banner(file_info_rows: "list | None", tr) -> "tuple[str, bool]":
     text when its English anchors resolve, else the joined file names,
     else the sheet name itself.
 
-    Returns ``(text, anchors_resolved)`` — the flag drives the Export
-    Notes degradation check (note 9): ``False`` when the stashed File
-    Info table exists but the English anchors failed, i.e. a translated
-    UI. No table at all degrades silently (nothing was there to read).
-    ``_bin_banner`` is deliberately NOT reused — its ``tr("Bin Chart")``
-    default would read wrong here.
+    Returns ``(text, anchors_resolved)``. The flag is informational
+    (the 2026-11-28 review fix re-anchored note 9 to ``_translated_ui``:
+    the banner fallback is NOT a degradation trigger — SUBLOT_ID is an
+    optional MIR field). No table at all degrades silently (nothing was
+    there to read). ``_bin_banner`` is deliberately NOT reused — its
+    ``tr("Bin Chart")`` default would read wrong here.
     """
     if file_info_rows is None:
         return tr("Report Overview"), False
@@ -175,7 +176,7 @@ def derive_notes(
     hide_remeasured: bool,
     wafer_heat_selected: bool,
     correlation_selected: bool,
-    anchors_resolved: bool,
+    translated_ui: bool,
     file_info_present: bool,
     tr,
 ) -> list:
@@ -190,7 +191,11 @@ def derive_notes(
     ``stat_unresolved``, ``stat_sheet_duts``, ``corr_sheet_duts``,
     ``merged_wafers``. ``sheet_names`` is the FINAL tab order at close
     time, which is what makes the "sheet present / not exported" notes
-    always truthful.
+    always truthful. ``translated_ui`` is the locale-signal detection
+    (``_translated_ui``): the 2026-11-28 review fix re-anchored note 9 to
+    it — the banner fallback alone is NOT a degradation (SUBLOT_ID is an
+    optional MIR field, and sublot-less English exports must not read as
+    translated UIs).
     """
     facts = facts or {}
     notes: list = []
@@ -238,10 +243,29 @@ def derive_notes(
     # 8 — correlation promised but the DUT context never ran
     if correlation_selected and not any(name.startswith(corr_base) for name in sheet_names):
         notes.append(tr("Test Correlation Map not exported — no DUT context"))
-    # 9 — one combined degradation note for translated UIs
-    if file_info_present and not anchors_resolved:
+    # 9 — one combined degradation note for translated UIs (the File Info
+    # numeric-label anchors are the locale signal — see _translated_ui)
+    if file_info_present and translated_ui:
         notes.append(tr("Non-English UI — some columns keep raw values"))
     return notes
+
+
+def _translated_ui(file_info_rows: "list | None") -> bool:
+    """True when the stashed File Info table exists but NONE of its labels
+    match the exporter's English numeric anchors (``FILE_INFO_NUMERIC_LABELS``,
+    the same whitespace-normalized matching the numericizer uses).
+
+    The 2026-11-28 review fix: the banner fallback was the old trigger,
+    but SUBLOT_ID is optional — a sublot-less ENGLISH export fell back to
+    the names banner and read as "Non-English UI". ``buildFileMetaData``
+    always leads with the Yield/DUTs rows in every locale, so a table
+    that matches none of them really is a translated UI."""
+    if file_info_rows is None:
+        return False
+    for row in file_info_rows:
+        if " ".join(str(row[0] if row else "").split()) in FILE_INFO_NUMERIC_LABELS:
+            return False
+    return True
 
 
 def _format_count(value) -> str:
@@ -293,7 +317,7 @@ def build_overview_spec(  # pylint: disable=too-many-arguments,too-many-locals,t
             sheet_families.append(family)
 
     # -- banner + degradation flag (R6 chain) --
-    title, anchors_resolved = resolve_banner(file_info_rows, tr)
+    title, _anchors_resolved = resolve_banner(file_info_rows, tr)
 
     # -- the 8 fact rows, pinned order --
     merged = facts.get("merged_wafers") or []
@@ -402,11 +426,26 @@ def build_overview_spec(  # pylint: disable=too-many-arguments,too-many-locals,t
         hide_remeasured=hide_remeasured,
         wafer_heat_selected=wafer_heat_selected,
         correlation_selected=correlation_selected,
-        anchors_resolved=anchors_resolved,
+        translated_ui=_translated_ui(file_info_rows),
         file_info_present=file_info_rows is not None,
         tr=tr,
     )
-    return {"title": title, "facts": facts_rows, "sheets": sheets, "notes": notes}
+    headings = {
+        "report": tr("Report"),
+        "sheets": tr("Sheets"),
+        "notes": tr("Export Notes"),
+        "sheet": tr("Sheet"),
+        "type": tr("Type"),
+        "duts": tr("DUTs"),
+        "note": tr("Note"),
+    }
+    return {
+        "title": title,
+        "facts": facts_rows,
+        "sheets": sheets,
+        "notes": notes,
+        "headings": headings,
+    }
 
 
 def render_overview(ws, spec: dict, theme) -> None:
@@ -471,10 +510,10 @@ def render_overview(ws, spec: dict, theme) -> None:
     ws.merge_range(row, 0, row, 4, headings.get("sheets", "Sheets"), headline_fmt)
     row += 1
     ws.write(row, 0, "", header_band)
-    ws.write(row, 1, "Sheet", header_left)
-    ws.write(row, 2, "Type", header_center)
-    ws.write(row, 3, "DUTs", header_center)
-    ws.write(row, 4, "Note", header_left)
+    ws.write(row, 1, headings.get("sheet", "Sheet"), header_left)
+    ws.write(row, 2, headings.get("type", "Type"), header_center)
+    ws.write(row, 3, headings.get("duts", "DUTs"), header_center)
+    ws.write(row, 4, headings.get("note", "Note"), header_left)
     row += 1
     for sheet in spec["sheets"]:
         ws.write(row, 0, "", theme.cf_fill(sheet["hex"]))

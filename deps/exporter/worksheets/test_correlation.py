@@ -344,6 +344,7 @@ class TestCorrelationMixin(ReportHost):
         theme = self._theme
         assert wb is not None and theme is not None
         order = self._dut_ctx_order
+        assert order is not None  # the context gate above guarantees the binding
         base_name = self.tr("Test Correlation Map")
 
         def collect(pairs):

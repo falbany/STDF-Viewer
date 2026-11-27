@@ -198,7 +198,7 @@ def notes_kwargs(**overrides):
         hide_remeasured=False,
         wafer_heat_selected=False,
         correlation_selected=False,
-        anchors_resolved=True,
+        translated_ui=False,
         file_info_present=False,
         tr=None,
     )
@@ -295,13 +295,13 @@ class TestDeriveNotes:
 
     def test_note9_translated_ui_with_table(self, tr):
         notes = derive_notes(
-            **{**notes_kwargs(), "tr": tr, "anchors_resolved": False, "file_info_present": True}
+            **{**notes_kwargs(), "tr": tr, "translated_ui": True, "file_info_present": True}
         )
         assert notes == ["Non-English UI — some columns keep raw values"]
 
     def test_note9_no_table_stays_silent(self, tr):
         notes = derive_notes(
-            **{**notes_kwargs(), "tr": tr, "anchors_resolved": False, "file_info_present": False}
+            **{**notes_kwargs(), "tr": tr, "translated_ui": False, "file_info_present": False}
         )
         assert notes == []
 
@@ -321,7 +321,7 @@ class TestDeriveNotes:
                 "drop_count": 312,
                 "hide_remeasured": True,
                 "correlation_selected": True,
-                "anchors_resolved": False,
+                "translated_ui": True,
                 "file_info_present": True,
             }
         )
@@ -400,7 +400,7 @@ def spec_kwargs(**overrides):
 class TestBuildOverviewSpec:
     def test_full_spec_shape_and_values(self, tr):
         spec = build_overview_spec(**{**spec_kwargs(), "tr": tr})
-        assert set(spec) == {"title", "facts", "sheets", "notes"}
+        assert set(spec) == {"title", "facts", "sheets", "notes", "headings"}
         assert spec["title"] == "TOP-3491 / 2A | TOP-3491 / 2B"
         labels = [label for label, _value in spec["facts"]]
         assert labels == [
@@ -778,3 +778,74 @@ class TestOverviewIntegration:
     def test_overview_off_is_regression_free(self, tmp_path, qapp):
         _gen, wb, _path, _closed, _errors = build_generated(tmp_path, qapp)
         assert "Report Overview" not in wb.sheetnames
+
+
+class TestReviewFixes:
+    """Final-review fix pass (2026-11-28): the three Important findings."""
+
+    def test_early_cancel_still_renders_overview(self, tmp_path, qapp, monkeypatch):
+        # Review Focus 5, EARLY window: cancel during the File Info fetch —
+        # before the DUT context bound its members — must still paint the
+        # overview. (Selection-gating the context reads raised
+        # AttributeError here and contextlib.suppress silently skipped the
+        # render, leaving a completely blank first tab.)
+        monkeypatch.setattr(
+            ModernReportGenerator,
+            "writeFileInfo",
+            lambda self: setattr(self, "forceQuit", True),
+        )
+        gen, wb, _path, _closed, errors = build_generated(
+            tmp_path, qapp, overview_selected=True, with_file_info=True
+        )
+        assert wb.sheetnames[0] == "Report Overview"
+        assert wb["Report Overview"].cell(row=1, column=1).value == "Report Overview"
+        assert not errors
+
+    def test_note9_not_fired_by_missing_sublot_on_english_ui(self, tr):
+        # SUBLOT_ID is an optional MIR field: an English export of
+        # sublot-less files falls back to the names banner — that is NOT a
+        # translation degradation (the old banner-fallback trigger fired
+        # the note wrongly on every such export)
+        rows = [
+            ["File Name: ", "a.stdf"],
+            ["Yield: ", "96.4%"],
+            ["DUTs Tested: ", "10"],
+        ]
+        spec = build_overview_spec(**{**spec_kwargs(file_info_rows=rows), "tr": tr})
+        assert spec["title"] == "1 — a.stdf"
+        assert all("Non-English UI" not in note for note in spec["notes"])
+
+    def test_note9_fires_on_translated_labels(self, tr):
+        rows = [
+            ["Nom du fichier: ", "a.stdf"],
+            ["Rendement: ", "96,4 %"],
+        ]
+        spec = build_overview_spec(**{**spec_kwargs(file_info_rows=rows), "tr": tr})
+        assert any("Non-English UI" in note for note in spec["notes"])
+
+    def test_spec_carries_translated_index_headers(self, tr):
+        # the sheet-index header band must translate with the UI (the
+        # plan's global i18n constraint) — the spec dict owns them
+        spec = build_overview_spec(**{**spec_kwargs(), "tr": tr})
+        assert spec["headings"]["sheet"] == "Sheet"
+        assert spec["headings"]["type"] == "Type"
+        assert spec["headings"]["duts"] == "DUTs"
+        assert spec["headings"]["note"] == "Note"
+
+    def test_renderer_uses_spec_headers(self):
+        spec = render_spec(RENDER_SHEETS)
+        spec["headings"].update(
+            {"sheet": "Feuille", "type": "Type", "duts": "DUTs", "note": "Note"}
+        )
+        names = ["Report Overview", "File Info", "Test Statistics", "Wafer 25 (Merged)", "Wafer 1_2"]
+        book = load_workbook_bytes(
+            render_workbook(
+                names,
+                lambda wb, ws_by_name: render_overview(
+                    ws_by_name["Report Overview"], spec, ModernTheme(wb)
+                ),
+            )
+        )
+        ws = book["Report Overview"]
+        header_row_values = [ws.cell(row=14, column=col).value for col in range(2, 6)]
+        assert header_row_values == ["Feuille", "Type", "DUTs", "Note"]

@@ -1270,6 +1270,7 @@ class TestStatisticsMixin(ReportHost):
         assert wb is not None and theme is not None
         summaryTable = self._dut_ctx_summary
         order = self._dut_ctx_order
+        assert order is not None  # the context gate above guarantees the binding
         dut_ids = self._dut_ctx_dut_ids
         file_temperatures = self._dut_ctx_temps
 
