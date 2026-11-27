@@ -64,6 +64,11 @@ _BANNER_SUBLOT_LABEL = "Sublot ID"
 # per selected file column).
 _FILE_INFO_TEMPERATURE_LABEL = "Test Temperature"
 
+# English-only File Info anchor feeding the Report Overview's Files fact
+# and banner fallback ("File Name: " row — the GUI's buildFileMetaData
+# leads the table with it).
+_FILE_INFO_NAME_LABEL = "File Name"
+
 
 def bin_banner_from_file_info(rows: list) -> "str | None":
     """ "{Product ID} / {Sublot ID}" per file column, files joined " | "
@@ -93,6 +98,26 @@ def bin_banner_from_file_info(rows: list) -> "str | None":
         if product and sublot:
             pairs.append(f"{product} / {sublot}")
     return " | ".join(pairs) if pairs else None
+
+
+def file_names_from_file_info(rows: list) -> list:
+    """The per-file name cells from the File Info table's "File Name:" row
+    (Report Overview's Files fact + banner fallback stage 2, 2026-11-27).
+
+    Position-matched with the "File #n" header contract like the
+    temperature sibling. Labels match whitespace-normalized with a
+    trailing ":" stripped, English-only like the banner anchors — a
+    translated UI (or a missing row) yields ``[]``. Values are stripped
+    strings, blanks kept so callers keep the file count honest. Never
+    raises.
+    """
+    for row in rows:
+        label = " ".join(str(row[0] if row else "").split())
+        if label.endswith(":"):
+            label = label[:-1]
+        if label == _FILE_INFO_NAME_LABEL:
+            return [str(value).strip() for value in row[1:]]
+    return []
 
 
 def file_temperatures_from_file_info(rows: list, fids: list) -> dict:

@@ -10,7 +10,12 @@ import pytest
 import xlsxwriter
 from PyQt5 import QtCore
 
-from deps.exporter.overview import sheet_roles
+from deps.exporter.overview import (
+    format_temperatures,
+    resolve_banner,
+    sheet_roles,
+)
+from deps.exporter.worksheets.file_info import file_names_from_file_info
 from deps.uic_stdExporter import ReportSelection
 
 pytestmark = [
@@ -124,3 +129,52 @@ class TestSheetRoles:
             "Per-DUT",
             "Sheet",
         ]
+
+
+class TestFileNamesFromFileInfo:
+    def test_names_from_the_file_name_row(self):
+        rows = [["File Name: ", "a.stdf", " b.stdf "], ["Yield: ", "96.4%", "98.1%"]]
+        assert file_names_from_file_info(rows) == ["a.stdf", "b.stdf"]
+
+    def test_missing_anchor_yields_empty(self):
+        assert file_names_from_file_info([["Yield: ", "96%"]]) == []
+
+    def test_translated_anchor_yields_empty(self):
+        rows = [["Nom du fichier: ", "a.stdf"]]
+        assert file_names_from_file_info(rows) == []
+
+
+class TestResolveBanner:
+    def test_stage1_anchors_resolve(self, tr):
+        rows = [
+            ["Product ID: ", "TOP-3491", "TOP-3491"],
+            ["Sublot ID: ", "2A", "2B"],
+        ]
+        assert resolve_banner(rows, tr) == ("TOP-3491 / 2A | TOP-3491 / 2B", True)
+
+    def test_stage2_falls_back_to_file_names(self, tr):
+        rows = [["File Name: ", "a.stdf", "b.stdf"]]
+        assert resolve_banner(rows, tr) == ("2 — a.stdf · b.stdf", False)
+
+    def test_stage3_falls_back_to_sheet_name(self, tr):
+        assert resolve_banner(None, tr) == ("Report Overview", False)
+        assert resolve_banner([], tr) == ("Report Overview", False)
+
+    def test_rows_present_without_any_anchor(self, tr):
+        rows = [["Yield: ", "96.4%"]]
+        assert resolve_banner(rows, tr) == ("Report Overview", False)
+
+
+class TestFormatTemperatures:
+    def test_sorted_distinct_labels(self):
+        assert format_temperatures({1: 25.0, 2: -40.0, 3: None}) == "T-40°C · T25°C"
+
+    def test_all_none_yields_none(self):
+        assert format_temperatures({1: None, 2: None}) is None
+
+    def test_empty_or_missing_dict_yields_none(self):
+        assert format_temperatures({}) is None
+        assert format_temperatures(None) is None
+
+    def test_fractional_temperature_keeps_its_decimal(self):
+        assert format_temperatures({1: 25.5}) == "T25.5°C"

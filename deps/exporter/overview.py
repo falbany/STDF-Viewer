@@ -17,6 +17,8 @@ family is the one hardcoded-English exception (``charts.wafer_sheet_name``
 builds ``"Wafer {id}"`` upstream of any translation).
 """
 
+from deps.exporter.helpers import format_temperature_label
+from deps.exporter.worksheets.file_info import bin_banner_from_file_info, file_names_from_file_info
 from deps.uic_stdExporter import ReportSelection
 
 # Role labels per pre-created ReportSelection — tr'd at use. Identity via
@@ -77,3 +79,38 @@ def sheet_roles(wss: list, overview_ws, sheet_dict: dict, tr) -> list[str]:
             matched = "Wafer"
         out.append(tr(matched) if matched is not None else tr("Sheet"))
     return out
+
+
+def resolve_banner(file_info_rows: "list | None", tr) -> "tuple[str, bool]":
+    """The overview's row-1 banner, resolved through the three-stage chain
+    (2026-11-27 ruling R6): the Bin sheet's "{Product ID} / {Sublot ID}"
+    text when its English anchors resolve, else the joined file names,
+    else the sheet name itself.
+
+    Returns ``(text, anchors_resolved)`` — the flag drives the Export
+    Notes degradation check (note 9): ``False`` when the stashed File
+    Info table exists but the English anchors failed, i.e. a translated
+    UI. No table at all degrades silently (nothing was there to read).
+    ``_bin_banner`` is deliberately NOT reused — its ``tr("Bin Chart")``
+    default would read wrong here.
+    """
+    if file_info_rows is None:
+        return tr("Report Overview"), False
+    banner = bin_banner_from_file_info(file_info_rows)
+    if banner:
+        return banner, True
+    names = [name for name in file_names_from_file_info(file_info_rows) if name]
+    if names:
+        return f"{len(names)} — {' · '.join(names)}", False
+    return tr("Report Overview"), False
+
+
+def format_temperatures(temps_by_fid: "dict | None") -> "str | None":
+    """The Temperatures fact: the distinct resolved file temperatures,
+    sorted, as ``"T-40°C · T25°C"`` (labels via ``format_temperature_label``,
+    the split-sheet naming helper). ``None`` when no file carries a
+    temperature — the caller writes the "—" placeholder."""
+    values = sorted({temp for temp in (temps_by_fid or {}).values() if temp is not None})
+    if not values:
+        return None
+    return " · ".join(f"T{format_temperature_label(value)}°C" for value in values)
