@@ -66,6 +66,9 @@ TAB_COLOR_HEXES = {
     # 2026-11-19 user ruling: light water blue at 40% (Blue, Accent 5,
     # Lighter 40%)
     "test_correlation": "9DC3E6",
+    # 2026-11-27 user ruling: the overview reuses the DUT Summary deep blue —
+    # "official front page" feel
+    "overview": "1E40AF",
 }
 
 # Excel built-in named styles have no xlsxwriter equivalent (no named-style

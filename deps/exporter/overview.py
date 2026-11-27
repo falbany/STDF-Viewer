@@ -17,9 +17,12 @@ family is the one hardcoded-English exception (``charts.wafer_sheet_name``
 builds ``"Wafer {id}"`` upstream of any translation).
 """
 
+from xlsxwriter.utility import quote_sheetname
+
+from deps.exporter.charts import BIN_BANNER_ROW_HEIGHT_PT
 from deps.exporter.helpers import format_temperature_label
-from deps.exporter.theme import TAB_COLOR_HEXES
-from deps.exporter.writer import DUT_SUMMARY_TAB_HEX, TEST_STATISTICS_TAB_HEX
+from deps.exporter.theme import HEADER_FILL_HEX, TAB_COLOR_HEXES
+from deps.exporter.writer import DUT_SUMMARY_TAB_HEX, FOOTER_TEXT, TEST_STATISTICS_TAB_HEX
 from deps.exporter.worksheets.file_info import (
     bin_banner_from_file_info,
     file_names_from_file_info,
@@ -405,3 +408,98 @@ def build_overview_spec(
         tr=tr,
     )
     return {"title": title, "facts": facts_rows, "sheets": sheets, "notes": notes}
+
+
+def render_overview(ws, spec: dict, theme) -> None:
+    """Paint the overview worksheet from the spec (build_overview_spec's
+    shape + the tr'd section headings under ``spec["headings"]``).
+
+    Layout (pinned by the 2026-11-27 design): the Bin sheet's
+    Title-lookalike banner at 50 pt; a Facts block of 8 label(A:B) /
+    value(C:E) rows; a Sheets index — color chip (A), internal hyperlink
+    (B), role (C), DUT count (D), note tag (E) under the header band; an
+    Export Notes block of merged A:E wrapped rows, omitted entirely when
+    the spec carries no notes. Print setup is the user's A4-portrait
+    must-have: A4 paper, portrait, one page wide, gridlines off,
+    page-number footer.
+    """
+    headings = spec.get("headings") or {}
+    # print setup (A4 portrait must-have; the wave-8 ruling gave A4 to the
+    # Bin sheet only — the overview carries its own explicitly)
+    ws.hide_gridlines(2)
+    ws.set_footer(FOOTER_TEXT)
+    ws.set_paper(9)
+    ws.set_portrait()
+    ws.fit_to_pages(1, 0)
+    ws.set_tab_color("#" + TAB_COLOR_HEXES["overview"])
+    ws.set_column(0, 0, 3)
+    ws.set_column(1, 1, 22)
+    ws.set_column(2, 2, 14)
+    ws.set_column(3, 3, 8)
+    ws.set_column(4, 4, 40)
+
+    headline_fmt = theme.lookalike("headline1")
+    label_fmt = theme.cell_format(font="metadata", align="left")
+    value_fmt = theme.cell_format(font="body", align="left", extra={"text_wrap": True})
+    header_band = theme.cell_format(font="header", fill_hex=HEADER_FILL_HEX)
+    header_left = theme.cell_format(
+        font="header", fill_hex=HEADER_FILL_HEX, align="left"
+    )
+    header_center = theme.cell_format(
+        font="header", fill_hex=HEADER_FILL_HEX, align="center"
+    )
+    link_fmt = theme.cell_format(
+        font="body", align="left", extra={"underline": 1, "font_color": "#1E40AF"}
+    )
+    role_fmt = theme.cell_format(font="body", align="left")
+    duts_fmt = theme.cell_format(font="body", align="right")
+    note_fmt = theme.cell_format(font="body", align="left")
+    value_chip = theme._format({})
+
+    # row 1 — the banner (same treatment as the Bin sheet's, no fill)
+    ws.merge_range(0, 0, 0, 4, spec["title"], theme.lookalike("title", wrap=True))
+    ws.set_row(0, BIN_BANNER_ROW_HEIGHT_PT)
+    row = 1  # 0-based cursor; 1-based spreadsheet row = row + 1
+    row += 1  # blank spacer
+    # the Report facts block
+    ws.merge_range(row, 0, row, 4, headings.get("report", "Report"), headline_fmt)
+    row += 1
+    for label, value in spec["facts"]:
+        ws.merge_range(row, 0, row, 1, label, label_fmt)
+        ws.merge_range(row, 2, row, 4, value, value_fmt)
+        row += 1
+    row += 1  # blank spacer
+    # the sheet index
+    ws.merge_range(row, 0, row, 4, headings.get("sheets", "Sheets"), headline_fmt)
+    row += 1
+    ws.write(row, 0, "", header_band)
+    ws.write(row, 1, "Sheet", header_left)
+    ws.write(row, 2, "Type", header_center)
+    ws.write(row, 3, "DUTs", header_center)
+    ws.write(row, 4, "Note", header_left)
+    row += 1
+    for sheet in spec["sheets"]:
+        ws.write(row, 0, "", theme.cf_fill(sheet["hex"]))
+        ws.write_url(
+            row,
+            1,
+            f"internal:{quote_sheetname(sheet['name'])}!A1",
+            link_fmt,
+            string=sheet["name"],
+        )
+        ws.write(row, 2, sheet["role"], role_fmt)
+        ws.write(row, 3, sheet["duts"], duts_fmt)
+        if sheet["note"]:
+            ws.write(row, 4, sheet["note"], note_fmt)
+        else:
+            ws.write(row, 4, "", note_fmt)
+        row += 1
+    # the Export Notes block — omitted entirely on a quiet export
+    if not spec["notes"]:
+        return
+    row += 1  # blank spacer
+    ws.merge_range(row, 0, row, 4, headings.get("notes", "Export Notes"), headline_fmt)
+    row += 1
+    for note in spec["notes"]:
+        ws.merge_range(row, 0, row, 4, f"– {note}", value_fmt)
+        row += 1

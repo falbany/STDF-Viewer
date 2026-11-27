@@ -14,11 +14,14 @@ from deps.exporter.overview import (
     build_overview_spec,
     derive_notes,
     format_temperatures,
+    render_overview,
     resolve_banner,
     sheet_roles,
 )
+from deps.exporter.theme import ModernTheme
 from deps.exporter.worksheets.file_info import file_names_from_file_info
 from deps.uic_stdExporter import ReportSelection
+from tests.exporter.conftest import load_workbook_bytes, render_workbook
 
 pytestmark = [
     pytest.mark.filterwarnings("ignore:Sparkline Group extension"),
@@ -494,3 +497,111 @@ class TestBuildOverviewSpec:
     def test_table_temps_used_when_ctx_absent(self, tr):
         spec = build_overview_spec(**{**spec_kwargs(), "tr": tr, "ctx_temps": None})
         assert dict(spec["facts"])["Temperatures"] == "T-40°C · T25°C"
+
+
+def render_spec(sheets, notes=None):
+    """A hand-built spec for renderer tests (build_overview_spec's output
+    shape, headings included)."""
+    return {
+        "title": "TOP-3491 / 2A",
+        "facts": [
+            ("Generated", "2026-11-27 14:32"),
+            ("Files", "2 — a.stdf · b.stdf"),
+            ("Temperatures", "T-40°C · T25°C"),
+            ("Tests", "148"),
+            ("DUTs", "18,432 tested"),
+            ("Heads / Sites", "1 head · 8 sites"),
+            ("Wafers", "25 (1 merged)"),
+            ("Filters", "None"),
+        ],
+        "sheets": sheets,
+        "notes": notes if notes is not None else [],
+        "headings": {"report": "Report", "sheets": "Sheets", "notes": "Export Notes"},
+    }
+
+
+RENDER_SHEETS = [
+    {"name": "File Info", "hex": "94A3B8", "role": "Report", "duts": "—", "note": ""},
+    {"name": "Test Statistics", "hex": "16A34A", "role": "Statistics", "duts": "16,384", "note": ""},
+    {"name": "Wafer 25 (Merged)", "hex": "7C3AED", "role": "Wafer", "duts": "—", "note": "merged from 2 files"},
+    {"name": "Wafer 1_2", "hex": "7C3AED", "role": "Wafer", "duts": "—", "note": ""},
+]
+
+
+def _build_overview(wb, ws_by_name):
+    theme = ModernTheme(wb)
+    render_overview(ws_by_name["Report Overview"], render_spec(RENDER_SHEETS), theme)
+
+
+class TestRenderOverview:
+    def _load(self, spec=None):
+        names = ["Report Overview", "File Info", "Test Statistics", "Wafer 25 (Merged)", "Wafer 1_2"]
+        book = render_workbook(
+            names,
+            lambda wb, ws_by_name: render_overview(
+                ws_by_name["Report Overview"], spec or render_spec(RENDER_SHEETS), ModernTheme(wb)
+            ),
+        )
+        return load_workbook_bytes(book)
+
+    def test_banner_and_facts_readable(self):
+        ws = self._load()["Report Overview"]
+        assert ws.cell(row=1, column=1).value == "TOP-3491 / 2A"
+        assert ws.cell(row=3, column=1).value == "Report"
+        assert ws.cell(row=4, column=1).value == "Generated"
+        assert ws.cell(row=4, column=3).value == "2026-11-27 14:32"
+        assert ws.cell(row=11, column=1).value == "Filters"
+
+    def test_hyperlink_targets_resolve(self):
+        from urllib.parse import unquote
+
+        book = self._load()
+        ws = book["Report Overview"]
+        # openpyxl exposes internal hyperlinks per-CELL (ws._hyperlinks only
+        # carries the r:id external ones)
+        targets = [
+            cell.hyperlink.location
+            for row in ws.iter_rows()
+            for cell in row
+            if cell.hyperlink
+        ]
+        assert len(targets) == 4
+        sheet_names = set(book.sheetnames)
+        for location in targets:
+            target = unquote(location.split("!")[0]).strip("'")
+            assert target in sheet_names, location
+
+    def test_chips_carry_tab_fill_and_tab_color(self):
+        ws = self._load()["Report Overview"]
+        # sheet rows: 1-based 15 = first (header band sits at 14)
+        assert ws.cell(row=15, column=1).fill.fgColor.rgb.endswith("94A3B8")
+        assert ws.cell(row=16, column=1).fill.fgColor.rgb.endswith("16A34A")
+        assert ws.sheet_properties.tabColor.rgb.endswith("1E40AF")
+
+    def test_print_setup_a4_portrait_one_page_wide(self):
+        ws = self._load()["Report Overview"]
+        assert ws.page_setup.paperSize == 9  # A4
+        assert ws.page_setup.orientation == "portrait"
+        assert ws.sheet_properties.pageSetUpPr.fitToPage is True
+        # xlsxwriter omits fitToWidth when it is Excel's default 1
+        assert ws.page_setup.fitToWidth in (1, None)
+        assert ws.page_setup.fitToHeight == 0
+
+    def test_gridlines_hidden_and_footer(self):
+        ws = self._load()["Report Overview"]
+        assert ws.sheet_view.showGridLines is False
+        footer = ws.oddFooter.center.text or ""
+        assert "&P" in footer and "&N" in footer
+
+    def test_notes_block_omitted_when_empty(self):
+        ws = self._load()["Report Overview"]
+        values = [cell.value for row in ws.iter_rows() for cell in row if cell.value]
+        assert all(value != "Export Notes" for value in values)
+
+    def test_notes_block_renders_when_present(self):
+        spec = render_spec(RENDER_SHEETS, notes=["something happened"])
+        ws = self._load(spec)["Report Overview"]
+        values = [cell.value for row in ws.iter_rows() for cell in row if cell.value]
+        assert "Export Notes" in values
+        # the renderer prepends the "– " bullet itself
+        assert "– something happened" in values
