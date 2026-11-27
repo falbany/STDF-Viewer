@@ -378,6 +378,23 @@ entirely when empty.
   "—" when their family is absent from the selection (proposal: show
   "—" — a stable row set reads better on the front page).
 
+## 2026-11-28 post-PR rulings (live session)
+
+- **Palette B "workflow spectrum"** (user pick from the mockup screen):
+  overview `1E40AF` · File Info `94A3B8` · Test Statistics `16A34A` ·
+  DUT Summary `0F766E` · Test Correlation `14B8A6` · GDR `64748B` ·
+  Trend `0EA5E9` · Histogram `0284C7` · Bin `EA580C` · Wafer `7C3AED` ·
+  NEW Wafer Heat Map `A78BFA`. The strip reads like the export: meta →
+  matrix → teal per-DUT family → sky chart family → orange → violet
+  spatial family. (Re-homes the 2026-11-23 DUT blue and the 2026-11-19
+  correlation blue.)
+- **Tab order**: GDR & DTR Summary then Bin Chart CLOSE the strip
+  (identity-based close-time reorder after `order_dut_block`, before the
+  `ws.index` renumber — `helpers.reorder_sheets_to_end`).
+- **Numeric cells**: the Tests fact and the sheet-index DUTs column are
+  numeric (`#,##0` display); a sheet without a count writes a blank
+  styled cell, not "—".
+
 ## Open rulings
 
 - **R1 RULED**: checkbox, Modern-mode-only, `gen.report_overview`
