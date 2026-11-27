@@ -20,8 +20,11 @@ from deps.exporter.overview import (
 )
 from deps.exporter.theme import ModernTheme
 from deps.exporter.worksheets.file_info import file_names_from_file_info
-from deps.uic_stdExporter import ReportSelection
+from deps.uic_stdExporter import ReportSelection, dataChannel, signals
 from tests.exporter.conftest import load_workbook_bytes, render_workbook
+from openpyxl import load_workbook
+
+from deps.exporter.generator import ModernReportGenerator
 from tests.exporter.test_generator_dut import build_generated
 
 pytestmark = [
@@ -661,3 +664,117 @@ class TestOverviewStashHooks:
         )
         assert closed == [True]
         assert gen._ov_facts["stat_chunks"] == 1
+
+
+class TestOverviewIntegration:
+    """Task 9: the close-time render through real build_generated runs."""
+
+    @staticmethod
+    def _overview_values(wb):
+        return [
+            cell.value
+            for row in wb["Report Overview"].iter_rows()
+            for cell in row
+            if cell.value is not None
+        ]
+
+    def test_overview_is_first_sheet_with_full_selection(self, tmp_path, qapp):
+        gen, wb, _path, closed, _errors = build_generated(
+            tmp_path, qapp, overview_selected=True, with_file_info=True
+        )
+        assert closed == [True]
+        assert wb.sheetnames[0] == "Report Overview"
+        assert wb.sheetnames[1] == "File Info"
+        assert wb.sheetnames[2] == "Test Statistics"
+        assert wb.sheetnames.index("DUT Summary") > wb.sheetnames.index("Test Statistics")
+        assert wb.sheetnames[-1] == "Wafer W01"
+        # the stage-1 banner from the File Info anchors (harness table)
+        assert wb["Report Overview"].cell(row=1, column=1).value == "ASIC-X / LOT123"
+
+    def test_toc_targets_resolve(self, tmp_path, qapp):
+        from urllib.parse import unquote
+
+        _gen, wb, _path, _closed, _errors = build_generated(
+            tmp_path, qapp, overview_selected=True
+        )
+        ws = wb["Report Overview"]
+        targets = [
+            cell.hyperlink.location
+            for row in ws.iter_rows()
+            for cell in row
+            if cell.hyperlink
+        ]
+        assert len(targets) == len(wb.sheetnames) - 1
+        for location in targets:
+            assert unquote(location.split("!")[0]).strip("'") in wb.sheetnames, location
+
+    def test_overview_only_selection(self, tmp_path, qapp):
+        # Review Focus 1: nothing else selected — no context, no writers,
+        # a one-sheet workbook that still loads cleanly with "—" facts
+        sig = signals()
+        report_path = str(tmp_path / "overview-only.xlsx")
+        report_info = (
+            [ReportSelection.Overview],
+            [],
+            [1],
+            [1],
+            [-1],
+            report_path,
+            [],
+            0,
+        )
+        gen = ModernReportGenerator(
+            sig, QtCore.QMutex(), QtCore.QWaitCondition(), report_info, dataChannel()
+        )
+        gen.report_core()
+        wb = load_workbook(report_path)
+        assert wb.sheetnames == ["Report Overview"]
+        values = self._overview_values(wb)
+        assert "—" in values
+        assert "Report Overview" in values  # the stage-3 banner fallback
+
+    def test_notes_fire_for_scenario(self, tmp_path, qapp, monkeypatch):
+        _gen, wb, _path, closed, _errors = build_generated(
+            tmp_path,
+            qapp,
+            overview_selected=True,
+            hide_remeasured=True,
+            split_temperature=True,
+            monkeypatch=monkeypatch,
+            part_ids=["SN541_T25C", "SN542_T85C", "SN541_T25C"],
+        )
+        assert closed == [True]
+        values = self._overview_values(wb)
+        # the renderer prepends the "– " bullet — match substrings
+        assert any("1 re-measured DUTs dropped (kept latest)" in value for value in values)
+        assert any("Temperature splits: T25°C, T85°C" in value for value in values)
+
+    def test_force_quit_still_renders_overview(self, tmp_path, qapp, monkeypatch):
+        # Review Focus 5: a writer bails mid-run; the finally still paints
+        monkeypatch.setattr(
+            ModernReportGenerator,
+            "writeBinChart",
+            lambda self: setattr(self, "forceQuit", True),
+        )
+        _gen, wb, _path, _closed, errors = build_generated(
+            tmp_path, qapp, overview_selected=True
+        )
+        assert wb.sheetnames[0] == "Report Overview"
+        assert not errors
+
+    def test_heat_note_fires_for_stacked_run(self, tmp_path, qapp):
+        _gen, wb, _path, _closed, _errors = build_generated(
+            tmp_path,
+            qapp,
+            overview_selected=True,
+            heat_selected=True,
+            wafer_tuples=[(-1, -1, "STACK")],
+        )
+        assert any(
+            "Stacked wafer view added (all wafers)" in value
+            for value in self._overview_values(wb)
+        )
+
+    def test_overview_off_is_regression_free(self, tmp_path, qapp):
+        _gen, wb, _path, _closed, _errors = build_generated(tmp_path, qapp)
+        assert "Report Overview" not in wb.sheetnames
