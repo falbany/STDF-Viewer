@@ -18,23 +18,96 @@ builds ``"Wafer {id}"`` upstream of any translation).
 """
 
 from deps.exporter.helpers import format_temperature_label
-from deps.exporter.worksheets.file_info import bin_banner_from_file_info, file_names_from_file_info
+from deps.exporter.theme import TAB_COLOR_HEXES
+from deps.exporter.writer import DUT_SUMMARY_TAB_HEX, TEST_STATISTICS_TAB_HEX
+from deps.exporter.worksheets.file_info import (
+    bin_banner_from_file_info,
+    file_names_from_file_info,
+    file_temperatures_from_file_info,
+)
 from deps.uic_stdExporter import ReportSelection
 
-# Role labels per pre-created ReportSelection — tr'd at use. Identity via
-# the generator's sheetDict, so translated sheet names never matter here.
-_ROLE_BY_SELECTION = {
-    ReportSelection.FileInfo: "Report",
-    ReportSelection.Stat: "Statistics",
-    ReportSelection.DUT: "Per-DUT",
-    ReportSelection.GDR_DTR: "Report",
-    ReportSelection.Trend: "Chart",
-    ReportSelection.Histo: "Chart",
-    ReportSelection.Bin: "Bins",
-    ReportSelection.Wafer: "Wafer",
-    ReportSelection.PPQQ: "Validation",
-    ReportSelection.Correlation: "Correlation",
+# Locale-proof family keys: everything downstream (role labels, tab hexes)
+# resolves from these — never from translated names. Identity comes from
+# the generator's sheetDict; derived sheets prefix-match the live tr()
+# bases their writers used; the wafer family is charts.wafer_sheet_name's
+# hardcoded-English exception.
+_FAMILY_BY_SELECTION = {
+    ReportSelection.FileInfo: "file_info",
+    ReportSelection.Stat: "stat",
+    ReportSelection.DUT: "dut",
+    ReportSelection.GDR_DTR: "gdr",
+    ReportSelection.Trend: "trend",
+    ReportSelection.Histo: "histo",
+    ReportSelection.Bin: "bin",
+    ReportSelection.Wafer: "wafer",
+    ReportSelection.PPQQ: "ppqq",
+    ReportSelection.Correlation: "correlation_upstream",
 }
+_LABEL_BY_FAMILY = {
+    "file_info": "Report",
+    "stat": "Statistics",
+    "dut": "Per-DUT",
+    "corr": "Correlation",
+    "gdr": "Report",
+    "trend": "Chart",
+    "histo": "Chart",
+    "bin": "Bins",
+    "wafer": "Wafer",
+    "ppqq": "Validation",
+    "correlation_upstream": "Correlation",
+    "fallback": "Sheet",
+}
+_HEX_BY_FAMILY = {
+    "stat": TEST_STATISTICS_TAB_HEX,
+    "dut": DUT_SUMMARY_TAB_HEX,
+    "corr": TAB_COLOR_HEXES["test_correlation"],
+    "wafer": TAB_COLOR_HEXES["wafer"],
+    "file_info": TAB_COLOR_HEXES["file_info"],
+    "gdr": TAB_COLOR_HEXES["gdr"],
+    "trend": TAB_COLOR_HEXES["trend"],
+    "histo": TAB_COLOR_HEXES["histo"],
+    "bin": TAB_COLOR_HEXES["bin"],
+    # the upstream validation/correlation sheets take the quiet gray
+    "ppqq": TAB_COLOR_HEXES["gdr"],
+    "correlation_upstream": TAB_COLOR_HEXES["gdr"],
+    "fallback": TAB_COLOR_HEXES["file_info"],
+}
+
+
+def _sheet_families(wss: list, overview_ws, sheet_dict: dict, tr) -> list[str]:
+    """One family key per worksheet in ``wss`` order; the overview's own
+    slot is ``""`` (identity-excluded), unmatched sheets ``"fallback"``.
+    See ``sheet_roles`` for the matching rules."""
+    by_identity = {id(ws): sel for sel, ws in sheet_dict.items()}
+    prefixes = [
+        (tr("Test Statistics"), "stat"),
+        (tr("DUT Summary"), "dut"),
+        (tr("Test Correlation Map"), "corr"),
+    ]
+    out = []
+    for ws in wss:
+        if ws is overview_ws:
+            out.append("")
+            continue
+        sel = by_identity.get(id(ws))
+        if sel is not None and sel in _FAMILY_BY_SELECTION:
+            out.append(_FAMILY_BY_SELECTION[sel])
+            continue
+        name = ws.get_name()
+        matched = None
+        for base, family in prefixes:
+            if name == base or name.startswith(base + " (") or name.startswith(base + " - T"):
+                matched = family
+                break
+        if matched is None and (
+            name == "Wafer Heat Map"
+            or name.endswith(" (Merged)")
+            or name.startswith("Wafer ")
+        ):
+            matched = "wafer"
+        out.append(matched if matched is not None else "fallback")
+    return out
 
 
 def sheet_roles(wss: list, overview_ws, sheet_dict: dict, tr) -> list[str]:
@@ -50,35 +123,10 @@ def sheet_roles(wss: list, overview_ws, sheet_dict: dict, tr) -> list[str]:
     names (heat map exact, ``" (Merged)"`` suffix, ``"Wafer "`` prefix).
     Anything unmatched degrades to ``tr("Sheet")`` — never a crash.
     """
-    by_identity = {id(ws): sel for sel, ws in sheet_dict.items()}
-    prefixes = [
-        (tr("Test Statistics"), "Statistics"),
-        (tr("DUT Summary"), "Per-DUT"),
-        (tr("Test Correlation Map"), "Correlation"),
+    return [
+        tr(_LABEL_BY_FAMILY[family]) if family else ""
+        for family in _sheet_families(wss, overview_ws, sheet_dict, tr)
     ]
-    out = []
-    for ws in wss:
-        if ws is overview_ws:
-            out.append("")
-            continue
-        sel = by_identity.get(id(ws))
-        if sel is not None and sel in _ROLE_BY_SELECTION:
-            out.append(tr(_ROLE_BY_SELECTION[sel]))
-            continue
-        name = ws.get_name()
-        matched = None
-        for base, label in prefixes:
-            if name == base or name.startswith(base + " (") or name.startswith(base + " - T"):
-                matched = label
-                break
-        if matched is None and (
-            name == "Wafer Heat Map"
-            or name.endswith(" (Merged)")
-            or name.startswith("Wafer ")
-        ):
-            matched = "Wafer"
-        out.append(tr(matched) if matched is not None else tr("Sheet"))
-    return out
 
 
 def resolve_banner(file_info_rows: "list | None", tr) -> "tuple[str, bool]":
@@ -191,3 +239,169 @@ def derive_notes(
     if file_info_present and not anchors_resolved:
         notes.append(tr("Non-English UI — some columns keep raw values"))
     return notes
+
+
+def _format_count(value) -> str:
+    """Thousands-separated integer cell ("18,432")."""
+    return f"{value:,}"
+
+
+def build_overview_spec(
+    *,
+    wss: list,
+    overview_ws,
+    sheet_dict: dict,
+    file_info_rows: "list | None",
+    facts: dict,
+    drop_count: "int | None",
+    hide_remeasured: bool,
+    split_temperature: bool,
+    wafer_heat_selected: bool,
+    correlation_selected: bool,
+    ctx_temps: "dict | None",
+    selected_fids: list,
+    test_count: int,
+    dut_count: "int | None",
+    heads: list,
+    sites: list,
+    wafer_count: "int | None",
+    generated: str,
+    tr,
+) -> dict:
+    """The full overview spec at close time — pure, every input already in
+    the generator's hands. Returns ``{"title", "facts", "sheets", "notes"}``:
+
+    - ``title``: the resolved banner chain (R6)
+    - ``facts``: exactly 8 (label, value) rows in the pinned order
+    - ``sheets``: one ``{"name", "hex", "role", "duts", "note"}`` row per
+      worksheet in final tab order, the overview itself excluded
+    - ``notes``: the Export Notes lines (possibly empty)
+
+    ``ctx_temps``/``dut_count`` must come pre-gated by the caller (None
+    when the DUT context never ran — the generator knows via the same
+    selection condition ``_prepare_dut_context`` runs under).
+    """
+    facts = facts or {}
+    sheet_names: list = []
+    sheet_families: list = []
+    for ws, family in zip(wss, _sheet_families(wss, overview_ws, sheet_dict, tr)):
+        if ws is not overview_ws:
+            sheet_names.append(ws.get_name())
+            sheet_families.append(family)
+
+    # -- banner + degradation flag (R6 chain) --
+    title, anchors_resolved = resolve_banner(file_info_rows, tr)
+
+    # -- the 8 fact rows, pinned order --
+    merged = facts.get("merged_wafers") or []
+    names = file_names_from_file_info(file_info_rows) if file_info_rows is not None else None
+    if file_info_rows is None:
+        files_value = "—"
+    elif names:
+        files_value = f"{len(names)} — {' · '.join(names)}"
+    else:
+        files_value = str(len(selected_fids))
+    if ctx_temps is not None:
+        temps = ctx_temps
+    elif file_info_rows is not None:
+        temps = file_temperatures_from_file_info(file_info_rows, selected_fids)
+    else:
+        temps = None
+    if dut_count is None:
+        duts_value = "—"
+    elif hide_remeasured:
+        duts_value = "{} tested · {} superseded · {} re-measured (kept latest)".format(
+            _format_count(dut_count),
+            _format_count(drop_count or 0),
+            _format_count(facts.get("remeasured_groups", 0)),
+        )
+    else:
+        duts_value = f"{_format_count(dut_count)} tested"
+    heads_value = "{} head{} · {} site{}".format(
+        len(heads), "" if len(heads) == 1 else "s",
+        len(sites), "" if len(sites) == 1 else "s",
+    )
+    if wafer_count is None:
+        wafers_value = "—"
+    elif merged:
+        wafers_value = f"{wafer_count} ({len(merged)} merged)"
+    else:
+        wafers_value = str(wafer_count)
+    filters = []
+    if hide_remeasured:
+        filters.append(tr("Re-measure filter ON (keep latest)"))
+    if split_temperature:
+        filters.append(tr("Temperature split ON"))
+    facts_rows = [
+        (tr("Generated"), generated),
+        (tr("Files"), files_value),
+        (tr("Temperatures"), format_temperatures(temps) or "—"),
+        (tr("Tests"), str(test_count)),
+        (tr("DUTs"), duts_value),
+        (tr("Heads / Sites"), heads_value),
+        (tr("Wafers"), wafers_value),
+        (tr("Filters"), " · ".join(filters) if filters else tr("None")),
+    ]
+
+    # -- sheet index rows --
+    stat_duts = dict(facts.get("stat_sheet_duts") or [])
+    corr_duts = dict(facts.get("corr_sheet_duts") or [])
+    sheets = []
+    for name, family in zip(sheet_names, sheet_families):
+        base = None
+        if family == "stat":
+            base = tr("Test Statistics")
+        elif family == "dut":
+            base = tr("DUT Summary")
+        elif family == "corr":
+            base = tr("Test Correlation Map")
+        note = ""
+        if base is not None and name.startswith(base + " ("):
+            # the suffix number IS the chunk index (writers format
+            # "{sheet_name} ({chunk_index + 1})"); N = family chunk count + 1
+            chunk_index = name[name.rfind("(") + 1 : name.rfind(")")]
+            chunk_total = sum(
+                1
+                for other, other_family in zip(sheet_names, sheet_families)
+                if other_family == family and other.startswith(base + " (")
+            ) + 1
+            note = tr("chunk {} of {}").format(chunk_index, chunk_total)
+        elif base is not None and name.startswith(base + " - T"):
+            note = tr("temperature split")
+        elif name == "Wafer Heat Map":
+            note = tr("all wafers, stacked")
+        else:
+            for _wafer_id, sheet_name, n_files, _superseded in merged:
+                if sheet_name == name:
+                    note = tr("merged from {} files").format(n_files)
+                    break
+        if family == "stat":
+            duts = stat_duts.get(name)
+        elif family == "corr":
+            duts = corr_duts.get(name)
+        elif family == "dut":
+            duts = dut_count
+        else:
+            duts = None
+        sheets.append(
+            {
+                "name": name,
+                "hex": _HEX_BY_FAMILY[family],
+                "role": tr(_LABEL_BY_FAMILY[family]),
+                "duts": _format_count(duts) if duts is not None else "—",
+                "note": note,
+            }
+        )
+
+    notes = derive_notes(
+        sheet_names=sheet_names,
+        facts=facts,
+        drop_count=drop_count,
+        hide_remeasured=hide_remeasured,
+        wafer_heat_selected=wafer_heat_selected,
+        correlation_selected=correlation_selected,
+        anchors_resolved=anchors_resolved,
+        file_info_present=file_info_rows is not None,
+        tr=tr,
+    )
+    return {"title": title, "facts": facts_rows, "sheets": sheets, "notes": notes}

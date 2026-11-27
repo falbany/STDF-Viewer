@@ -11,6 +11,7 @@ import xlsxwriter
 from PyQt5 import QtCore
 
 from deps.exporter.overview import (
+    build_overview_spec,
     derive_notes,
     format_temperatures,
     resolve_banner,
@@ -326,3 +327,170 @@ class TestDeriveNotes:
             "Test Correlation Map not exported — no DUT context",
             "Non-English UI — some columns keep raw values",
         ]
+
+
+def spec_kwargs(**overrides):
+    """build_overview_spec baseline: full-ish selection, everything in hand."""
+    wss = make_book(
+        [
+            "Report Overview",
+            "File Info",
+            "Test Statistics",
+            "Test Statistics (2)",
+            "Test Statistics - T-40°C",
+            "DUT Summary",
+            "Wafer 1",
+            "Wafer Heat Map",
+        ]
+    )
+    file_info_rows = [
+        ["File Name: ", "a.stdf", "b.stdf"],
+        ["Product ID: ", "TOP-3491", "TOP-3491"],
+        ["Sublot ID: ", "2A", "2B"],
+        ["Test Temperature: ", "25", "-40"],
+    ]
+    facts = {
+        "remeasured_groups": 156,
+        "stat_chunks": 2,
+        "stat_splits": [(-40.0, 9216)],
+        "stat_unresolved": 12,
+        "stat_sheet_duts": [
+            ("Test Statistics", 16384),
+            ("Test Statistics (2)", 2048),
+            ("Test Statistics - T-40°C", 9216),
+        ],
+        "merged_wafers": [("W25", "Wafer 25 (Merged)", 2, 14)],
+    }
+    kwargs = dict(
+        wss=wss,
+        overview_ws=wss[0],
+        sheet_dict={
+            ReportSelection.FileInfo: wss[1],
+            ReportSelection.Stat: wss[2],
+            ReportSelection.DUT: wss[5],
+        },
+        file_info_rows=file_info_rows,
+        facts=facts,
+        drop_count=312,
+        hide_remeasured=True,
+        split_temperature=True,
+        wafer_heat_selected=True,
+        correlation_selected=False,
+        ctx_temps={1: 25.0, 2: -40.0},
+        selected_fids=[1, 2],
+        test_count=148,
+        dut_count=18432,
+        heads=[1],
+        sites=list(range(8)),
+        wafer_count=25,
+        generated="2026-11-27 14:32",
+        tr=None,
+    )
+    kwargs.update(overrides)
+    return kwargs
+
+
+class TestBuildOverviewSpec:
+    def test_full_spec_shape_and_values(self, tr):
+        spec = build_overview_spec(**{**spec_kwargs(), "tr": tr})
+        assert set(spec) == {"title", "facts", "sheets", "notes"}
+        assert spec["title"] == "TOP-3491 / 2A | TOP-3491 / 2B"
+        labels = [label for label, _value in spec["facts"]]
+        assert labels == [
+            "Generated",
+            "Files",
+            "Temperatures",
+            "Tests",
+            "DUTs",
+            "Heads / Sites",
+            "Wafers",
+            "Filters",
+        ]
+        values = dict(spec["facts"])
+        assert values["Generated"] == "2026-11-27 14:32"
+        assert values["Files"] == "2 — a.stdf · b.stdf"
+        assert values["Temperatures"] == "T-40°C · T25°C"
+        assert values["Tests"] == "148"
+        assert (
+            values["DUTs"] == "18,432 tested · 312 superseded · 156 re-measured (kept latest)"
+        )
+        assert values["Heads / Sites"] == "1 head · 8 sites"
+        assert values["Wafers"] == "25 (1 merged)"
+        assert values["Filters"] == "Re-measure filter ON (keep latest) · Temperature split ON"
+
+    def test_sheet_rows_hexes_duts_notes(self, tr):
+        spec = build_overview_spec(**{**spec_kwargs(), "tr": tr})
+        rows = spec["sheets"]
+        assert [row["name"] for row in rows] == [
+            "File Info",
+            "Test Statistics",
+            "Test Statistics (2)",
+            "Test Statistics - T-40°C",
+            "DUT Summary",
+            "Wafer 1",
+            "Wafer Heat Map",
+        ]  # the overview itself is excluded
+        by_name = {row["name"]: row for row in rows}
+        assert by_name["File Info"]["hex"] == "94A3B8"
+        assert by_name["Test Statistics"]["hex"] == "16A34A"
+        assert by_name["Test Statistics"]["duts"] == "16,384"
+        assert by_name["Test Statistics (2)"]["duts"] == "2,048"
+        assert by_name["Test Statistics (2)"]["note"] == "chunk 2 of 2"
+        assert by_name["Test Statistics - T-40°C"]["duts"] == "9,216"
+        assert by_name["Test Statistics - T-40°C"]["note"] == "temperature split"
+        assert by_name["DUT Summary"]["hex"] == "1E40AF"
+        assert by_name["DUT Summary"]["duts"] == "18,432"
+        assert by_name["Wafer 1"]["hex"] == "7C3AED"
+        assert by_name["Wafer 1"]["duts"] == "—"
+        assert by_name["Wafer Heat Map"]["note"] == "all wafers, stacked"
+        assert all(row["role"] for row in rows)
+
+    def test_notes_flow_through(self, tr):
+        spec = build_overview_spec(**{**spec_kwargs(), "tr": tr})
+        assert "312 re-measured DUTs dropped (kept latest)" in spec["notes"]
+        assert spec["notes"][0] == "312 re-measured DUTs dropped (kept latest)"
+
+    def test_spec_without_dut_context(self, tr):
+        wss = make_book(
+            ["Report Overview", "File Info", "Test Statistics", "DUT Summary"]
+        )
+        spec = build_overview_spec(
+            **{
+                **spec_kwargs(
+                    wss=wss,
+                    overview_ws=wss[0],
+                    sheet_dict={
+                        ReportSelection.FileInfo: wss[1],
+                        ReportSelection.Stat: wss[2],
+                        ReportSelection.DUT: wss[3],
+                    },
+                    file_info_rows=None,
+                    facts={},
+                    drop_count=None,
+                    hide_remeasured=False,
+                    split_temperature=False,
+                    wafer_heat_selected=False,
+                    ctx_temps=None,
+                    dut_count=None,
+                    wafer_count=None,
+                ),
+                "tr": tr,
+            }
+        )
+        values = dict(spec["facts"])
+        assert values["Files"] == "—"
+        assert values["Temperatures"] == "—"
+        assert values["DUTs"] == "—"
+        assert values["Wafers"] == "—"
+        assert values["Filters"] == "None"
+        assert spec["notes"] == []
+        assert all(row["duts"] == "—" for row in spec["sheets"])
+
+    def test_ctx_temps_win_over_the_table(self, tr):
+        # ctx says {T25} only; the table says 25/-40 — the context wins
+        spec = build_overview_spec(**{**spec_kwargs(), "tr": tr, "ctx_temps": {1: 25.0}})
+        assert dict(spec["facts"])["Temperatures"] == "T25°C"
+
+    def test_table_temps_used_when_ctx_absent(self, tr):
+        spec = build_overview_spec(**{**spec_kwargs(), "tr": tr, "ctx_temps": None})
+        assert dict(spec["facts"])["Temperatures"] == "T-40°C · T25°C"
