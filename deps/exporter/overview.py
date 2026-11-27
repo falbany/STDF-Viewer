@@ -114,3 +114,80 @@ def format_temperatures(temps_by_fid: "dict | None") -> "str | None":
     if not values:
         return None
     return " · ".join(f"T{format_temperature_label(value)}°C" for value in values)
+
+
+def derive_notes(
+    *,
+    sheet_names: list,
+    facts: dict,
+    drop_count: "int | None",
+    hide_remeasured: bool,
+    wafer_heat_selected: bool,
+    correlation_selected: bool,
+    anchors_resolved: bool,
+    file_info_present: bool,
+    tr,
+) -> list:
+    """The Export Notes block, derived AT CLOSE from the stashed facts —
+    actionable events + degradations only (2026-11-27 ruling R4): no idle
+    notes, no per-sheet chatter. Uniform order, pure, tr-ready (templates
+    carry ``{}`` placeholders; the English locale renders the pinned
+    wording verbatim).
+
+    ``facts`` is ``_ov_facts`` (every key optional — ``.get`` throughout):
+    ``remeasured_groups``, ``stat_chunks``, ``stat_splits``,
+    ``stat_unresolved``, ``stat_sheet_duts``, ``corr_sheet_duts``,
+    ``merged_wafers``. ``sheet_names`` is the FINAL tab order at close
+    time, which is what makes the "sheet present / not exported" notes
+    always truthful.
+    """
+    facts = facts or {}
+    notes: list = []
+    stat_chunks = facts.get("stat_chunks")
+    splits = facts.get("stat_splits") or []
+    unresolved = facts.get("stat_unresolved")
+    merged = facts.get("merged_wafers") or []
+    dut_base = tr("DUT Summary")
+    corr_base = tr("Test Correlation Map")
+
+    # 1 — the re-measure filter's actual effect
+    if hide_remeasured and drop_count:
+        notes.append(tr("{} re-measured DUTs dropped (kept latest)").format(drop_count))
+    # 2 — the matrix's die-overflow chunks
+    if stat_chunks and stat_chunks > 1:
+        notes.append(
+            tr("Test Statistics split into {} sheets (Excel column cap)").format(stat_chunks)
+        )
+    # 3 — the DUT Summary's test-cap chunks (read off the final names)
+    dut_chunks = [name for name in sheet_names if name.startswith(dut_base + " (")]
+    if dut_chunks:
+        notes.append(
+            tr("DUT Summary split into {} sheets (Excel column cap)").format(len(dut_chunks) + 1)
+        )
+    # 4 — the temperature splits + the unresolved remainder
+    if splits:
+        labels = ", ".join(f"T{format_temperature_label(temp)}°C" for temp, _count in splits)
+        note = tr("Temperature splits: {}").format(labels)
+        if unresolved:
+            note += tr(" — {} DUTs without a temperature stay on the base sheet").format(unresolved)
+        notes.append(note)
+    # 5 — one note per merged wafer
+    for wafer_id, _sheet_name, n_files, n_superseded in merged:
+        notes.append(
+            tr("Wafer {} merged from {} files ({} dies superseded)").format(
+                wafer_id, n_files, n_superseded
+            )
+        )
+    # 6 / 7 — the stacked heat map, present or promised-but-absent
+    heat_present = "Wafer Heat Map" in sheet_names
+    if heat_present:
+        notes.append(tr("Stacked wafer view added (all wafers)"))
+    elif wafer_heat_selected:
+        notes.append(tr("Wafer Heat Map not exported — selection has no all-wafers data"))
+    # 8 — correlation promised but the DUT context never ran
+    if correlation_selected and not any(name.startswith(corr_base) for name in sheet_names):
+        notes.append(tr("Test Correlation Map not exported — no DUT context"))
+    # 9 — one combined degradation note for translated UIs
+    if file_info_present and not anchors_resolved:
+        notes.append(tr("Non-English UI — some columns keep raw values"))
+    return notes

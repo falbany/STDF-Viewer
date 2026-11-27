@@ -11,6 +11,7 @@ import xlsxwriter
 from PyQt5 import QtCore
 
 from deps.exporter.overview import (
+    derive_notes,
     format_temperatures,
     resolve_banner,
     sheet_roles,
@@ -178,3 +179,150 @@ class TestFormatTemperatures:
 
     def test_fractional_temperature_keeps_its_decimal(self):
         assert format_temperatures({1: 25.5}) == "T25.5°C"
+
+
+def notes_kwargs(**overrides):
+    """derive_notes' baseline: a quiet, English, nothing-happened export."""
+    kwargs = dict(
+        sheet_names=["File Info", "Test Statistics", "DUT Summary", "Wafer 1"],
+        facts={},
+        drop_count=None,
+        hide_remeasured=False,
+        wafer_heat_selected=False,
+        correlation_selected=False,
+        anchors_resolved=True,
+        file_info_present=False,
+        tr=None,
+    )
+    kwargs.update(overrides)
+    return kwargs
+
+
+class TestDeriveNotes:
+    def test_quiet_export_has_no_notes(self, tr):
+        assert derive_notes(**{**notes_kwargs(), "tr": tr}) == []
+
+    def test_note1_drops_when_filter_on(self, tr):
+        notes = derive_notes(**{**notes_kwargs(), "tr": tr, "hide_remeasured": True, "drop_count": 312})
+        assert notes == ["312 re-measured DUTs dropped (kept latest)"]
+
+    def test_note1_idle_filter_on_nothing_dropped_suppressed(self, tr):
+        notes = derive_notes(**{**notes_kwargs(), "tr": tr, "hide_remeasured": True, "drop_count": 0})
+        assert notes == []
+
+    def test_note2_matrix_chunks(self, tr):
+        notes = derive_notes(**{**notes_kwargs(), "tr": tr, "facts": {"stat_chunks": 2}})
+        assert notes == ["Test Statistics split into 2 sheets (Excel column cap)"]
+
+    def test_note2_single_chunk_stays_silent(self, tr):
+        notes = derive_notes(**{**notes_kwargs(), "tr": tr, "facts": {"stat_chunks": 1}})
+        assert notes == []
+
+    def test_note3_dut_summary_chunks_from_names(self, tr):
+        notes = derive_notes(
+            **{
+                **notes_kwargs(),
+                "tr": tr,
+                "sheet_names": ["DUT Summary", "DUT Summary (2)", "DUT Summary (3)"],
+            }
+        )
+        assert notes == ["DUT Summary split into 3 sheets (Excel column cap)"]
+
+    def test_note4_splits_with_unresolved_clause(self, tr):
+        facts = {"stat_splits": [(-40.0, 9216), (25.0, 9204)], "stat_unresolved": 12}
+        notes = derive_notes(**{**notes_kwargs(), "tr": tr, "facts": facts})
+        assert notes == [
+            "Temperature splits: T-40°C, T25°C — 12 DUTs without a temperature stay on the base sheet"
+        ]
+
+    def test_note4_without_unresolved_clause(self, tr):
+        facts = {"stat_splits": [(-40.0, 9216), (25.0, 9204)], "stat_unresolved": 0}
+        notes = derive_notes(**{**notes_kwargs(), "tr": tr, "facts": facts})
+        assert notes == ["Temperature splits: T-40°C, T25°C"]
+
+    def test_note5_merged_wafer_per_entry(self, tr):
+        facts = {"merged_wafers": [("W25", "Wafer 25 (Merged)", 2, 14)]}
+        notes = derive_notes(**{**notes_kwargs(), "tr": tr, "facts": facts})
+        assert notes == ["Wafer W25 merged from 2 files (14 dies superseded)"]
+
+    def test_note6_heat_map_present(self, tr):
+        notes = derive_notes(
+            **{
+                **notes_kwargs(),
+                "tr": tr,
+                "sheet_names": ["Wafer 1", "Wafer Heat Map"],
+            }
+        )
+        assert notes == ["Stacked wafer view added (all wafers)"]
+
+    def test_note7_heat_selected_but_absent(self, tr):
+        notes = derive_notes(**{**notes_kwargs(), "tr": tr, "wafer_heat_selected": True})
+        assert notes == ["Wafer Heat Map not exported — selection has no all-wafers data"]
+
+    def test_note7_heat_present_not_fired(self, tr):
+        notes = derive_notes(
+            **{
+                **notes_kwargs(),
+                "tr": tr,
+                "wafer_heat_selected": True,
+                "sheet_names": ["Wafer 1", "Wafer Heat Map"],
+            }
+        )
+        assert notes == ["Stacked wafer view added (all wafers)"]
+
+    def test_note8_correlation_selected_but_absent(self, tr):
+        notes = derive_notes(**{**notes_kwargs(), "tr": tr, "correlation_selected": True})
+        assert notes == ["Test Correlation Map not exported — no DUT context"]
+
+    def test_note8_correlation_present_not_fired(self, tr):
+        notes = derive_notes(
+            **{
+                **notes_kwargs(),
+                "tr": tr,
+                "correlation_selected": True,
+                "sheet_names": ["Test Correlation Map", "Test Correlation Map - T25°C"],
+            }
+        )
+        assert notes == []
+
+    def test_note9_translated_ui_with_table(self, tr):
+        notes = derive_notes(
+            **{**notes_kwargs(), "tr": tr, "anchors_resolved": False, "file_info_present": True}
+        )
+        assert notes == ["Non-English UI — some columns keep raw values"]
+
+    def test_note9_no_table_stays_silent(self, tr):
+        notes = derive_notes(
+            **{**notes_kwargs(), "tr": tr, "anchors_resolved": False, "file_info_present": False}
+        )
+        assert notes == []
+
+    def test_maximal_scenario_keeps_the_pinned_order(self, tr):
+        facts = {
+            "stat_chunks": 2,
+            "stat_splits": [(-40.0, 9216), (25.0, 9204)],
+            "stat_unresolved": 12,
+            "merged_wafers": [("W25", "Wafer 25 (Merged)", 2, 14)],
+        }
+        notes = derive_notes(
+            **{
+                **notes_kwargs(),
+                "tr": tr,
+                "sheet_names": ["File Info", "Test Statistics", "DUT Summary", "DUT Summary (2)", "Wafer 1"],
+                "facts": facts,
+                "drop_count": 312,
+                "hide_remeasured": True,
+                "correlation_selected": True,
+                "anchors_resolved": False,
+                "file_info_present": True,
+            }
+        )
+        assert notes == [
+            "312 re-measured DUTs dropped (kept latest)",
+            "Test Statistics split into 2 sheets (Excel column cap)",
+            "DUT Summary split into 2 sheets (Excel column cap)",
+            "Temperature splits: T-40°C, T25°C — 12 DUTs without a temperature stay on the base sheet",
+            "Wafer W25 merged from 2 files (14 dies superseded)",
+            "Test Correlation Map not exported — no DUT context",
+            "Non-English UI — some columns keep raw values",
+        ]
