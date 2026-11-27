@@ -362,7 +362,7 @@ def build_overview_spec(  # pylint: disable=too-many-arguments,too-many-locals,t
         (tr("Generated"), generated),
         (tr("Files"), files_value),
         (tr("Temperatures"), format_temperatures(temps) or "—"),
-        (tr("Tests"), str(test_count)),
+        (tr("Tests"), test_count),
         (tr("DUTs"), duts_value),
         (tr("Heads / Sites"), heads_value),
         (tr("Wafers"), wafers_value),
@@ -414,7 +414,7 @@ def build_overview_spec(  # pylint: disable=too-many-arguments,too-many-locals,t
                 "name": name,
                 "hex": _HEX_BY_FAMILY[family],
                 "role": tr(_LABEL_BY_FAMILY[family]),
-                "duts": _format_count(duts) if duts is not None else "—",
+                "duts": duts,
                 "note": note,
             }
         )
@@ -478,7 +478,11 @@ def render_overview(ws, spec: dict, theme) -> None:
 
     headline_fmt = theme.lookalike("headline1")
     label_fmt = theme.cell_format(font="metadata", align="left")
-    value_fmt = theme.cell_format(font="body", align="left", extra={"text_wrap": True})
+    # num_fmt only affects numeric cells: the Tests fact rides through as
+    # an int (2026-11-28 user ruling — numeric cells, sortable/aggregatable)
+    value_fmt = theme.cell_format(
+        font="body", align="left", extra={"text_wrap": True}, num_fmt="#,##0"
+    )
     header_band = theme.cell_format(font="header", fill_hex=HEADER_FILL_HEX)
     header_left = theme.cell_format(
         font="header", fill_hex=HEADER_FILL_HEX, align="left"
@@ -490,7 +494,7 @@ def render_overview(ws, spec: dict, theme) -> None:
         font="body", align="left", extra={"underline": 1, "font_color": "#1E40AF"}
     )
     role_fmt = theme.cell_format(font="body", align="left")
-    duts_fmt = theme.cell_format(font="body", align="right")
+    duts_fmt = theme.cell_format(font="body", align="right", num_fmt="#,##0")
     note_fmt = theme.cell_format(font="body", align="left")
 
     # row 1 — the banner (same treatment as the Bin sheet's, no fill)
@@ -525,7 +529,10 @@ def render_overview(ws, spec: dict, theme) -> None:
             string=sheet["name"],
         )
         ws.write(row, 2, sheet["role"], role_fmt)
-        ws.write(row, 3, sheet["duts"], duts_fmt)
+        if sheet["duts"] is None:
+            ws.write_blank(row, 3, None, duts_fmt)  # no count → blank cell
+        else:
+            ws.write(row, 3, sheet["duts"], duts_fmt)
         if sheet["note"]:
             ws.write(row, 4, sheet["note"], note_fmt)
         else:

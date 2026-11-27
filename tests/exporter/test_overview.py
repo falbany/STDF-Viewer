@@ -417,7 +417,7 @@ class TestBuildOverviewSpec:
         assert values["Generated"] == "2026-11-27 14:32"
         assert values["Files"] == "2 — a.stdf · b.stdf"
         assert values["Temperatures"] == "T-40°C · T25°C"
-        assert values["Tests"] == "148"
+        assert values["Tests"] == 148
         assert (
             values["DUTs"] == "18,432 tested · 312 superseded · 156 re-measured (kept latest)"
         )
@@ -440,15 +440,15 @@ class TestBuildOverviewSpec:
         by_name = {row["name"]: row for row in rows}
         assert by_name["File Info"]["hex"] == "94A3B8"
         assert by_name["Test Statistics"]["hex"] == "16A34A"
-        assert by_name["Test Statistics"]["duts"] == "16,384"
-        assert by_name["Test Statistics (2)"]["duts"] == "2,048"
+        assert by_name["Test Statistics"]["duts"] == 16384
+        assert by_name["Test Statistics (2)"]["duts"] == 2048
         assert by_name["Test Statistics (2)"]["note"] == "chunk 2 of 2"
-        assert by_name["Test Statistics - T-40°C"]["duts"] == "9,216"
+        assert by_name["Test Statistics - T-40°C"]["duts"] == 9216
         assert by_name["Test Statistics - T-40°C"]["note"] == "temperature split"
         assert by_name["DUT Summary"]["hex"] == "1E40AF"
-        assert by_name["DUT Summary"]["duts"] == "18,432"
+        assert by_name["DUT Summary"]["duts"] == 18432
         assert by_name["Wafer 1"]["hex"] == "7C3AED"
-        assert by_name["Wafer 1"]["duts"] == "—"
+        assert by_name["Wafer 1"]["duts"] is None
         assert by_name["Wafer Heat Map"]["note"] == "all wafers, stacked"
         assert all(row["role"] for row in rows)
 
@@ -491,7 +491,7 @@ class TestBuildOverviewSpec:
         assert values["Wafers"] == "—"
         assert values["Filters"] == "None"
         assert spec["notes"] == []
-        assert all(row["duts"] == "—" for row in spec["sheets"])
+        assert all(row["duts"] is None for row in spec["sheets"])
 
     def test_ctx_temps_win_over_the_table(self, tr):
         # ctx says {T25} only; the table says 25/-40 — the context wins
@@ -675,7 +675,7 @@ class TestOverviewIntegration:
             cell.value
             for row in wb["Report Overview"].iter_rows()
             for cell in row
-            if cell.value is not None
+            if isinstance(cell.value, str)  # the DUTs column is numeric now
         ]
 
     def test_overview_is_first_sheet_with_full_selection(self, tmp_path, qapp):
@@ -849,3 +849,46 @@ class TestReviewFixes:
         ws = book["Report Overview"]
         header_row_values = [ws.cell(row=14, column=col).value for col in range(2, 6)]
         assert header_row_values == ["Feuille", "Type", "DUTs", "Note"]
+
+
+class TestNumericCells:
+    """2026-11-28 user ruling: the Tests fact and the sheet-index DUTs
+    column must be NUMERIC cells (sortable/aggregatable), not strings."""
+
+    def test_tests_fact_is_numeric(self, tr):
+        spec = build_overview_spec(**{**spec_kwargs(), "tr": tr})
+        value = dict(spec["facts"])["Tests"]
+        assert value == 148
+        assert isinstance(value, int)
+
+    def test_sheet_duts_are_numeric_or_none(self, tr):
+        spec = build_overview_spec(**{**spec_kwargs(), "tr": tr})
+        by_name = {row["name"]: row for row in spec["sheets"]}
+        assert by_name["Test Statistics"]["duts"] == 16384
+        assert by_name["Test Statistics (2)"]["duts"] == 2048
+        assert by_name["DUT Summary"]["duts"] == 18432
+        assert by_name["Wafer 1"]["duts"] is None
+
+    def test_renderer_writes_numeric_cells_and_blanks(self):
+        spec = render_spec(
+            [
+                {"name": "Test Statistics", "hex": "16A34A", "role": "Statistics", "duts": 16384, "note": ""},
+                {"name": "File Info", "hex": "94A3B8", "role": "Report", "duts": None, "note": ""},
+            ]
+        )
+        spec["facts"] = [("Generated", "2026-11-27 14:32"), ("Tests", 148)]
+        names = ["Report Overview", "Test Statistics", "File Info"]
+        book = load_workbook_bytes(
+            render_workbook(
+                names,
+                lambda wb, ws_by_name: render_overview(
+                    ws_by_name["Report Overview"], spec, ModernTheme(wb)
+                ),
+            )
+        )
+        ws = book["Report Overview"]
+        assert ws.cell(row=5, column=3).value == 148  # Tests fact, numeric
+        # sheet rows: banner 1, blank 2, headline 3, facts 4-5, blank 6,
+        # headline 7, header band 8, first sheet row 9
+        assert ws.cell(row=9, column=4).value == 16384  # DUTs column, numeric
+        assert ws.cell(row=10, column=4).value is None  # no count → blank cell
