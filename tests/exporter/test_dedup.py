@@ -9,6 +9,7 @@ FETCH_SELECT_DUT_SUMMARY). No Qt, no workbook — pure functions.
 from deps.exporter.dedup import (
     compute_fid_ranks,
     compute_remeasure_drops,
+    compute_remeasure_stats,
     file_dates_from_rows,
 )
 
@@ -252,4 +253,54 @@ class TestWaferAwareDrops:
         # head/site selection — a missing key is "no occurrences", not an error
         info = dut_info([(1, 0, "SN541", "Failed - 0x08", "W01")])
         assert compute_remeasure_drops(info, [1, 2]) == set()
+
+
+class TestComputeRemeasureStats:
+    """The tuple form (Report Overview's DUTs fact): drops + the
+    re-measured group count in ONE walk."""
+
+    def test_drops_identical_to_compute_remeasure_drops(self):
+        info = dut_info(
+            [
+                (1, 0, "SN002", "Superseded - 0x04"),
+                (1, 5, "SN100", "Failed - 0x08"),
+                (2, 0, "SN002", "Passed - 0x00", "W01"),
+                (2, 5, "SN100", "Passed - 0x00"),
+            ]
+        )
+        drops, _groups = compute_remeasure_stats(info, [1, 2])
+        assert drops == compute_remeasure_drops(info, [1, 2])
+
+    def test_three_occurrences_one_group_two_drops(self):
+        info = dut_info(
+            [
+                (1, 0, "SN541", "Passed - 0x00"),
+                (2, 0, "SN541", "Passed - 0x00"),
+                (3, 0, "SN541", "Passed - 0x00"),
+            ]
+        )
+        drops, groups = compute_remeasure_stats(info, [1, 2, 3])
+        assert drops == {(1, 0), (2, 0)}
+        assert groups == 1
+
+    def test_two_remeasured_parts_two_groups(self):
+        info = dut_info(
+            [
+                (1, 0, "A1", "Failed - 0x08"),
+                (2, 0, "A1", "Passed - 0x00"),
+                (1, 5, "B2", "Passed - 0x00"),
+                (2, 5, "B2", "Failed - 0x08"),
+            ]
+        )
+        drops, groups = compute_remeasure_stats(info, [1, 2])
+        assert groups == 2
+        assert drops == {(1, 0), (1, 5)}
+
+    def test_stdf_flagged_supersede_alone_makes_no_group(self):
+        # rule (a) drops without a duplicate part — groups counts only
+        # (WAFER_ID, Part ID) buckets with >1 occurrence
+        info = dut_info([(1, 0, "SN002", "Superseded - 0x04")])
+        drops, groups = compute_remeasure_stats(info, [1])
+        assert drops == {(1, 0)}
+        assert groups == 0
 

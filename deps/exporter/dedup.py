@@ -85,6 +85,48 @@ def compute_fid_ranks(file_dates: dict[int, tuple[int, str, str]]) -> dict[int, 
     return {fid: rank for rank, fid in enumerate(ordered)}
 
 
+def _collect(dutInfo: dict, selected_fids: list[int]) -> tuple[dict, set]:
+    """One walk over the selection: the `(WAFER_ID, Part ID)` -> pairs
+    buckets and the STDF-flagged-superseded pairs. Shared by the drop-set
+    and the Report Overview's group-count forms."""
+    selected = set(selected_fids)
+    # (WAFER_ID, Part ID) -> [(fid, dutIndex)] ascending, selection only
+    occurrences: dict[tuple[str, str], list[tuple[int, int]]] = {}
+    superseded: set[tuple[int, int]] = set()
+    for fid in dutInfo:
+        if fid not in selected:
+            continue
+        for dut_index, info in dutInfo[fid].items():
+            pair = (fid, dut_index)
+            if _is_superseded(info):
+                superseded.add(pair)
+            part_id = _part_id(info)
+            if part_id is not None:
+                occurrences.setdefault((_wafer_id(info), part_id), []).append(pair)
+    return occurrences, superseded
+
+
+def compute_remeasure_stats(
+    dutInfo: dict, selected_fids: list[int], fid_ranks: "dict | None" = None
+) -> "tuple[set[tuple[int, int]], int]":
+    """`(drops, groups)` in ONE walk — the drop-set `compute_remeasure_drops`
+    returns plus the number of `(WAFER_ID, Part ID)` buckets with >1
+    selected occurrence: the distinct part-IDs the keep-latest filter
+    actually re-measured (Report Overview's DUTs fact, 2026-11-27 ruling).
+    STDF-flagged supersede rows drop without creating a group."""
+    occurrences, superseded = _collect(dutInfo, selected_fids)
+    ranks = fid_ranks or {}
+    drops = set(superseded)
+    for pairs in occurrences.values():
+        pairs.sort(key=lambda p: (ranks.get(p[0], p[0]), p[1]))
+        # ascending scan: every occurrence with a strictly later twin drops
+        for index, pair in enumerate(pairs):
+            if index + 1 < len(pairs):
+                drops.add(pair)
+    groups = sum(1 for pairs in occurrences.values() if len(pairs) > 1)
+    return drops, groups
+
+
 def compute_remeasure_drops(
     dutInfo: dict, selected_fids: list[int], fid_ranks: "dict | None" = None
 ) -> set[tuple[int, int]]:
@@ -103,27 +145,4 @@ def compute_remeasure_drops(
     Fid ordering — see `compute_fid_ranks`; without it the order is
     `(Fid, DUTIndex)`.
     """
-    selected = set(selected_fids)
-    # (WAFER_ID, Part ID) -> [(fid, dutIndex)] ascending, selection only
-    occurrences: dict[tuple[str, str], list[tuple[int, int]]] = {}
-    superseded: set[tuple[int, int]] = set()
-    for fid in dutInfo:
-        if fid not in selected:
-            continue
-        for dut_index, info in dutInfo[fid].items():
-            pair = (fid, dut_index)
-            if _is_superseded(info):
-                superseded.add(pair)
-            part_id = _part_id(info)
-            if part_id is not None:
-                occurrences.setdefault((_wafer_id(info), part_id), []).append(pair)
-
-    ranks = fid_ranks or {}
-    drops = set(superseded)
-    for pairs in occurrences.values():
-        pairs.sort(key=lambda p: (ranks.get(p[0], p[0]), p[1]))
-        # ascending scan: every occurrence with a strictly later twin drops
-        for index, pair in enumerate(pairs):
-            if index + 1 < len(pairs):
-                drops.add(pair)
-    return drops
+    return compute_remeasure_stats(dutInfo, selected_fids, fid_ranks)[0]
