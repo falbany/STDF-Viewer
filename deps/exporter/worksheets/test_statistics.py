@@ -41,7 +41,7 @@ import re
 import numpy as np
 
 from deps.exporter.contract import ReportHost
-from deps.exporter.dedup import compute_remeasure_drops
+from deps.exporter.dedup import compute_remeasure_stats
 from deps.exporter.helpers import (
     DUT_CHUNK_CAP,
     cp_formula,
@@ -962,6 +962,9 @@ def _build_chunk(
 
     spec = {
         "name": sheet_name if chunk_index == 0 else f"{sheet_name} ({chunk_index + 1})",
+        # fork(falbany): the chunk's die-column count (Report Overview DUTs
+        # column) — every matrix sheet carries its own
+        "die_count": die_count,
         # banner row 1: base labels + plain numeric DUT indices (fix wave
         # 2 — cell value is the int 1, 2, 3…; chunk-global numbering, so
         # chunk 2 starts at its global offset; the raw part IDs stay on
@@ -1209,14 +1212,18 @@ class TestStatisticsMixin(ReportHost):
         # is computed BEFORE rendering and stored (prune happens in place).
         # An empty set means "ran, nothing to drop".
         if getSetting().gen.hide_remeasured:
-            drops = compute_remeasure_drops(
+            drops, remeasured_groups = compute_remeasure_stats(
                 summaryTable["dutInfo"],
                 self.selectedFiles,
                 fid_ranks=self._fid_ranks(),  # 2026-11-13: shared supersede ranks
             )
         else:
             drops = set()
+            remeasured_groups = 0
         self._remeasure_drops = drops
+        # fork(falbany): the distinct re-measured part-IDs (Report Overview
+        # DUTs fact, 2026-11-27) ride the same walk
+        self._ov_facts["remeasured_groups"] = remeasured_groups
         if drops:
             summaryTable = prune_summary_view(summaryTable, drops)
 
@@ -1230,6 +1237,10 @@ class TestStatisticsMixin(ReportHost):
         file_info_rows = self.waitForTableData(isFileInfo=True)
         if self.forceQuit:
             return
+        # fork(falbany): the identical fetch the File Info sheet makes —
+        # stashed so the Report Overview reads it even when that sheet is
+        # not selected
+        self._file_info_table = file_info_rows
         file_temperatures = file_temperatures_from_file_info(file_info_rows, self.selectedFiles)
 
         # shared per-test table (finding 4): die/mirror cells + the six
@@ -1259,6 +1270,7 @@ class TestStatisticsMixin(ReportHost):
         assert wb is not None and theme is not None
         summaryTable = self._dut_ctx_summary
         order = self._dut_ctx_order
+        assert order is not None  # the context gate above guarantees the binding
         dut_ids = self._dut_ctx_dut_ids
         file_temperatures = self._dut_ctx_temps
 
@@ -1291,6 +1303,12 @@ class TestStatisticsMixin(ReportHost):
             render_matrix_sheet(ws, spec, theme)
             if chunk_index > 0:
                 self._dut_sheet_block.append(ws)
+
+        # fork(falbany): Report Overview facts — matrix sheet DUT counts +
+        # the chunk/split summary (values in hand; no fetches, no ticks)
+        stat_sheet_duts = [(spec["name"], spec["die_count"]) for spec in specs]
+        stat_splits: list = []
+        stat_unresolved = None
 
         # temperature split (§7.4): one extra worksheet per distinct
         # temperature, ascending — additive; the base sheet above is
@@ -1327,6 +1345,17 @@ class TestStatisticsMixin(ReportHost):
                         ws = wb.add_worksheet(spec["name"])
                         render_matrix_sheet(ws, spec, theme)
                         self._dut_sheet_block.append(ws)
+                    # fork(falbany): the split sheets join the overview facts
+                    stat_sheet_duts += [(spec["name"], spec["die_count"]) for spec in split_specs]
+                    stat_splits = [(temp, len(groups[temp])) for temp in sorted(resolved)]
+                    stat_unresolved = len(groups.get(None, []))
+
+        self._ov_facts.update(
+            stat_chunks=len(specs),
+            stat_sheet_duts=stat_sheet_duts,
+            stat_splits=stat_splits,
+            stat_unresolved=stat_unresolved,
+        )
 
         # one tick per test column (rows span every chunk); the context
         # tick belongs to _prepare_dut_context

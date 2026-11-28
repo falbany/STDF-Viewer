@@ -23,6 +23,7 @@ from collections.abc import Callable
 from typing import Any
 
 import xlsxwriter
+from xlsxwriter.worksheet import Worksheet
 
 from deps.exporter.theme import ModernTheme
 
@@ -50,14 +51,20 @@ class ReportHost:  # pylint: disable=too-few-public-methods
                           # triples writeWaferMap fetched; [] until then
     _dut_sheet_block: list  # DUT-derived sheets, base first (§7.4 reorder)
 
+    # -- Report Overview stash (fork, 2026-11-27): the close-time renderer
+    #    reads these; nothing fetches, nothing ticks --
+    _overview_sheet: Worksheet | None
+    _file_info_table: "list | None"  # the File Info dataTable (banner/names/temps)
+    _ov_facts: dict  # Report Overview facts (schema: overview.derive_notes)
+
     # -- DUT-block shared context (_prepare_dut_context, generator level:
     #    fetched ONCE when either DUT-block sheet is selected; both
     #    writeStatistic and writeDUT_Summary consume it, including the
     #    shared per-test table passed to the builders as shared_stats) --
     _dut_ctx_summary: dict  # the PRUNED summaryTable
-    _dut_ctx_order: list  # classic (fid, dutIndex) display order
+    _dut_ctx_order: "list | None"  # classic (fid, dutIndex) display order; None until bound
     _dut_ctx_dut_ids: list  # per-column part IDs, "DUT #n" fallback
-    _dut_ctx_temps: dict  # per-file MIR temperatures (File Info fetch)
+    _dut_ctx_temps: "dict | None"  # per-file MIR temperatures; None until _prepare_dut_context binds (the overview render gates on the binding — 2026-11-28 review fix)
     _dut_ctx_stats: dict  # test_tuple -> (die, mirror, caches6, has_num), aligned to _dut_ctx_order
     _dut_ctx_pos: dict  # (fid, dutIndex) -> index into _dut_ctx_order (dut2ind hoist)
     _prepare_dut_context: Callable[[], None]

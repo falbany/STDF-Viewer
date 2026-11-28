@@ -632,3 +632,26 @@ def test_row_stat_caches_full_gating():
     assert row_stat_caches([1.0, 1.0], 0.0, 1.0, [])[3] is None  # sigma 0
     st = row_stat_caches([2.0, 2.0, 4.0], 0.0, 8.0, [])
     assert st[3] == 8.0 / (6 * statistics.stdev([2.0, 2.0, 4.0]))
+
+
+class TestReorderSheetsToEnd:
+    """2026-11-28 user ruling: GDR & DTR Summary and Bin Chart close the
+    strip — the close-time reorder moves listed sheets to the end, in
+    listed order, skipping sheets that were not created."""
+
+    def test_moves_listed_sheets_to_the_end_in_order(self):
+        from deps.exporter.helpers import reorder_sheets_to_end
+
+        wss = ["A", "B", "C", "D", "E"]
+        assert reorder_sheets_to_end(wss, ["D", "B"]) == ["A", "C", "E", "D", "B"]
+
+    def test_missing_sheets_are_skipped(self):
+        from deps.exporter.helpers import reorder_sheets_to_end
+
+        assert reorder_sheets_to_end(["A", "B", "C"], ["X", "B"]) == ["A", "C", "B"]
+
+    def test_none_entries_and_empty_ask_are_noops(self):
+        from deps.exporter.helpers import reorder_sheets_to_end
+
+        assert reorder_sheets_to_end(["A", "B"], [None]) == ["A", "B"]
+        assert reorder_sheets_to_end(["A", "B"], []) == ["A", "B"]

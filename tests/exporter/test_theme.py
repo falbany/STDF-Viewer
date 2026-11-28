@@ -319,11 +319,13 @@ class TestTabColors:
     def test_pinned_hexes(self):
         assert TAB_COLOR_HEXES == {
             "file_info": "94A3B8",
-            "dut_summary": "1E40AF",  # 2026-11-23 user ruling: per-DUT family takes the deep blue (purple retired)
-            "gdr": "94A3B8",
+            "dut_summary": "0F766E",  # 2026-11-28 palette ruling B: per-DUT analytics = teal family (frees the deep blue for the overview)
+            "wafer_heat_map": "A78BFA",  # 2026-11-28 palette ruling B: light violet, same wafer family
+            "gdr": "64748B",  # 2026-11-28 palette ruling B: deep slate, distinct from File Info
             "trend": "0EA5E9",
-            "histo": "0EA5E9",
+            "histo": "0284C7",  # 2026-11-28 palette ruling B: deep sky, the chart pair separates
             "bin": "EA580C",
             "wafer": "7C3AED",
-            "test_correlation": "9DC3E6",  # 2026-11-19: light water blue 40%
+            "test_correlation": "14B8A6",  # 2026-11-28 palette ruling B: teal, joins the per-DUT family
+            "overview": "1E40AF",  # 2026-11-27: DUT Summary blue — official front page
         }

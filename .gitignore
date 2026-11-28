@@ -85,3 +85,6 @@ test.py
 # single app instance lock
 STDF-Viewer.lock
 .zcode/
+
+# superpowers brainstorm scratch (visual companion)
+.superpowers/

@@ -344,6 +344,7 @@ class TestCorrelationMixin(ReportHost):
         theme = self._theme
         assert wb is not None and theme is not None
         order = self._dut_ctx_order
+        assert order is not None  # the context gate above guarantees the binding
         base_name = self.tr("Test Correlation Map")
 
         def collect(pairs):
@@ -377,16 +378,20 @@ class TestCorrelationMixin(ReportHost):
                     (
                         f"{base_name} - T{format_temperature_label(temp)}°C",
                         collect(groups[temp]),
+                        len(groups[temp]),
                     )
                     for temp in resolved
                 ]
         if not maps:
-            maps = [(base_name, collect(order))]
+            maps = [(base_name, collect(order), len(order))]
 
-        for name, tests in maps:
+        for name, tests, dut_count in maps:
             spec = build_correlation_spec(name, tests)
             if spec is None:
                 continue
             ws = wb.add_worksheet(name)
             render_correlation_sheet(ws, spec, theme)
             self._dut_sheet_block.append(ws)
+            # fork(falbany): Report Overview DUTs column — the map's DUT
+            # count rides the same partition it was collected from
+            self._ov_facts.setdefault("corr_sheet_duts", []).append((name, dut_count))

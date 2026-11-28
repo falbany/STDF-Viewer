@@ -66,12 +66,15 @@ keeps only the assembly — ``__init__`` state, the shared
 """
 
 import contextlib
+from datetime import datetime
 from itertools import product
 
 import xlsxwriter
 from PyQt5 import QtCore
 
 from deps.exporter.charts import complete_chart_flags
+from deps.exporter.helpers import reorder_sheets_to_end
+from deps.exporter.overview import build_overview_spec, render_overview
 from deps.exporter.theme import ModernTheme
 from deps.exporter.worksheets.bin_chart import BinChartMixin
 from deps.exporter.worksheets.dut_summary import DUTSummaryMixin
@@ -88,6 +91,7 @@ from deps.exporter.writer import (
     reset_widths,
     write_body_cell,
 )
+from deps.SharedSrc import getSetting
 from deps.uic_stdExporter import (
     ReportSelection,
     dataChannel,
@@ -102,9 +106,11 @@ AUTOFIT_FACTOR = 1.1
 AUTOFIT_CAP = 60
 
 
-class ModernReportGenerator(  # pylint: disable=too-many-ancestors
+class ModernReportGenerator(  # pylint: disable=too-many-ancestors,too-many-instance-attributes
     # fork(falbany): 14 ancestors after TestCorrelationMixin joined the
-    # composition (2026-11-19) — one more mixin than max-parents=12 admits
+    # composition (2026-11-19) — one more mixin than max-parents=12 admits;
+    # 17 instance attributes after the Report Overview stash joined
+    # (2026-11-27) — three more than max-attributes=15 admits
     FileInfoMixin,
     GdrDtrMixin,
     TestStatisticsMixin,
@@ -143,6 +149,11 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
         self._fid_ranks_cache: dict | None = None
         self._wafer_fetched: list = []
         self._dut_sheet_block: list = []
+        # Report Overview stash (fork, 2026-11-27): the close-time renderer
+        # reads these; report_core re-binds every one per run
+        self._overview_sheet = None
+        self._file_info_table = None
+        self._ov_facts: dict = {}
 
     # ----------------------------------------------------------------------
     # helpers
@@ -195,6 +206,11 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
         # temperature splits + the DUT Summary per-DUT sheets, base first)
         # for the close-time tab-order reorder (§7.4)
         self._dut_sheet_block: list = []
+        # Report Overview per-run stash (fork, 2026-11-27): the sheet the
+        # close-time renderer paints + the facts the writers stashed
+        self._overview_sheet = None
+        self._file_info_table = None
+        self._ov_facts: dict = {}
         # the shared per-test table of the DUT-block context (finding 4):
         # empty until _prepare_dut_context rebuilds it — it runs whenever
         # either DUT-block sheet is selected, before the writers that
@@ -202,13 +218,28 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
         self._dut_ctx_stats: dict = {}
         self._dut_ctx_pos: dict = {}
         # the rest of the DUT-block shared context (_dut_ctx_summary/
-        # _order/_dut_ids/_temps) binds in _prepare_dut_context, like the
-        # other per-run state
+        # _dut_ids) binds in _prepare_dut_context, like the other per-run
+        # state — _dut_ctx_temps/_dut_ctx_order bind None HERE so the
+        # close-time overview render can gate on the binding itself
+        # (2026-11-28 review fix: an early forceQuit used to leave them
+        # unbound while the render's contextlib.suppress swallowed the
+        # AttributeError, painting a completely blank first tab)
+        self._dut_ctx_temps = None
+        self._dut_ctx_order = None
 
         # the try/finally mirrors the classic `with Workbook(...)` block:
         # the (partial) workbook is saved on forceQuit early-returns and on
         # exceptions alike; only the success path emits closeSignal
         try:
+            # fork(falbany): the Report Overview first sheet (2026-11-27) —
+            # created BEFORE every content sheet so it owns tab position 1;
+            # rendered at close time (the finally below) from the final
+            # sheet list
+            if ReportSelection.Overview in self.selectedContents:
+                self._overview_sheet = self._wb.add_worksheet(
+                    self.tr("Report Overview")
+                )
+
             # 1. create sheets for each selected contents, in the fixed
             #    classic order; 2./3./4. below write them in classic order
             for cont in [
@@ -338,6 +369,16 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
                 self._wb.worksheets_objs = order_dut_block(
                     self._wb.worksheets_objs, self._dut_sheet_block
                 )
+            # fork(falbany): 2026-11-28 tab-order ruling — GDR & DTR Summary
+            # then Bin Chart close the strip (identity-based; sheets that
+            # were not selected are skipped)
+            self._wb.worksheets_objs = reorder_sheets_to_end(
+                self._wb.worksheets_objs,
+                [
+                    self.sheetDict.get(ReportSelection.GDR_DTR),
+                    self.sheetDict.get(ReportSelection.Bin),
+                ],
+            )
             # Defined-name localSheetIds carry the sheet's CREATION index
             # (xlsxwriter workbook.py _prepare_defined_names reads
             # sheet.index) — the wafer base-sheet drop and the DUT-block
@@ -347,6 +388,52 @@ class ModernReportGenerator(  # pylint: disable=too-many-ancestors
             # final tab order before close.
             for position, ws in enumerate(self._wb.worksheets_objs):
                 ws.index = position
+            # fork(falbany): Report Overview — rendered AT CLOSE from the
+            # final sheet list (the TOC needs it), after the reorder and
+            # the localSheetId renumber, BEFORE wb.close(). Guarded: a bug
+            # in the convenience sheet must never block close or corrupt
+            # the file (same spirit as complete_chart_flags' suppress).
+            if self._overview_sheet is not None:
+                with contextlib.suppress(Exception):
+                    # the context BINDING is the truth, not the selection
+                    # (2026-11-28 review fix): an early forceQuit can return
+                    # report_core while the selection said the context
+                    # should run — the reset block binds None, the writers
+                    # are unreachable in that state
+                    spec = build_overview_spec(
+                        wss=self._wb.worksheets_objs,
+                        overview_ws=self._overview_sheet,
+                        sheet_dict=self.sheetDict,
+                        file_info_rows=self._file_info_table,
+                        facts=self._ov_facts,
+                        drop_count=(
+                            len(self._remeasure_drops)
+                            if self._remeasure_drops is not None
+                            else None
+                        ),
+                        hide_remeasured=getSetting().gen.hide_remeasured,
+                        split_temperature=getSetting().gen.split_temperature,
+                        wafer_heat_selected=(
+                            ReportSelection.WaferHeatMap in self.selectedContents
+                        ),
+                        correlation_selected=(
+                            ReportSelection.TestCorrelation in self.selectedContents
+                        ),
+                        ctx_temps=self._dut_ctx_temps,
+                        selected_fids=self.selectedFiles,
+                        test_count=len(self.testTuples),
+                        dut_count=(
+                            len(self._dut_ctx_order)
+                            if self._dut_ctx_order is not None
+                            else None
+                        ),
+                        heads=self.selectedHeads,
+                        sites=self.selectedSites,
+                        wafer_count=len(self._wafer_fetched) or None,
+                        generated=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        tr=self.tr,
+                    )
+                    render_overview(self._overview_sheet, spec, self._theme)
             self._wb.close()
             # xlsxwriter gap completion (charts.py): inject the data-label
             # show* zeros + <c:plotVisOnly val="0"/> it cannot emit — run on

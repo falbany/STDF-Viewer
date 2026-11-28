@@ -646,3 +646,21 @@ def sanitize_cell(value):
     if isinstance(value, float) and math.isnan(value):
         return ""
     return value
+
+
+def reorder_sheets_to_end(wss: list, sheets: list) -> list:
+    """The 2026-11-28 tab-order ruling: move the listed worksheets to the
+    END of the workbook list, in listed order — GDR & DTR Summary and Bin
+    Chart close the strip. Identity-based (the generator's pre-created
+    worksheet objects), ``None`` entries (sheet not selected) and missing
+    sheets are skipped; everything else keeps its relative order. Pure —
+    the generator calls it in the ``finally`` between ``order_dut_block``
+    and the ``ws.index`` renumber, so the renumber still sees the final
+    order."""
+    out = list(wss)
+    for sheet in sheets:
+        if sheet is None or sheet not in out:
+            continue
+        out.remove(sheet)
+        out.append(sheet)
+    return out

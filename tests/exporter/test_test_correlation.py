@@ -248,7 +248,7 @@ class TestCorrelationRender:
         assert sheet.sheet_properties.pageSetUpPr.fitToPage is True
         assert sheet.print_title_rows == "$1:$3"
         assert sheet.print_area.endswith("!$A$1:$I$6")
-        assert sheet.sheet_properties.tabColor.rgb == "FF9DC3E6"
+        assert sheet.sheet_properties.tabColor.rgb == "FF14B8A6"
 
     def test_diagonal_self_comparison_rule_uses_border(self, rendered):
         # 2026-11-19 user ruling: the NxN diagonal must read as "this test
@@ -282,8 +282,8 @@ class TestCorrelationMapSheets:
             "DUT Summary",
             "Test Correlation Map",
             "Trend Chart",
-            "Bin Chart",
             "Wafer W01",
+            "Bin Chart",
         ]
         sheet = wb["Test Correlation Map"]
         assert sheet["F3"].value == "Test"

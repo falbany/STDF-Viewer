@@ -215,3 +215,7 @@ class WaferMapMixin(ReportHost):
             wb=wb,  # issue #7: the merged sheet's SW table gets its donut
         )
         self._style_wafer_sheet(WaferSheet)
+        # fork(falbany): Report Overview merged-wafer facts (values in hand)
+        self._ov_facts.setdefault("merged_wafers", []).append(
+            (wafer_id, name, len(ordered), len(superseded))
+        )

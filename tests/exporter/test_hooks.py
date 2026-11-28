@@ -158,6 +158,32 @@ def test_wafer_heat_map_round_trips():
     assert params.gen.wafer_heat_map is False
 
 
+def test_report_overview_default_true():
+    # fork(falbany): default CHECKED (2026-11-27 user ruling)
+    assert SettingParams().gen.report_overview is True
+
+
+def test_report_overview_alias_in_dump():
+    dumped = SettingParams().model_dump(by_alias=True)
+    assert dumped["General"]["Report Overview"] is True
+
+
+def test_report_overview_round_trips():
+    params = SettingParams()
+    params.gen.report_overview = False
+    dumped = params.model_dump(by_alias=True)
+    assert dumped["General"]["Report Overview"] is False
+    assert params.gen.report_overview is False
+
+
+def test_overview_enum_member():
+    # fork(falbany): the overview joins the fork enum range (11/12 taken, 10
+    # stays the upstream gap)
+    from deps.uic_stdExporter import ReportSelection
+
+    assert ReportSelection.Overview == 13
+
+
 def test_dut_block_loop_count_progress_denominator():
     # hook #5: 1 context tick + one tick per test tuple per selected sheet;
     # 0 when neither DUT-block sheet is selected (classic keeps its own
