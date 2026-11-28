@@ -394,6 +394,12 @@ entirely when empty.
 - **Numeric cells**: the Tests fact and the sheet-index DUTs column are
   numeric (`#,##0` display); a sheet without a count writes a blank
   styled cell, not "—".
+- **Wafer family joins the DUTs column** (R3 default superseded by the
+  user, 2026-11-28 post-merge): per-wafer sheets carry
+  `aggregate_kpi(rows)["total"]` (the sheet's own displayed total);
+  a merged sheet carries the Σ over its whole file group; the heat map
+  carries the stacked "Total DUTs Tested" figure — every stash value
+  mirrors what the sheet itself displays. Stash key `wafer_sheet_duts`.
 
 ## Open rulings
 

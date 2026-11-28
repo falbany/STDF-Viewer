@@ -448,7 +448,7 @@ class TestBuildOverviewSpec:
         assert by_name["DUT Summary"]["hex"] == "0F766E"
         assert by_name["DUT Summary"]["duts"] == 18432
         assert by_name["Wafer 1"]["hex"] == "7C3AED"
-        assert by_name["Wafer 1"]["duts"] is None
+        assert by_name["Wafer 1"]["duts"] is None  # no wafer facts in this baseline
         assert by_name["Wafer Heat Map"]["note"] == "all wafers, stacked"
         assert all(row["role"] for row in rows)
 
@@ -492,6 +492,13 @@ class TestBuildOverviewSpec:
         assert values["Filters"] == "None"
         assert spec["notes"] == []
         assert all(row["duts"] is None for row in spec["sheets"])
+
+    def test_wafer_family_reads_the_duts_stash(self, tr):
+        facts = {"wafer_sheet_duts": [("Wafer 1", 5120), ("Wafer Heat Map", 18432)]}
+        spec = build_overview_spec(**{**spec_kwargs(), "tr": tr, "facts": facts})
+        by_name = {row["name"]: row for row in spec["sheets"]}
+        assert by_name["Wafer 1"]["duts"] == 5120
+        assert by_name["Wafer Heat Map"]["duts"] == 18432
 
     def test_ctx_temps_win_over_the_table(self, tr):
         # ctx says {T25} only; the table says 25/-40 — the context wins
@@ -655,6 +662,33 @@ class TestOverviewStashHooks:
             tmp_path, qapp, with_file_info=True
         )
         assert gen._file_info_table and gen._file_info_table[0][0] == "File Name"
+
+    def test_wafer_sheets_get_dut_counts(self, tmp_path, qapp):
+        # 2026-11-28: R3 default superseded — the wafer family joins the
+        # numeric DUTs column (per-wafer = the sheet's own displayed total)
+        gen, _wb, _path, _closed, _errors = build_generated(tmp_path, qapp)
+        assert gen._ov_facts["wafer_sheet_duts"] == [("Wafer W01", 5)]
+
+    def test_merged_wafer_counts_the_whole_group(self, tmp_path, qapp, monkeypatch):
+        gen, _wb, _path, _closed, _errors = build_generated(
+            tmp_path,
+            qapp,
+            wafer_tuples=[(0, 1, "W01"), (0, 2, "W01")],
+            hide_remeasured=True,
+            monkeypatch=monkeypatch,
+        )
+        duts = dict(gen._ov_facts["wafer_sheet_duts"])
+        assert duts["Wafer W01 (Merged)"] == 10  # Σ over the 2-file group
+
+    def test_heat_map_gets_the_stacked_total(self, tmp_path, qapp):
+        # the stash mirrors what the sheet's own "Total DUTs Tested" KPI
+        # displays — the Σ over the per-wafer roster (5 here, same pin as
+        # the KPI test in test_generator.py); stacked-ALONE the roster is
+        # empty and the sheet itself displays 0
+        gen, _wb, _path, _closed, _errors = build_generated(
+            tmp_path, qapp, heat_selected=True, wafer_tuples=[(-1, -1, "STACK"), (0, 1, "W01")]
+        )
+        assert dict(gen._ov_facts["wafer_sheet_duts"])["Wafer Heat Map"] == 5
 
     def test_overview_selected_adds_no_tick(self, tmp_path, qapp):
         # the overview is tickless: a full run with it selected still
@@ -887,7 +921,7 @@ class TestNumericCells:
         assert by_name["Test Statistics"]["duts"] == 16384
         assert by_name["Test Statistics (2)"]["duts"] == 2048
         assert by_name["DUT Summary"]["duts"] == 18432
-        assert by_name["Wafer 1"]["duts"] is None
+        assert by_name["Wafer 1"]["duts"] is None  # no wafer facts in this baseline
 
     def test_renderer_writes_numeric_cells_and_blanks(self):
         spec = render_spec(

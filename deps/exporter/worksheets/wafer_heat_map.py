@@ -476,5 +476,8 @@ class WaferHeatMapMixin(ReportHost):
         # fork(falbany): same wafer family look, own light violet
         # (2026-11-28 palette ruling B)
         HeatSheet.set_tab_color(f"#{TAB_COLOR_HEXES['wafer_heat_map']}")
+        # fork(falbany): Report Overview DUTs column — the stacked sheet's
+        # own "Total DUTs Tested" figure, already in hand
+        self._ov_facts.setdefault("wafer_sheet_duts", []).append((name, total_duts))
         self.loopCount += 1
         self.sendProgress()

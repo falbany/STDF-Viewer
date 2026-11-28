@@ -50,6 +50,7 @@ from deps.exporter.charts import (
     WAFER_LABEL_COL_WIDTH,
     WAFER_SPACER_PINNED_WIDTH,
     WAFER_VALUE_COL_WIDTH,
+    aggregate_kpi,
     wafer_sheet_name,
     wafer_table_name,
     write_wafer_map_block,
@@ -171,6 +172,11 @@ class WaferMapMixin(ReportHost):
                 wb=wb,  # issue #7: the SW table gets its palette donut
             )
             self._style_wafer_sheet(WaferSheet)
+            # fork(falbany): Report Overview DUTs column — the wafer's own
+            # DUT total (the same KPI this sheet displays)
+            self._ov_facts.setdefault("wafer_sheet_duts", []).append(
+                (name, aggregate_kpi(payload["rows"])["total"])
+            )
             row = start_row  # kept for _row bookkeeping symmetry
             self.loopCount += 1
             self.sendProgress()
@@ -218,4 +224,9 @@ class WaferMapMixin(ReportHost):
         # fork(falbany): Report Overview merged-wafer facts (values in hand)
         self._ov_facts.setdefault("merged_wafers", []).append(
             (wafer_id, name, len(ordered), len(superseded))
+        )
+        # the merged sheet covers the WHOLE group — Σ over every file's
+        # payloads, not just the winner's identity rows
+        self._ov_facts.setdefault("wafer_sheet_duts", []).append(
+            (name, sum(aggregate_kpi(p["rows"])["total"] for _w, p in ordered))
         )
