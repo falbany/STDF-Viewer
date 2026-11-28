@@ -189,7 +189,8 @@ def derive_notes(
     ``facts`` is ``_ov_facts`` (every key optional — ``.get`` throughout):
     ``remeasured_groups``, ``stat_chunks``, ``stat_splits``,
     ``stat_unresolved``, ``stat_sheet_duts``, ``corr_sheet_duts``,
-    ``merged_wafers``. ``sheet_names`` is the FINAL tab order at close
+    ``merged_wafers``, ``wafer_sheet_duts``. ``sheet_names`` is the FINAL
+    tab order at close
     time, which is what makes the "sheet present / not exported" notes
     always truthful. ``translated_ui`` is the locale-signal detection
     (``_translated_ui``): the 2026-11-28 review fix re-anchored note 9 to
@@ -372,6 +373,7 @@ def build_overview_spec(  # pylint: disable=too-many-arguments,too-many-locals,t
     # -- sheet index rows --
     stat_duts = dict(facts.get("stat_sheet_duts") or [])
     corr_duts = dict(facts.get("corr_sheet_duts") or [])
+    wafer_duts = dict(facts.get("wafer_sheet_duts") or [])
     sheets = []
     for name, family in zip(sheet_names, sheet_families, strict=True):
         base = None
@@ -407,6 +409,10 @@ def build_overview_spec(  # pylint: disable=too-many-arguments,too-many-locals,t
             duts = corr_duts.get(name)
         elif family == "dut":
             duts = dut_count
+        elif family == "wafer":
+            # 2026-11-28: R3 default superseded — per-wafer/merged/heat-map
+            # sheets carry their DUT totals too
+            duts = wafer_duts.get(name)
         else:
             duts = None
         sheets.append(
